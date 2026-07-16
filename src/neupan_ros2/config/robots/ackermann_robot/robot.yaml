@@ -1,0 +1,55 @@
+# NeuPAN ROS2 Configuration — Ackermann Robot (AckermannRobot-2D)
+#
+# Vehicle: 0.70m × 0.52m, wheelbase 0.593m, 360° 2D LiDAR
+# TF: map → odom → base_link → laser_link
+
+neupan_node:
+  ros__parameters:
+    use_sim_time: true
+
+    # Robot identification
+    robot_type: 'ackermann_robot'
+    robot_description: 'Ackermann vehicle (0.70m, 0.593m wheelbase) in Gazebo'
+
+    # Configuration file paths (relative to robot directory)
+    planner_config_file: 'planner.yaml'
+    dune_checkpoint_file: 'models/dune_model_5000.pth'
+
+    # ---- TF Frame Configuration -------------------------------------
+    map_frame: 'map'
+    base_frame: 'base_link'
+    lidar_frame: 'laser_link'
+
+    # ---- Topic Configuration ----------------------------------------
+    cmd_vel_topic: '/neupan_cmd_vel'      # NeuPAN output (separate from DWB /cmd_vel)
+    scan_topic: '/scan'                    # 360° 2D LaserScan
+    plan_input_topic: '/plan'             # From Nav2 planner_server (global path)
+    goal_topic: '/goal_pose'              # Nav2 goal (optional, path-based navigation)
+    plan_output_topic: '/neupan_plan'     # Optimized trajectory (visualization)
+    ref_state_topic: '/neupan_ref_state'  # Reference state (visualization)
+    initial_path_topic: '/neupan_initial_path'
+    dune_markers_topic: '/dune_point_markers'
+    robot_marker_topic: '/robot_marker'
+    nrmp_markers_topic: '/nrmp_point_markers'
+
+    # ---- Visualization ----------------------------------------------
+    enable_visualization: false    # Disabled by default for performance
+    enable_dune_markers: false
+    enable_nrmp_markers: false
+    enable_robot_marker: false
+    marker_size: 0.05
+    marker_z: 0.5
+
+    # ---- Laser Scan Processing --------------------------------------
+    # 360° LiDAR @ 10Hz, 360 samples, range 0.15-25m
+    scan_angle_max: 3.14           # 180° (half-circle — we reverse the other half)
+    scan_angle_min: -3.14          # -180°
+    scan_downsample: 1             # Use all 360 points
+    scan_range_max: 25.0           # Full LiDAR range
+    scan_range_min: 0.15           # Min range
+
+    # ---- Path Planning ----------------------------------------------
+    flip_angle: false
+    refresh_initial_path: true     # Re-plan when new global path arrives
+    include_initial_path_direction: true   # Detect gear from path pose orientations
+    control_frequency: 20.0        # 20 Hz (matching controller frequency)

@@ -1,0 +1,240 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Map1
+        - /LaserScan1
+        - /Path (Global)1
+        - /Path (NeuPAN)1
+        - /RobotModel1
+        - /TF1
+      Splitter Ratio: 0.5
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Expanded:
+      - /2D Goal Pose1
+    Name: Tool Properties
+    Splitter Ratio: 0.5
+  - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: rviz_common/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: ""
+
+Visualization Manager:
+  Class: ""
+  Displays:
+    # ---- Global Options ----
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Reference Frame: map
+      Plane Cell Count: 100
+      Cell Size: 1.0
+      Color: 160; 160; 164
+      Alpha: 0.5
+      Normal Cell Count: 0
+
+    # ---- Map from Nav2 map_server ----
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        Value: /map
+      Alpha: 0.7
+      Color Scheme: map
+      Draw Behind: true
+      Use Timestamp: false
+      Update Topic:
+        Value: /map_updates
+
+    # ---- Global Costmap (Nav2) ----
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Costmap
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /global_costmap/costmap
+      Alpha: 0.3
+      Color Scheme: costmap
+      Draw Behind: false
+
+    # ---- 2D LaserScan (from pointcloud_to_laserscan) ----
+    - Class: rviz_default_plugins/LaserScan
+      Enabled: true
+      Name: LaserScan
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+        Value: /scan
+      Size (m): 0.03
+      Style: Flat Squares
+      Color: 255; 0; 0
+      Decay Time: 0.1
+      Use Rainbow: false
+      Invert Rainbow: false
+
+    # ---- 3D PointCloud (Velodyne, reference) ----
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: false
+      Name: PointCloud (3D LiDAR)
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+        Value: /points_raw
+      Size (m): 0.01
+      Style: Flat Squares
+      Use Rainbow: true
+      Position Transformer: XYZ
+      Color Transformer: Intensity
+
+    # ---- Global Path (from Nav2 planner_server) ----
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Path (Global)
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /plan_path
+      Color: 50; 200; 50
+      Alpha: 0.7
+      Line Style: Lines
+      Line Width: 0.05
+      Shaft Diameter: 0.1
+      Head Diameter: 0.3
+      Head Length: 0.2
+      Axes Length: 0.0
+      Axes Radius: 0.0
+
+    # ---- Optimized Trajectory (from NeuPAN) ----
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Path (NeuPAN)
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /neupan_plan
+      Color: 50; 150; 255
+      Alpha: 0.8
+      Line Style: Lines
+      Line Width: 0.08
+
+    # ---- Initial Path (from NeuPAN, echo of global) ----
+    - Class: rviz_default_plugins/Path
+      Enabled: false
+      Name: Path (Initial)
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /neupan_initial_path
+      Color: 255; 200; 50
+      Alpha: 0.5
+      Line Style: Dashes
+
+    # ---- Odometry (from Gazebo /odom) ----
+    - Class: rviz_default_plugins/Odometry
+      Enabled: false
+      Name: Odometry
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /odom
+      Keep: 100
+      Position Tolerance: 0.1
+      Angle Tolerance: 0.1
+      Color: 255; 100; 100
+      Alpha: 0.5
+      Shaft Diameter: 0.1
+      Head Diameter: 0.3
+      Head Length: 0.2
+
+    # ---- Robot Model (TF-based) ----
+    - Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Name: RobotModel
+      Description Topic:
+        Value: /robot_description
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 1.0
+      Mass Properties:
+        Inertia: false
+        Mass: false
+
+    # ---- TF Frames ----
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Frame Timeout: 15.0
+      Marker Scale: 1.0
+      Update Interval: 0.0
+      All Enabled: false
+      Frames:
+        base_link:
+          Value: true
+        rear_axle_link:
+          Value: true
+        lidar3d_link:
+          Value: false
+        map:
+          Value: true
+        odom:
+          Value: true
+
+  # ---- Global Options ----
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+    Use Time: false
+
+  # ---- Views ----
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 30.0
+      Focal Point:
+        X: 0.0
+        Y: 0.0
+        Z: 1.0
+      Target Frame: map
+      Yaw: 0.0
+      Pitch: 1.5707
+      Name: Current View
+      Near Clip Distance: 0.01
+      Far Clip Distance: 1000.0
+    Saved: {}
+
+  # ---- Tools ----
+  Tools:
+    Current: 2D Goal Pose
+    Toolbar:
+      - Class: rviz_default_plugins/Interact
+      - Class: rviz_default_plugins/MoveCamera
+      - Class: rviz_default_plugins/Select
+      - Class: rviz_default_plugins/FocusCamera
+      - Class: rviz_default_plugins/Measure
+      - Class: rviz_default_plugins/SetInitialPose
+      - Class: rviz_default_plugins/SetGoal
+      - Class: rviz_default_plugins/PublishPoint
+
+  # ---- Time ----
+  Time: {}

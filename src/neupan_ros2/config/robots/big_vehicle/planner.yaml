@@ -1,0 +1,53 @@
+# NeuPAN Planner Configuration — Big Ackermann Vehicle (robot_gazebo)
+#
+# Vehicle: 5.24m × 1.5m, wheelbase 3.0m, max steering 0.6 rad
+# Min turning radius: 4.38m
+#
+# This is the RUNTIME config. The DUNE checkpoint path is set at runtime
+# by neupan_node (via the pan.dune_checkpoint override).
+#
+# Must match the training config (trian/big_vehicle.yaml) in all robot
+# geometry fields — the DUNE weights are geometry-specific.
+
+# ---- MPC ------------------------------------------------------------
+receding: 20                     # Horizon steps (20 × 0.2s = 4s look-ahead)
+step_time: 0.2                   # Time per step (s)
+ref_speed: 1.0                   # Reference cruise speed (m/s)
+device: 'cpu'
+time_print: false
+collision_threshold: 0.15        # Emergency stop distance (m)
+
+# ---- Robot Geometry -------------------------------------------------
+robot:
+  kinematics: 'acker'
+  max_speed: [5.0, 0.6]          # [linear m/s, steering rad]
+  min_speed: [-2.0, -0.6]        # Allow reverse
+  max_acce: [2.0, 0.5]           # [linear m/s², angular rad/s²]
+  length: 5.24                    # Overall length (m)
+  width: 1.5                      # Overall width (m)
+  wheelbase: 3.0                  # Front-rear axle distance (m)
+
+# ---- Initial Path ---------------------------------------------------
+ipath:
+  interval: 0.2                   # Waypoint spacing (m)
+  curve_style: 'reeds'            # Reeds-Shepp: forward + reverse, ackermann-aware
+  min_radius: 4.38                # Min turn radius (m)
+  loop: false
+  arrive_threshold: 1.0           # "Arrived" distance (m)
+  close_threshold: 0.1
+  arrive_index_threshold: 3
+
+# ---- PAN Algorithm --------------------------------------------------
+pan:
+  iter_num: 2
+  dune_max_num: 200
+  nrmp_max_num: 10
+  dune_checkpoint: null           # Set at runtime by neupan_node
+
+# ---- Control Tuning -------------------------------------------------
+adjust:
+  q_s: 0.3                        # State tracking weight
+  p_u: 1.0                        # Control effort weight
+  eta: 15.0                       # Collision avoidance weight
+  d_max: 1.0                      # Max obstacle distance for barrier (m)
+  d_min: 0.15                     # Min obstacle distance for barrier (m)

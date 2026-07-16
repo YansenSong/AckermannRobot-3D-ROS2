@@ -1,0 +1,54 @@
+# NeuPAN Planner Configuration — Ackermann Robot (AckermannRobot-2D)
+#
+# Vehicle: 0.70m × 0.52m, wheelbase 0.593m, max steering 0.52 rad (~29.8°)
+# Min turning radius: 1.05m = wheelbase / tan(max_steering)
+# Supports reverse: min_vel_x = -0.5 m/s
+#
+# This is the RUNTIME config. The DUNE checkpoint path is set at runtime
+# by neupan_node (via the pan.dune_checkpoint override).
+#
+# Must match the training config in all robot geometry fields —
+# the DUNE weights are geometry-specific.
+
+# ---- MPC ------------------------------------------------------------
+receding: 15                     # Horizon steps (15 × 0.2s = 3s look-ahead)
+step_time: 0.2                   # Time per step (s)
+ref_speed: 1.0                   # Reference cruise speed (m/s)
+device: 'cpu'
+time_print: false
+collision_threshold: 0.05        # Emergency stop distance (m)
+
+# ---- Robot Geometry -------------------------------------------------
+robot:
+  kinematics: 'acker'
+  max_speed: [1.5, 0.52]         # [linear m/s, steering rad]
+  min_speed: [-0.5, -0.52]       # Allow reverse
+  max_acce: [1.0, 0.5]           # [linear m/s², steering rad/s²]
+  length: 0.70                    # Overall length (m) — chassis collision box
+  width: 0.52                     # Overall width (m) — rear track
+  wheelbase: 0.593                # Front-rear axle distance (m)
+
+# ---- Initial Path ---------------------------------------------------
+ipath:
+  interval: 0.1                   # Waypoint spacing (m)
+  curve_style: 'reeds'            # Reeds-Shepp: forward + reverse, ackermann-aware
+  min_radius: 1.05                # Min turn radius (m) = wheelbase / tan(0.52)
+  loop: false
+  arrive_threshold: 0.5           # "Arrived" distance (m)
+  close_threshold: 0.1
+  arrive_index_threshold: 3
+
+# ---- PAN Algorithm --------------------------------------------------
+pan:
+  iter_num: 2
+  dune_max_num: 200
+  nrmp_max_num: 10
+  dune_checkpoint: null           # Set at runtime by neupan_node
+
+# ---- Control Tuning -------------------------------------------------
+adjust:
+  q_s: 0.15                       # State tracking weight
+  p_u: 0.5                        # Control effort weight
+  eta: 15.0                       # Collision avoidance weight
+  d_max: 0.5                      # Max obstacle distance for barrier (m)
+  d_min: 0.05                     # Min obstacle distance for barrier (m)

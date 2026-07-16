@@ -1,0 +1,60 @@
+# NeuPAN Runtime Configuration — Big Ackermann Vehicle (robot_gazebo)
+#
+# Vehicle model: 5.24m × 1.5m × 0.47m, wheelbase 3.0m, max steering 0.6 rad (~34.4°)
+# LiDAR: Velodyne 32-line 3D PointCloud2 → 2D LaserScan via pointcloud_to_laserscan
+# TF: map → odom → base_link → rear_axle_link (revolute-kinematics reference point)
+
+neupan_node:
+  ros__parameters:
+    use_sim_time: true
+
+    # Robot identification
+    robot_type: 'big_vehicle'
+    robot_description: 'Ackermann vehicle (5.24m, 3.0m wheelbase) in Gazebo'
+
+    # Configuration file paths (relative to robot directory)
+    planner_config_file: 'planner.yaml'
+    dune_checkpoint_file: 'models/dune_model_5000.pth'
+
+    # ---- TF Frame Configuration -------------------------------------
+    # CRITICAL: base_frame must be rear_axle_link (not base_link).
+    # The installed neupan.py does NOT apply a center→rear-axle offset —
+    # it assumes the input state is already at the rear axle (rotation center).
+    # nav2_plan_bridge broadcasts base_link → rear_axle_link (static x=-1.545m).
+    map_frame: 'map'
+    base_frame: 'rear_axle_link'     # Rear axle = Ackermann rotation center
+    lidar_frame: 'base_link'         # pointcloud_to_laserscan outputs /scan in base_link
+
+    # ---- Topic Configuration ----------------------------------------
+    cmd_vel_topic: '/neupan_cmd_vel'      # Remapped → /cmd_vel in launch file
+    scan_topic: '/scan'                    # From pointcloud_to_laserscan
+    plan_input_topic: '/plan_path'         # From Nav2 planner_server (global path)
+    goal_topic: '/neupan_goal_pose'        # Unused — Nav2 bridge handles /goal_pose
+    plan_output_topic: '/neupan_plan'      # Optimized trajectory (visualization)
+    ref_state_topic: '/neupan_ref_state'   # Reference state (visualization)
+    initial_path_topic: '/neupan_initial_path'  # Global path echo (visualization)
+    dune_markers_topic: '/dune_point_markers'
+    robot_marker_topic: '/robot_marker'
+    nrmp_markers_topic: '/nrmp_point_markers'
+
+    # ---- Visualization (enable for debugging) -----------------------
+    enable_visualization: true
+    enable_dune_markers: true
+    enable_nrmp_markers: true
+    enable_robot_marker: true
+    marker_size: 0.1
+    marker_z: 2.5                 # Robot marker height above ground (~1m base + 1.5m)
+
+    # ---- Laser Scan Processing --------------------------------------
+    # pointcloud_to_laserscan outputs 720 rays @ 0.5°, 10Hz, range 0.3-50m
+    scan_angle_max: 3.14          # 180° forward (half-circle)
+    scan_angle_min: -3.14         # -180°
+    scan_downsample: 2            # Use every 2nd point → ~360 points
+    scan_range_max: 30.0          # Far clip (m) — big vehicle needs longer range
+    scan_range_min: 0.3           # Near clip (m)
+
+    # ---- Path Planning ----------------------------------------------
+    flip_angle: false
+    refresh_initial_path: true    # Re-plan when new global path arrives
+    include_initial_path_direction: true   # Use path pose orientations to detect reverse gear
+    control_frequency: 20.0       # 20 Hz (big vehicle moves slower, 50Hz overkill)
