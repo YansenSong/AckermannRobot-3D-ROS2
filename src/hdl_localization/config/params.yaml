@@ -1,0 +1,43 @@
+/**
+  ros__parameters:
+    # ---- Map ----
+    # globalmap_pcd: "/home/young/my_robot/src/map/GlobalMap.pcd"
+    # Set via launch argument -- overrides this default
+    downsample_resolution: 0.2
+
+    # ---- Frames ----
+    # odom_child_frame_id: frame the LiDAR scan is transformed into before NDT matching
+    #   Must match the LiDAR frame (e.g. "lidar3d_link")
+    odom_child_frame_id: "laser_link"
+    # robot_odom_frame_id: the odometry frame (published as parent of base_link)
+    robot_odom_frame_id: "odom"
+
+    # ---- Registration method ----
+    # Currently only NDT_OMP is supported (no CUDA dependency)
+    reg_method: "NDT_OMP"
+
+    # ---- NDT parameters ----
+    ndt_resolution: 0.5
+    ndt_neighbor_search_method: "DIRECT7"   # DIRECT1, DIRECT7, or KDTREE
+    ndt_neighbor_search_radius: 2.0
+
+    # ---- Initial pose ----
+    # If specify_init_pose=true, the estimator starts from these coordinates
+    # Otherwise, wait for /initialpose (2D Pose Estimate in RViz)
+    specify_init_pose: true
+    init_pos_x: 0.0
+    init_pos_y: 0.0
+    init_pos_z: 0.0
+    init_ori_w: 1.0
+    init_ori_x: 0.0
+    init_ori_y: 0.0
+    init_ori_z: 0.0
+    cool_time_duration: 2.0
+
+    # ---- IMU ----
+    use_imu: true                   # Enable UKF prediction with IMU
+    invert_acc: false                # Invert accelerometer Z if needed
+    invert_gyro: false               # Invert gyroscope axes if needed
+
+    # ---- UTM offset (for globalmap_server) ----
+    convert_utm_to_local: false
