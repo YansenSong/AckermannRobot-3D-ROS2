@@ -14,6 +14,8 @@ find_package(robot_state_publisher REQUIRED)
 # Install Python scripts
 install(PROGRAMS
   scripts/arrow_key_control.py
+  scripts/cmd_vel_stamper.py
+  scripts/cmd_vel_mux.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
