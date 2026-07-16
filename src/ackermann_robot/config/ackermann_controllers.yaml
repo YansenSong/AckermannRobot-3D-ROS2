@@ -1,0 +1,35 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    # 定义我们要加载的控制器
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    ackermann_steering_controller:
+      type: ackermann_steering_controller/AckermannSteeringController
+
+ackermann_steering_controller:
+  ros__parameters:
+    reference_timeout: 2.0
+    front_steering: true
+    open_loop: false
+    velocity_rolling_window_size: 10
+    position_feedback: false
+    use_stamped_vel: true
+
+    # 关节名称需与 URDF (chassis.xacro) 一一对应
+    rear_wheels_names: ['left_rear_wheel_joint', 'right_rear_wheel_joint']
+    front_wheels_names: ['left_steering_joint', 'right_steering_joint']
+
+    wheelbase: 0.593
+    front_wheel_track: 0.510
+    rear_wheel_track: 0.510
+    front_wheels_radius: 0.093
+    rear_wheels_radius: 0.093
+
+    # 发布odom相关设置
+    publish_rate: 50.0
+    odom_frame_id: odom
+    base_frame_id: base_link
+    enable_odom_tf: true

@@ -1,0 +1,191 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- <link name="base_footprint">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+    </link> -->
+
+    <link name="base_link">
+        <inertial>
+            <origin xyz="-0.062722 0.001568 0.043922" rpy="0 0 0" />
+            <mass value="5.46103" />
+            <inertia ixx="0.03415" ixy="-5.47e-06" ixz="5.12e-07" iyy="0.07738" iyz="-1.61e-06" izz="0.10971" />
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/base_link.STL" />
+            </geometry>
+            <material name="blue"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0.05" rpy="0 0 0" />
+            <geometry>
+                <box size="0.7 0.3 0.1"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- <joint name="base_joint" type="fixed">
+        <parent link="base_footprint"/>
+        <child link="base_link"/>
+        <origin rpy="0 0 0.0" xyz="0.0 0.0 0.054"/>
+    </joint> -->
+
+    <gazebo reference="base_link">
+        <material>Gazebo/Orange</material>
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
+    </gazebo>
+
+    <xacro:macro name="rear_wheel" params="prefix y_pos">
+        <link name="${prefix}_rear_wheel_link">
+            <inertial>
+                <origin xyz="0 -0.00343 0" rpy="0 0 0" />
+                <mass value="0.4564" />
+                <inertia ixx="0.001298" ixy="0.0" ixz="0.0" iyy="0.00244" iyz="0.0" izz="0.001298" />
+            </inertial>
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0" />
+                <geometry>
+                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_rear_wheel_link.STL" />
+                </geometry>
+                <material name="white"/>
+            </visual>
+            <collision>
+                <origin xyz="0 0 0" rpy="1.5707 0 0" />
+                <geometry>
+                    <cylinder length="0.05" radius="0.093"/>
+                </geometry>
+            </collision>
+        </link>
+        <joint name="${prefix}_rear_wheel_joint" type="continuous">
+            <origin xyz="-0.30449 ${y_pos} 0.045" rpy="0 0 0" />
+            <parent link="base_link" />
+            <child link="${prefix}_rear_wheel_link" />
+            <axis xyz="0 1 0" />
+            <dynamics damping="0.1" friction="0"/>
+            <limit effort="50" velocity="10"/>
+        </joint>
+        <gazebo reference="${prefix}_rear_wheel_link">
+            <mu1>150.0</mu1>
+            <mu2>10.0</mu2>
+            <kp>10000000.0</kp> 
+            <kd>1.0</kd>
+            <minDepth>0.001</minDepth>
+            <material>Gazebo/Grey</material>
+        </gazebo>
+    </xacro:macro>
+
+    <xacro:rear_wheel prefix="left" y_pos="0.25935"/>
+    <xacro:rear_wheel prefix="right" y_pos="-0.25935"/>
+
+    <xacro:macro name="front_steer_wheel" params="prefix y_steer_pos">
+        <xacro:property name="reflect" value="${1 if prefix == 'left' else -1}"/>
+
+        <link name="${prefix}_steering_link">
+            <inertial>
+                <origin xyz="0 ${0.0147 * reflect} -0.0315" rpy="0 0 0" />
+                <mass value="0.0871" />
+                <inertia ixx="5.35e-05" ixy="0" ixz="0" iyy="4.29e-05" iyz="0" izz="5.01e-05" />
+            </inertial>
+            <visual>
+                <geometry>
+                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_steering_link.STL" />
+                </geometry>
+                <material name="blue"/>
+            </visual>
+            <collision>
+                <geometry>
+                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_steering_link.STL" />
+                </geometry>
+            </collision>
+        </link>
+        <joint name="${prefix}_steering_joint" type="revolute">
+            <origin xyz="0.2893 ${y_steer_pos} 0.076686" rpy="0 0 0" />
+            <parent link="base_link" />
+            <child link="${prefix}_steering_link" />
+            <axis xyz="0 0 1" />
+            <dynamics damping="0.01" friction="0"/>
+            <limit lower="-0.52" upper="0.52" effort="25" velocity="10" />
+        </joint>
+
+        <link name="${prefix}_front_wheel_link">
+            <inertial>
+                <origin xyz="0 0 0" rpy="0 0 0" />
+                <mass value="0.4539" />
+                <inertia ixx="0.001299" ixy="0.0" ixz="0.0" iyy="0.002439" iyz="0.0" izz="0.001299" />
+            </inertial>
+            <visual>
+                <geometry>
+                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_front_wheel_link.STL" />
+                </geometry>
+                <material name="white"/>
+            </visual>
+            <collision>
+                <origin xyz="0 0 0" rpy="1.5707 0 0" />
+                <geometry>
+                    <cylinder length="0.05" radius="0.093"/>
+                </geometry>
+            </collision>
+        </link>
+        
+        <xacro:if value="${prefix == 'left'}">
+            <joint name="${prefix}_front_wheel_joint" type="continuous">
+                <origin xyz="0 0.091957 -0.031686" rpy="0 0 0" />
+                <parent link="${prefix}_steering_link" />
+                <child link="${prefix}_front_wheel_link" />
+                <axis xyz="0 1 0" />
+                <dynamics damping="0.01" friction="0"/>
+                <limit effort="50" velocity="10"/>
+            </joint>
+        </xacro:if>
+        <xacro:unless value="${prefix == 'left'}">
+             <joint name="${prefix}_front_wheel_joint" type="continuous">
+                <origin xyz="0 -0.091957 -0.031686" rpy="0 0 0" />
+                <parent link="${prefix}_steering_link" />
+                <child link="${prefix}_front_wheel_link" />
+                <axis xyz="0 1 0" />
+                <dynamics damping="0.01" friction="0"/>
+                <limit effort="50" velocity="10"/>
+            </joint>
+        </xacro:unless>
+
+        <gazebo reference="${prefix}_front_wheel_link">
+            <mu1>150.0</mu1>
+            <mu2>10.0</mu2>
+            <kp>10000000.0</kp> 
+            <kd>1.0</kd>
+            <minDepth>0.001</minDepth>
+            <material>Gazebo/Grey</material>
+        </gazebo>
+    </xacro:macro>
+
+    <xacro:front_steer_wheel prefix="left" y_steer_pos="0.16300"/>
+    <xacro:front_steer_wheel prefix="right" y_steer_pos="-0.16300"/>
+
+    <link name="virtual_steer_link">
+        <visual>
+            <geometry> <box size="0.01 0.15 0.075"/> </geometry>
+            <material name="yellow"/>
+        </visual>
+        <inertial>
+            <mass value="0.1"/>
+            <inertia ixx="0.000234" ixy="0" ixz="0" iyy="0.0000477" iyz="0" izz="0.000188"/>
+        </inertial>
+    </link>
+    <joint name="virtual_steering_wheel_joint" type="fixed">
+        <origin xyz="-0.368 0.0 0.05" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <child link="virtual_steer_link"/>
+    </joint>
+    <gazebo reference="virtual_steer_link">
+        <material>Gazebo/White</material>
+    </gazebo>
+
+</robot>

@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ackermann_robot">
+    
+    <xacro:include filename="$(find ackermann_robot)/xacro/common_properties.xacro"/>
+    <xacro:include filename="$(find ackermann_robot)/xacro/chassis.xacro"/>
+    <xacro:include filename="$(find ackermann_robot)/xacro/sensors.xacro"/>
+    <xacro:include filename="$(find ackermann_robot)/xacro/control.xacro"/>
+
+</robot>

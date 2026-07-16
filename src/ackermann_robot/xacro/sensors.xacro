@@ -1,0 +1,264 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <link name="laser_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <mass value="1.5" />
+            <inertia ixx="0.00395" ixy="0.0" ixz="0.0" iyy="0.00395" iyz="0.0" izz="0.00227" />
+        </inertial>
+        <visual>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/laser_link.STL" /> </geometry>
+            <material name="white"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <cylinder length="0.15" radius="0.055"/>
+            </geometry>
+        </collision>
+    </link>
+    <joint name="laser_joint" type="fixed">
+        <origin xyz="-0.07777 0.00081 0.3842" rpy="0 0 0" />
+        <parent link="base_link" />
+        <child link="laser_link" />
+    </joint>
+    
+    <gazebo reference="laser_link">
+        <material>Gazebo/Grey</material>
+        <sensor type="gpu_ray" name="velodyne_3d_lidar">
+            <pose>0 0 0 0 0 0</pose>
+            <always_on>true</always_on>
+            <visualize>false</visualize>
+            <update_rate>20</update_rate>
+            <ray>
+                <scan>
+                    <horizontal>
+                        <samples>1800</samples>
+                        <resolution>1</resolution>
+                        <min_angle>-3.14159265</min_angle>
+                        <max_angle>3.14159265</max_angle>
+                    </horizontal>
+                    <vertical>
+                        <samples>16</samples>
+                        <resolution>1</resolution>
+                        <min_angle>-0.261799</min_angle>
+                        <max_angle>0.261799</max_angle>
+                    </vertical>
+                </scan>
+                <range>
+                    <min>0.5</min>
+                    <max>100.0</max>
+                    <resolution>0.03</resolution>
+                </range>
+                <noise> 
+                    <type>gaussian</type>
+                    <mean>0.0</mean>
+                    <stddev>0.03</stddev>
+                    </noise>
+            </ray>
+            <plugin name="gazebo_ros_laser_controller" filename="libgazebo_ros_ray_sensor.so">
+                <ros> <remapping>~/out:=/points_raw</remapping> </ros>
+                <output_type>sensor_msgs/PointCloud2</output_type>
+                <frame_name>laser_link</frame_name>
+            </plugin>
+            <!-- <plugin filename="libgazebo_ros_ray_sensor.so" name="laserscan">
+                <ros>
+                    <remapping>~/out:=scan</remapping>
+                </ros>
+                <output_type>sensor_msgs/LaserScan</output_type>
+                <frame_name>laser_link</frame_name>
+            </plugin> -->
+        </sensor>
+    </gazebo>
+
+    <!-- <link name="flaser_link">
+        <inertial>
+            <origin xyz="0.0019 0.0 -0.0002" rpy="0 0 0" />
+            <mass value="0.0477" />
+            <inertia ixx="3.38e-05" ixy="-2.19e-09" ixz="1.07e-06" iyy="3.94e-05" iyz="6.83e-10" izz="5.60e-05" />
+        </inertial>
+        <visual>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/flaser.STL" /> </geometry>
+            <material name="grey"/>
+        </visual>
+        <collision>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/flaser.STL" /> </geometry>
+        </collision>
+    </link>
+    <joint name="flaser_joint" type="fixed">
+        <origin xyz="0.23979 -0.00016 0.15302" rpy="0 0 3.1415926" />
+        <parent link="base_link" />
+        <child link="flaser_link" />
+    </joint>
+
+    <gazebo reference="flaser_link">
+        <material>Gazebo/Red</material>
+        <sensor type="gpu_ray" name="single_line_lidar">
+            <pose>0 0 0 0 0 0</pose>
+            <visualize>false</visualize>
+            <update_rate>10</update_rate>
+            <ray>
+                <scan>
+                    <horizontal>
+                        <samples>450</samples> <resolution>1</resolution>
+                        <min_angle>2.04159265</min_angle> <max_angle>4.24159265</max_angle>
+                    </horizontal>
+                </scan>
+                <range> <min>0.25</min> <max>25.0</max> <resolution>0.01</resolution> </range>
+                <noise> <type>gaussian</type> <mean>0.0</mean> <stddev>0.01</stddev> </noise>
+            </ray>
+            <plugin name="gazebo_ros_head_rplidar_controller" filename="libgazebo_ros_ray_sensor.so">
+                <ros> <remapping>~/out:=/scan</remapping> </ros>
+                <output_type>sensor_msgs/LaserScan</output_type>
+                <frame_name>flaser_link</frame_name>
+            </plugin>
+        </sensor>
+    </gazebo> -->
+
+    <link name="camera_link">
+        <inertial>
+            <mass value="0.0559" />
+            <inertia ixx="0.00013" ixy="1.2e-07" ixz="1.62e-06" iyy="1.91e-05" iyz="-2.8e-08" izz="0.00013" />
+        </inertial>
+        <visual>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/camera_link.STL" /> </geometry>
+            <material name="white"/>
+        </visual>
+        <collision>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/camera_link.STL" /> </geometry>
+        </collision>
+    </link>
+    <joint name="camera_joint" type="fixed">
+        <origin xyz="0.31239 -3.77e-05 0.1347" rpy="0 0 0" />
+        <parent link="base_link" />
+        <child link="camera_link" />
+    </joint>
+    <!-- 虚拟光学关节，矫正ROS机器人和相机光学坐标轴不一致的问题 -->
+    <link name="camera_optical_link"/>
+    
+    <joint name="camera_optical_joint" type="fixed">
+        <origin xyz="0.05 0 0" rpy="-1.570796327 0 -1.570796327"/>
+        <parent link="camera_link"/>
+        <child link="camera_optical_link"/>
+    </joint>
+
+    <gazebo reference="camera_link">
+        <material>Gazebo/Yellow</material>
+        <sensor name="depth_camera" type="depth">
+            <pose>0.05 0 0 0 0 0</pose>
+            <update_rate>30.0</update_rate>
+            <camera>
+                <horizontal_fov>1.047198</horizontal_fov>
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>B8G8R8</format>
+                </image>
+                <clip>
+                    <near>0.2</near>
+                    <far>4.0</far>
+                </clip>
+            </camera>
+            <plugin name="depth_camera_controller" filename="libgazebo_ros_camera.so">
+                <ros>
+                    <remapping>custom_camera/image_raw:=color/image_raw</remapping>
+                    <remapping>custom_camera/image_depth:=depth/image_raw</remapping>
+                    <remapping>custom_camera/camera_info:=color/camera_info</remapping>
+                    <remapping>custom_camera/camera_info_depth:=depth/camera_info</remapping>
+                    <remapping>custom_camera/points:=depth/points</remapping>
+                </ros>
+                
+                <camera_name>depth_camera</camera_name>
+                <frame_name>camera_optical_link</frame_name>
+                
+                <hack_baseline>0.07</hack_baseline>
+                <min_depth>0.2</min_depth>
+                <max_depth>4.0</max_depth>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+    <link name="gyro_link">
+        <inertial>
+             <origin xyz="-0.0226 0.0293 0.0055" rpy="0 0 0" />
+            <mass value="0.0236" />
+            <inertia ixx="5.41e-06" ixy="-2.2e-14" ixz="-1.81e-09" iyy="4.38e-06" iyz="4.78e-14" izz="9.32e-06" />
+        </inertial>
+        <visual>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/gyro_link.STL" /> </geometry>
+            <material name="blue"/>
+        </visual>
+        <collision>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/gyro_link.STL" /> </geometry>
+        </collision>
+    </link>
+    <joint name="gyro_joint" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="base_link" />
+        <child link="gyro_link" />
+    </joint>
+
+    <gazebo reference="gyro_link">
+        <material>Gazebo/Green</material>
+        <sensor name="imu_sensor" type="imu">
+            <always_on>true</always_on>
+            <update_rate>100</update_rate>
+            <imu>
+                <angular_velocity>
+                    <x> <noise type="gaussian"> <mean>0.0</mean> <stddev>2e-4</stddev> </noise> </x>
+                    <y> <noise type="gaussian"> <mean>0.0</mean> <stddev>2e-4</stddev> </noise> </y>
+                    <z> <noise type="gaussian"> <mean>0.0</mean> <stddev>2e-4</stddev> </noise> </z>
+                </angular_velocity>
+                <linear_acceleration>
+                    <x> <noise type="gaussian"> <mean>0.0</mean> <stddev>1.7e-2</stddev> </noise> </x>
+                    <y> <noise type="gaussian"> <mean>0.0</mean> <stddev>1.7e-2</stddev> </noise> </y>
+                    <z> <noise type="gaussian"> <mean>0.0</mean> <stddev>1.7e-2</stddev> </noise> </z>
+                </linear_acceleration>
+            </imu>
+            <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+                <ros> <remapping>~/out:=/imu/data</remapping> </ros>
+                <frame_name>gyro_link</frame_name>
+                <initial_orientation_as_reference>false</initial_orientation_as_reference>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+    <!-- <link name="rtk_link">
+        <inertial>
+            <mass value="0.6548" />
+            <inertia ixx="0.00081" ixy="-9.5e-11" ixz="1.19e-06" iyy="0.00081" iyz="-8.5e-11" izz="0.00139" />
+        </inertial>
+        <visual>
+            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/rtk_link.STL" /> </geometry>
+            <material name="white"/>
+        </visual>
+        <collision>
+             <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/rtk_link.STL" /> </geometry>
+        </collision>
+    </link>
+    <joint name="rtk_joint" type="fixed">
+        <origin xyz="-0.043328 0.00081 0.20739" rpy="0 0 0" />
+        <parent link="base_link" />
+        <child link="rtk_link" />
+    </joint>
+
+    <gazebo reference="rtk_link">
+        <material>Gazebo/Blue</material>
+        <sensor name="rtk_gps" type="gps">
+            <always_on>true</always_on>
+            <update_rate>50.0</update_rate>
+            <gps>
+                <position_sensing>
+                    <horizontal> <noise type="gaussian"> <mean>0.0</mean> <stddev>0.01</stddev> </noise> </horizontal>
+                    <vertical> <noise type="gaussian"> <mean>0.0</mean> <stddev>0.01</stddev> </noise> </vertical>
+                </position_sensing>
+            </gps>
+            <plugin name="gps_controller" filename="libgazebo_ros_gps_sensor.so">
+                <ros> <remapping>~/out:=/gps/fix</remapping> </ros>
+                <frame_name>rtk_link</frame_name>
+            </plugin>
+        </sensor>
+    </gazebo> -->
+
+</robot>
