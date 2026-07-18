@@ -87,17 +87,13 @@ Visualization Manager:
         All Enabled: true
         base_link:
           Value: true
-        chassis_link:
+        gyro_link:
           Value: true
-        imu_link:
+        laser_link:
           Value: true
         map:
           Value: true
-        navsat_link:
-          Value: true
         odom:
-          Value: true
-        os0_32/os_sensor:
           Value: true
       Marker Scale: 1
       Name: TF

@@ -1,0 +1,36 @@
+/**:
+  ros__parameters:
+    # ---- 地图 (由 launch 文件设置) ----
+    map_path: ""
+    resolution: 0.05
+    origin_x: 0.0
+    origin_y: 0.0
+
+    # ---- 车辆运动学 (小型阿克曼: 0.70m×0.52m, wheelbase=0.593m) ----
+    minimum_turning_radius: 1.05        # wheelbase / tan(max_steering) = 0.593 / tan(0.52)
+    angle_quantization: 72              # 5° per bin (360/72)
+    motion_model: "REEDS_SHEPP"         # 支持前进+倒车
+
+    # ---- 车体尺寸 (相对后轴) ----
+    rear_axle_offset_x: -0.25           # 后轴在几何中心后方
+    vehicle_length: 0.70                # 总长 (m)
+    vehicle_width: 0.52                 # 总宽 (m)
+
+    # ---- 搜索参数 ----
+    max_iterations: 50000
+    max_on_approach_iterations: 500
+    tolerance: 0.5                      # 目标容差 (m)
+    allow_unknown: true
+
+    # ---- 代价惩罚 ----
+    change_penalty: 1.0
+    non_straight_penalty: 1.2
+    reverse_penalty: 2.1                # 倒车惩罚 (>1 减少倒车)
+    cost_penalty: 1.0
+    analytic_expansion_ratio: 3.0
+    analytic_expansion_max_length: 50.0
+
+    # ---- 路径平滑 (默认关闭) ----
+    use_smoother: false
+    smooth_max_time: 0.1
+    smooth_max_iterations: 50

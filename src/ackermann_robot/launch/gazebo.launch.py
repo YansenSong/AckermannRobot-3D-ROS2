@@ -91,15 +91,15 @@ def generate_launch_description():
         output="screen"
     )
 
-    # ================= 键盘控制 (↑↓←→) =================
-    keyboard_control = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            PathJoinSubstitution([
-                FindPackageShare('ackermann_robot'),
-                'launch',
-                'keyboard_control.launch.py'
-            ])
-        ])
+    # ================= EKF 融合 (轮式里程计 + IMU → odom→base_link TF) =================
+    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_config.yaml')
+    ekf_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[ekf_config_path, {'use_sim_time': True}],
+        remappings=[('/odometry/filtered', '/odometry/filtered')],
     )
 
     # ================= RViz =================
@@ -133,11 +133,10 @@ def generate_launch_description():
             )
         ),
 
-        # 键盘控制在阿克曼控制器加载后启动
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=load_ackermann_controller,
-                on_exit=[keyboard_control],
+                on_exit=[ekf_node],
             )
         ),
 

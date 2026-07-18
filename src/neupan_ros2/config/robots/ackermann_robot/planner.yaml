@@ -46,9 +46,12 @@ pan:
   dune_checkpoint: null           # Set at runtime by neupan_node
 
 # ---- Control Tuning -------------------------------------------------
+# Weights are normalized for a 0.7m×0.52m robot (L₀=0.7m, v₀=1.0m/s).
+# Δx/L₀≈0.3  →  q_s² gives meaningful tracking cost
+# d_max/L₀≈0.7 →  η balanced so avoidance doesn't drown tracking
 adjust:
-  q_s: 0.15                       # State tracking weight
-  p_u: 0.5                        # Control effort weight
-  eta: 15.0                       # Collision avoidance weight
+  q_s: 0.5                        # State tracking weight (↑ 0.15→0.5, small robot needs it)
+  p_u: 0.3                        # Control effort weight (↓ 0.5→0.3)
+  eta: 4.0                        # Collision avoidance weight (↓ 15→4, 1m obstacles aren't critical)
   d_max: 0.5                      # Max obstacle distance for barrier (m)
   d_min: 0.05                     # Min obstacle distance for barrier (m)
