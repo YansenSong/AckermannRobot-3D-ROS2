@@ -21,7 +21,7 @@ def generate_launch_description():
         value_type=str
     )
 
-    world_file_path = os.path.join(pkg_share, 'worlds', 'mini.world')
+    world_file_path = os.path.join(get_package_share_directory('gazebo_worlds'), 'worlds', 'mini', 'mini.world')
 
     # 设置 GAZEBO_MODEL_PATH 环境变量
     pkg_share_env = os.pathsep + os.path.join(get_package_prefix(package_name), 'share')

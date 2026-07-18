@@ -3,7 +3,7 @@
 > 最后更新: 2026-07-11
 > 
 > **所有世界文件、模型和地图集中存放在本目录**，与 `ackermann_robot` 功能包分离。
-> 原 `mini.world` / `empty.world` / `mini_world.yaml` 仍留在 `src/ackermann_robot/` 中不动。
+> `mini.world` / `empty.world` 已迁移至本目录，配套地图 `mini_world.yaml` 仍在 `src/ackermann_robot/maps/`。
 
 ## 快速启动
 
@@ -121,10 +121,10 @@ gazebo /home/young/AckermannRobot/src/gazebo_worlds/worlds/<文件名>
 
 | 项目 | 说明 |
 |------|------|
-| **来源** | 项目原有文件 |
+| **来源** | 项目原有文件（已从 `ackermann_robot` 迁移至此） |
 | **环境** | 小型迷宫（围墙+桌子+方块障碍物） |
 | **模型依赖** | **无** — 所有几何体内联，不需额外模型 |
-| **配套地图** | mini_world.yaml → 已存在 |
+| **配套地图** | mini_world.yaml → 已存在（仍在 `src/ackermann_robot/maps/`） |
 | **状态** | **完全立即可用** ✅ |
 
 ---
@@ -133,7 +133,7 @@ gazebo /home/young/AckermannRobot/src/gazebo_worlds/worlds/<文件名>
 
 | 项目 | 说明 |
 |------|------|
-| **来源** | 项目原有文件 |
+| **来源** | 项目原有文件（已从 `ackermann_robot` 迁移至此） |
 | **环境** | 完全空白，只有地面和光照 |
 | **用途** | 纯传感器测试、快速启动 |
 | **状态** | **立即可用** ✅ |
