@@ -16,9 +16,9 @@ TF 链路:
 
 Usage:
   ros2 launch robot_slam navigation_hdl.launch.py \
-      map:=src/maps/map.yaml \
-      map_pgm:=src/maps/map.pgm \
-      globalmap_pcd:=src/maps/GlobalMap.pcd
+      map:=src/gazebo_worlds/worlds/mini/maps/map.yaml \
+      map_pgm:=src/gazebo_worlds/worlds/mini/maps/map.pgm \
+      globalmap_pcd:=src/gazebo_worlds/worlds/mini/maps/GlobalMap.pcd
 """
 
 import os

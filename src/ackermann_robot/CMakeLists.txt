@@ -19,14 +19,12 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install launch files
+# Install directories
 install(DIRECTORY
   launch
   config
   meshes
-  worlds
   rviz
-  maps
   models
   xacro
   DESTINATION share/${PROJECT_NAME}
