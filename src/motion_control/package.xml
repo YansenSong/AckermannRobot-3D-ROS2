@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>motion_control</name>
+  <version>0.1.0</version>
+  <description>ROS2 node that bridges /cmd_vel (geometry_msgs/Twist) to the STM32 motion control board via UDP using the 26-byte protocol.</description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>BSD</license>
+
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,0 +1,36 @@
+/**:
+  ros__parameters:
+    # --- UDP communication ---
+    # Target motion control board IP address (on enp5s0 subnet)
+    udp_host: "192.168.1.50"
+    # Target UDP port (Ethernet-to-Serial bridge listening port)
+    udp_port: 5000
+    # Force socket to use this network device for egress (SO_BINDTODEVICE).
+    # Use this on multi-NIC hosts to ensure packets go through the correct
+    # interface regardless of the kernel routing table.
+    bind_device: "enp5s0"
+    # Optional: bind socket to this specific IP for source address selection
+    bind_interface: "192.168.1.11"
+
+    # --- Vehicle dynamics ---
+    # Wheelbase: front-to-rear axle distance in meters (Ackermann steering model)
+    wheelbase: 0.97
+    # Maximum forward speed (m/s)
+    max_speed: 2.0
+    # Maximum reverse speed (m/s), negative value
+    max_reverse_speed: -0.5
+    # Maximum steering angle per side (degrees)
+    max_steer_deg: 30.0
+
+    # --- Actuator enable mask ---
+    # bit0: RT49 (drive), bit1: EPS (steering), bit2: SEB (brake)
+    # 7 = all enabled, 3 = drive+steering only, etc.
+    enable_mask: 7
+
+    # --- Control timing ---
+    # Speed dead zone: |v| below this → steering commanded to 0
+    speed_deadzone: 0.01
+    # Frame publish rate (Hz), matches STM32 20ms control period
+    publish_rate: 20.0
+    # Seconds without cmd_vel before sending zero-velocity safety frame
+    command_timeout: 0.5
