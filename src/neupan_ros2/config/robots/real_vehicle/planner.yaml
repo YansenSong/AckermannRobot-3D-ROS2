@@ -1,0 +1,56 @@
+# NeuPAN Planner Configuration — Real Vehicle
+#
+# Vehicle: Ackermann steering, 0.97m wheelbase, max steering 30° (0.524 rad)
+# Min turning radius: 1.68m = wheelbase / tan(30°) = 0.97 / 0.577
+# Supports reverse: min_vel_x = -0.5 m/s
+#
+# This is the RUNTIME config. The DUNE checkpoint path is set at runtime
+# by neupan_node (via the pan.dune_checkpoint override).
+#
+# Must match the training config in all robot geometry fields —
+# the DUNE weights are geometry-specific.
+
+# ---- MPC ------------------------------------------------------------
+receding: 15                            # Horizon steps (15 × 0.2s = 3s look-ahead)
+step_time: 0.2                          # Time per step (s)
+ref_speed: 1.0                          # Reference cruise speed (m/s)
+device: 'cpu'
+time_print: false
+collision_threshold: 0.10               # Emergency stop distance (m) — wider for real vehicle safety
+
+# ---- Robot Geometry -------------------------------------------------
+robot:
+  kinematics: 'acker'
+  max_speed: [2.0, 0.524]              # [linear m/s, steering rad] = [2.0 m/s, 30°]
+  min_speed: [-0.5, -0.524]            # Allow reverse with full steering
+  max_acce: [0.5, 0.3]                 # [linear m/s², steering rad/s²] — conservative for real vehicle
+  length: 1.40                          # Overall length (m) — confirmed
+  width: 0.93                           # Overall width (m) — confirmed
+  wheelbase: 0.97                       # Front-rear axle distance (m) — REAL VEHICLE
+
+# ---- Initial Path ---------------------------------------------------
+ipath:
+  interval: 0.1                         # Waypoint spacing (m)
+  curve_style: 'reeds'                  # Reeds-Shepp: forward + reverse, ackermann-aware
+  min_radius: 1.68                      # Min turn radius (m) = 0.97 / tan(30°)
+  loop: false
+  arrive_threshold: 0.5                 # "Arrived" distance (m)
+  close_threshold: 0.1
+  arrive_index_threshold: 3
+
+# ---- PAN Algorithm --------------------------------------------------
+pan:
+  iter_num: 2
+  dune_max_num: 200
+  nrmp_max_num: 10
+  dune_checkpoint: null                 # Set at runtime by neupan_node
+
+# ---- Control Tuning -------------------------------------------------
+# Conservative tuning for real vehicle safety.
+# Tune on real vehicle after initial deployment per docs/neupan_tuning.md.
+adjust:
+  q_s: 0.5                              # State tracking weight
+  p_u: 0.5                              # Control effort weight (higher = smoother steering)
+  eta: 4.0                              # Collision avoidance weight
+  d_max: 1.0                            # Max obstacle distance for barrier (m) — wider safety margin
+  d_min: 0.10                           # Min obstacle distance for barrier (m)

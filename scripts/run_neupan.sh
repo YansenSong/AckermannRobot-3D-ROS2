@@ -15,7 +15,7 @@ conda activate neupan
 export PYTHONPATH="$CONDA_PREFIX/lib/python3.10/site-packages:$PYTHONPATH"
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
-echo "=== NeuPAN ==="
+echo "=== NeuPAN (实车 real_vehicle) ==="
 echo "Python: $(which python3)"
 echo "Conda env: $CONDA_DEFAULT_ENV"
 
@@ -24,6 +24,6 @@ python3 -c "
 from neupan_ros2.neupan_node import main
 main()
 " --ros-args \
-  -p use_sim_time:=true \
-  --params-file "$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot/robot.yaml" \
-  -p robot_config_dir:="$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot"
+  -p use_sim_time:=false \
+  --params-file "$PROJECT_DIR/src/neupan_ros2/config/robots/real_vehicle/robot.yaml" \
+  -p robot_config_dir:="$PROJECT_DIR/src/neupan_ros2/config/robots/real_vehicle"

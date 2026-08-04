@@ -1,0 +1,37 @@
+/**:
+  ros__parameters:
+    # ---- Map (set by launch file) ----
+    map_path: ""
+    resolution: 0.05
+    origin_x: 0.0
+    origin_y: 0.0
+
+    # ---- Vehicle Kinematics (Real: 0.70m × 0.52m, wheelbase=0.97m) ----
+    minimum_turning_radius: 1.68        # 0.97 / tan(30°)
+    angle_quantization: 72              # 5° per bin (360/72)
+    motion_model: "REEDS_SHEPP"         # Forward + reverse
+
+    # ---- Vehicle Dimensions (relative to rear axle) ----
+    # TODO: rear_axle_offset_x needs measurement (rear axle offset from geometric center)
+    rear_axle_offset_x: -0.25           # Rear axle behind geometric center
+    vehicle_length: 1.40                # Total length (m)
+    vehicle_width: 0.93                 # Total width (m)
+
+    # ---- Search Parameters ----
+    max_iterations: 50000
+    max_on_approach_iterations: 500
+    tolerance: 0.5                      # Goal tolerance (m)
+    allow_unknown: true
+
+    # ---- Cost Penalties ----
+    change_penalty: 1.0
+    non_straight_penalty: 1.2
+    reverse_penalty: 2.1                # Reverse penalty (>1 reduces reversing)
+    cost_penalty: 1.0
+    analytic_expansion_ratio: 3.0
+    analytic_expansion_max_length: 50.0
+
+    # ---- Path Smoothing (disabled by default) ----
+    use_smoother: false
+    smooth_max_time: 0.1
+    smooth_max_iterations: 50

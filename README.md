@@ -16,7 +16,9 @@ AckermannRobot-3D/
 │   ├── hdl_localization/ # NDT 3D 点云定位 (ndt_omp vendored)
 │   ├── pcd2pgm/          # 3D PCD → 2D PGM 地图转换工具
 │   ├── gazebo_worlds/    # Gazebo 仿真世界
-│   └── maps/             # 地图存储目录
+│   ├── maps/             # 地图存储目录
+│   ├── lidar_driver/     # [实车] Hesai 激光雷达驱动（原名 hesai_ros_driver）
+│   └── motion_control/   # [实车] /cmd_vel → STM32 运控桥（原名 uart_vehicle_bridge）
 ├── install/              # colcon build 产物
 ├── build/                # 编译中间文件
 └── log/                  # 运行日志
@@ -212,3 +214,116 @@ map ←(hdl NDT)← odom ←(EKF)← base_link ←(URDF)← laser_link
 | 初始位姿 | RViz 手动设置 | 必须手动 "2D Pose Estimate" |
 | 输出 | `map→odom` TF | `map→odom` TF |
 | 鲁棒性 | ★★★★★ | ★★ |
+
+---
+
+## 实车部署（real-vehicle-deployment 分支）
+
+本节对应实车运行环境（RK3588 工控机 + 普通车运控），与上文的 Gazebo 仿真相互独立。涉及的实车功能包：
+
+- `lidar_driver`（Hesai 激光雷达驱动）
+- `motion_control`（/cmd_vel → STM32 26 字节 UDP 运控协议桥）
+
+### 硬件架构
+
+```
+┌────────────────────────────────────────────────────┐
+│  RK3588 工控机                                      │
+│                                                     │
+│  IP: 192.168.1.74 (enp2s0·管理)                     │
+│  IP: 10.242.10.221 (enp4s0·外网)                    │
+│  enp5s0 → 运控开发板 (以太网-UART 桥)               │
+│                                                     │
+│  ├── Hesai LiDAR (以太网直连, 192.168.1.201)        │
+│  └── motion_control → STM32运控板 → CAN总线         │
+│                               ├── RT49 驱动          │
+│                               ├── EPS 转向           │
+│                               └── SEB 制动           │
+└────────────────────────────────────────────────────┘
+```
+
+### 快速开始
+
+```bash
+# 首次构建（含实车功能包）
+cd /home/t/AckermannRobot-3D-ROS2
+source /opt/ros/humble/setup.bash
+colcon build --packages-select lidar_driver motion_control
+source install/setup.bash
+
+# 启动（三种模式）
+bash scripts/start_vehicle.sh lidar    # LiDAR + rviz2 可视化
+bash scripts/start_vehicle.sh bridge   # 仅运动控制桥
+bash scripts/start_vehicle.sh all      # 全部启动
+```
+
+> 实车运行时 `motion_control` 通过 UDP 发送控制指令，务必确认 enp5s0 网段与运控板一致（见[网络配置](#网络配置)）。
+
+### 测试运动控制桥
+
+```bash
+# 终端 1：启动桥接
+bash scripts/start_vehicle.sh bridge
+
+# 终端 2：发布速度指令
+ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.2}, angular: {z: 0.0}}"
+```
+
+> ⚠️ 实车测试前请先悬空车轮或限速，最大速度从 0.1~0.2 m/s 开始。
+
+---
+
+### 实车功能包说明
+
+#### 1. 激光雷达驱动 (`lidar_driver`)
+
+| 项目 | 说明 |
+|------|------|
+| 雷达型号 | Hesai PandarXT-16 |
+| 配置 | `src/lidar_driver/config/config.yaml` |
+| 话题 | `/lidar_points`、`/lidar_packets`、`/lidar_imu` |
+| 标定文件 | 相对路径，运行时按包根目录解析（无硬编码） |
+
+#### 2. 运动控制桥 (`motion_control`)
+
+订阅 `/cmd_vel`，按阿克曼模型换算转向角，打包为 26 字节控制帧，经 UDP 发送至 STM32 运控板（默认 `192.168.1.50:5000`）。
+
+配置：`src/motion_control/config/bridge_params.yaml`
+
+| 参数 | 当前值 | 说明 |
+|------|--------|------|
+| `udp_host` | `192.168.1.50` | 运控板 IP（enp5s0 子网） |
+| `udp_port` | `5000` | UDP 端口 |
+| `bind_device` | `enp5s0` | 绑定网卡，保证走运控板通道 |
+| `wheelbase` | `0.97` | 实车轴距 (m) |
+| `max_speed` | `2.0` | 最大前进速度 (m/s) |
+| `max_steer_deg` | `30.0` | 最大单侧转向角 (°) |
+| `publish_rate` | `20.0` | 帧发送频率 (Hz) |
+| `command_timeout` | `0.5` | cmd_vel 超时自动安全停车 (s) |
+
+**安全机制：**
+- **cmd_vel 超时**：超过 0.5 秒未收到指令 → 自动发送零速帧
+- **速度/转角限幅**：防止超出机械极限
+- **STM32 侧保护**：运控板自身 500 ms 无指令进入超时安全状态
+
+### 网络配置
+
+#### enp5s0（运控板通信）
+
+与运控板同网段的静态 IP：
+
+```bash
+# 临时配置
+sudo ip addr add 192.168.1.10/24 dev enp5s0
+sudo ip link set enp5s0 up
+```
+
+#### LiDAR 网络
+
+雷达 IP `192.168.1.201`，UDP 端口 `2368`，PC 侧接收端口 `9347`（PTC）。与运控通信同处 `192.168.1.0/24` 网段。
+
+### 文档
+
+- 运控协议：`docs/普通车运控_以太网UDP通信协议说明_V1.0.md`
+- LiDAR SDK：`src/lidar_driver/README.md`
