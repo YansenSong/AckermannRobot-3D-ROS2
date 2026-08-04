@@ -11,7 +11,7 @@ robots/
 │   ├── planner.yaml         # NeuPAN planner configuration (MPC and tuning)
 │   ├── pcl_to_scan.yaml     # pointcloud_to_laserscan node config
 │   └── models/
-│       └── dune_model_5000.pth  (place trained model here)
+│       └── dune_model_5000.pth  (实车训练权重)
 │
 └── _template/               # Template for new robots (reference only)
     ├── README.md
