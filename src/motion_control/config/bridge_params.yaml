@@ -12,15 +12,8 @@
     # Optional: bind socket to this specific IP for source address selection
     bind_interface: "192.168.1.11"
 
-    # --- Vehicle dynamics ---
-    # Wheelbase: front-to-rear axle distance in meters (Ackermann steering model)
-    wheelbase: 0.97
-    # Maximum forward speed (m/s)
-    max_speed: 2.0
-    # Maximum reverse speed (m/s), negative value
-    max_reverse_speed: -0.5
-    # Maximum steering angle per side (degrees)
-    max_steer_deg: 30.0
+    # Vehicle geometry and limits are injected at launch from the shared
+    # vehicle_config/config/real_vehicle.yaml file.
 
     # --- Actuator enable mask ---
     # bit0: RT49 (drive), bit1: EPS (steering), bit2: SEB (brake)

@@ -14,7 +14,7 @@ set -e
 # ---- 环境配置（路径由脚本位置推导，避免硬编码）----
 ROS2_DISTRO="humble"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LIDAR_CONFIG="${PROJECT_DIR}/src/lidar_driver/config/config.yaml"
+VEHICLE_CONFIG="${PROJECT_DIR}/src/vehicle_config/config/real_vehicle.yaml"
 BRIDGE_CONFIG="${PROJECT_DIR}/src/motion_control/config/bridge_params.yaml"
 
 # ---- 颜色输出 ----
@@ -96,10 +96,10 @@ trap cleanup EXIT INT TERM
 
 # --- LiDAR (lidar_driver + rviz2) ---
 if $WITH_LIDAR; then
-    if [ -f "${LIDAR_CONFIG}" ]; then
-        log_info "LiDAR 配置文件: ${LIDAR_CONFIG}"
+    if [ -f "${VEHICLE_CONFIG}" ]; then
+        log_info "实车与 LiDAR 统一配置: ${VEHICLE_CONFIG}"
     else
-        log_warn "LiDAR 配置文件不存在: ${LIDAR_CONFIG}"
+        log_warn "实车统一配置不存在: ${VEHICLE_CONFIG}"
     fi
 
     log_info "启动 Hesai LiDAR + rviz2 ..."

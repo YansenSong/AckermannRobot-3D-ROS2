@@ -8,13 +8,12 @@
 
 ## 需要实车测量/确认的参数
 
-### 1. LiDAR 安装位置 (`real_vehicle.launch.py` → static TF `base_link → hesai_lidar`)
+### 1. LiDAR 安装位置 (`vehicle_config/config/real_vehicle.yaml` → `lidar_mount`)
 
-| 参数 | 当前默认值 | 影响 |
-|------|-----------|------|
-| `--x` | `0.0` | LiDAR 在 base_link 下的 X 偏移 (m) |
-| `--y` | `0.0` | LiDAR 在 base_link 下的 Y 偏移 (m) |
-| `--z` | `0.4` | LiDAR 安装高度 (m)，相对 base_link 原点 |
+| 参数 | 当前值 | 影响 |
+|------|--------|------|
+| `x/y/z` | 查看统一配置 | LiDAR 在 base_link 下的位置偏移 (m) |
+| `roll/pitch/yaw` | 查看统一配置 | LiDAR 相对 base_link 的姿态 (rad) |
 
 **确认方式**: 测量 LiDAR 中心相对车体几何中心（base_link 原点）的三维位置。
 **影响**: pointcloud_to_laserscan 的高度切片、NeuPAN 中 scan 点云到 map 的 TF 变换。
@@ -31,32 +30,29 @@
 如果将来需要更精确的障碍物定位（考虑 LiDAR 安装偏移），应改为 `hesai_lidar`，
 同时调整 pcl_to_scan 的 `target_frame`。
 
-### 3. 后轴偏移 (`planner_params_real.yaml` → Hybrid A*)
+### 3. 后轴偏移 (`vehicle_config/config/real_vehicle.yaml` → `rear_axle_offset_x`)
 
-| 参数 | 当前默认值 | 影响 |
-|------|-----------|------|
-| `rear_axle_offset_x` | `-0.25` | 后轴相对于车体几何中心的 X 偏移 (m) |
+| 参数 | 当前值 | 影响 |
+|------|--------|------|
+| `rear_axle_offset_x` | 查看统一配置 | 后轴相对于车体几何中心的 X 偏移 (m) |
 
-当前值从仿真抄来（仿真车长 0.70m，后轴在中心后方 0.25m）。
-实车长 1.40m、轴距 0.97m，这个值大概率不对。
+当前值是尚未测量的占位值，大概率不符合实车。
 
-**确认方式**: 测量后轴中心到车体几何中心的距离。如果几何中心在车体正中间（0.70m 处），
-后轴在车尾方向 0.70 - 0.97/2 的位置... 实际上需要实际测量。
+**确认方式**: 测量后轴中心到车体几何中心的有符号 X 向距离。
 
 ---
 
-## 需要跟训模型确认的参数
+## 已确认的公共参数
 
-### 4. planner.yaml 中须与训练配置一致的几何参数
+### 4. 须与训练配置一致的几何参数
 
-这些参数在 DUNE 模型训练时已固定，修改后需要重新训练：
+数值只保存在 `src/vehicle_config/config/real_vehicle.yaml`。几何参数修改后，
+需确认 DUNE 模型是否必须重新训练。
 
-| 参数 | 当前值 | 说明 |
-|------|--------|------|
-| `robot.length` | `1.40` | ✅ 已确认 |
-| `robot.width` | `0.93` | ✅ 已确认 |
-| `robot.wheelbase` | `0.97` | ✅ 已确认 |
-| `robot.kinematics` | `'acker'` | ✅ 已确认 |
+| 参数 | 唯一来源 | 说明 |
+|------|----------|------|
+| 车长、车宽、轴距、轮子半径 | `vehicle` 段 | ✅ 已确认 |
+| 运动学类型 | NeuPAN `planner.yaml` | ✅ `acker` |
 
 ---
 
@@ -64,13 +60,13 @@
 
 | 参数 | 值 | 公式 |
 |------|-----|------|
-| `planner.yaml → min_radius` | `1.68` | `wheelbase / tan(30°)` = 0.97 / 0.577 |
-| `planner.yaml → max_speed[1]` | `0.524` | `30° → rad` |
-| `planner_params_real.yaml → minimum_turning_radius` | `1.68` | 同上 |
+| NeuPAN `min_radius` | 运行时计算 | `wheelbase / tan(max_steer_deg)` |
+| NeuPAN 转角限制 | 运行时计算 | `max_steer_deg` 转换为 rad |
+| Hybrid A* `minimum_turning_radius` | 运行时计算 | 同上 |
 
 ---
 
-## 从仿真沿用、需实车验证/调优的参数
+## 未经实车验证、需要调优的参数
 
 这些参数在当前阶段没有数据支撑，在实车跑起来后需要按 `docs/neupan_tuning.md` 方法论调优：
 
@@ -78,43 +74,41 @@
 
 | 参数 | 当前值 | 来源 |
 |------|--------|------|
-| `receding` | `15` | 仿真 ackermann_robot |
-| `step_time` | `0.2` | 仿真 ackermann_robot |
-| `ref_speed` | `1.0` | 仿真 ackermann_robot |
+| `receding` | `15` | 初始值，待实车验证 |
+| `step_time` | `0.2` | 初始值，待实车验证 |
+| `ref_speed` | `1.0` | 初始值，待实车验证 |
 
 ### planner.yaml — 动力学
 
 | 参数 | 当前值 | 来源 |
 |------|--------|------|
-| `max_acce[0]` (linear) | `0.5` | 未确认，Claude 占位值（仿真用 1.0） |
-| `max_acce[1]` (steering) | `0.3` | 未确认，Claude 占位值（仿真用 0.5） |
-| `collision_threshold` | `0.10` | 未确认，Claude 占位值（仿真用 0.05） |
+| `max_acce[0]` (linear) | `0.5` | 保守初值，待测加速度 |
+| `max_acce[1]` (steering) | `0.3` | 保守初值，待测转向响应 |
+| `collision_threshold` | `0.10` | 安全初值，待实车验证 |
 
 ### planner.yaml — 控制调优 (adjust)
 
 | 参数 | 当前值 | 来源 |
 |------|--------|------|
-| `q_s` | `0.5` | 仿真 ackermann_robot |
-| `p_u` | `0.5` | 未确认，Claude 占位值（仿真用 0.3），意图让转向更平滑 |
-| `eta` | `4.0` | 仿真 ackermann_robot |
-| `d_max` | `1.0` | 未确认，Claude 占位值（仿真用 0.5），意图扩大安全距离 |
-| `d_min` | `0.10` | 未确认，Claude 占位值（仿真用 0.05） |
+| `q_s` | `0.5` | 初始值，待实车调优 |
+| `p_u` | `0.5` | 初始值，待实车调优 |
+| `eta` | `4.0` | 初始值，待实车调优 |
+| `d_max` | `1.0` | 按车长比例给出的初值，待验证 |
+| `d_min` | `0.10` | 按车长比例给出的初值，待验证 |
 
 ### robot.yaml — 激光扫描
 
 | 参数 | 当前值 | 来源 |
 |------|--------|------|
-| `scan_range_max` | `30.0` | 未确认，Claude 占位值。PandarXT-16 实际可达 ~100m |
-| `scan_range_min` | `0.3` | 未确认，Claude 占位值，用于滤除车体自反射 |
-| `scan_downsample` | `2` | 未确认，Claude 占位值 |
+| `scan_range_max/min` | 查看统一配置 | 需根据环境和车体自反射调整 |
+| `scan_downsample` | 查看统一配置 | 需在点云密度和计算量之间调整 |
 
 ### pcl_to_scan.yaml
 
 | 参数 | 当前值 | 来源 |
 |------|--------|------|
-| `min_height` | `-0.4` | 未确认，Claude 占位值，取决于 LiDAR 安装高度 |
-| `max_height` | `1.0` | 未确认，Claude 占位值 |
-| `range_max` | `50.0` | 未确认，Claude 占位值 |
+| `min_height/max_height` | 查看统一配置 | 取决于雷达安装高度和障碍物高度 |
+| `range_min/range_max` | 查看统一配置 | 与 NeuPAN 共用同一扫描距离范围 |
 
 ---
 

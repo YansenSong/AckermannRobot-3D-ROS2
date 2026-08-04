@@ -13,12 +13,12 @@ Cost = q_s²·||s - ref_s||²  +  p_u²·||v - ref_v||²  +  0.5·bk·||s - s_no
 
 ## 特征尺度
 
-| 符号 | 含义 | 小机器人示例 (本项目) | 大型汽车示例 |
+| 符号 | 含义 | 本项目实车 | 大型汽车示例 |
 |------|------|:---:|:---:|
-| L₀ | 特征长度 (车长) | 0.70 m | 5.0 m |
+| L₀ | 特征长度 (车长) | 1.40 m | 5.0 m |
 | v₀ | 巡航速度 | 1.0 m/s | 10.0 m/s |
 | ψ_max | 最大转向角 | 0.52 rad | 0.6 rad |
-| R_min | 最小转弯半径 | 1.05 m | 6.0 m |
+| R_min | 最小转弯半径 | 由轴距与最大转角计算（当前约 1.68 m） | 6.0 m |
 
 ## 归一化框架
 
@@ -39,7 +39,7 @@ q_s² × (0.3·L₀)² ≈ 0.1
 
 | 机器人 | L₀ | 建议 q_s | 有效代价 (Δx=0.2m) |
 |--------|:--:|:--------:|:-------------------:|
-| 本项目 (小阿克曼) | 0.7m | **0.5** | 0.25 × 0.04 = 0.01 |
+| 本项目实车 | 1.4m | **待实车调优** | 以实测跟踪效果为准 |
 | 大型汽车 | 5.0m | 0.15 | 0.0225 × 0.04 = 0.0009 |
 
 **结论**：小机器人需要更大的 `q_s`，因为同样的 0.2m 偏差对小机器人来说占比更大。
@@ -82,16 +82,16 @@ d_max / L₀ < 0.5 → 障碍物很近才躲 → 路径贴着走
 → η ≈ (q_s² × 0.25 × L₀²) / d_max
 ```
 
-对于本项目 (L₀=0.7, d_max=0.5, q_s=0.5)：
+对于本项目当前初值 (L₀=1.4, d_max=1.0, q_s=0.5)：
 
 ```
-η ≈ (0.25 × 0.25 × 0.49) / 0.5 ≈ 0.06  ← 但这是理论下界
+η ≈ (0.25 × 0.25 × 1.96) / 1.0 ≈ 0.12  ← 但这是理论下界
 实际取 η = 3~5，因为避障仍需要主导地位
 ```
 
 | 机器人 | d_max | q_s | 建议 η |
 |--------|:-----:|:---:|:------:|
-| 本项目 (小空间) | 0.5m (0.7 L₀) | 0.5 | **3~5** |
+| 本项目实车 | 1.0m (0.7 L₀) | 0.5（初值） | **待实车调优** |
 | 大型汽车 (开阔室外) | 2.0m (0.4 L₀) | 0.15 | **10~15** |
 
 ### 4. 近端正则 `bk`
@@ -121,7 +121,7 @@ d_max ≈ 0.7 × L₀    (约 70% 车长，开始关注的距离)
 
 | 机器人 | L₀ | d_min | d_max |
 |--------|:--:|:-----:|:-----:|
-| 本项目 | 0.7m | 0.05m | 0.5m |
+| 本项目实车 | 1.4m | 0.10m | 1.0m |
 
 ## 本项目参数推导全过程
 
@@ -137,18 +137,18 @@ d_max ≈ 0.7 × L₀    (约 70% 车长，开始关注的距离)
 
 ### 最终方案
 
-归一化到 L₀=0.7m, v₀=1.0m/s：
+当前实车初值按 L₀=1.4m、v₀=1.0m/s 设置，仍需低速实车验证：
 
 ```yaml
 adjust:
   q_s: 0.5     # Δx/L₀=0.3 → 代价 0.011，MPC 开始"在乎"偏离
   p_u: 0.3     # Δv/v₀=0.3 → 代价 0.008，不打压速度调整
   eta: 4.0     # 避障:追踪 ≈ 2.0:0.011 ≈ 180:1 (原来 8300:1)
-  d_max: 0.5   # ~0.7 L₀，合理
-  d_min: 0.05  # ~0.07 L₀，合理
+  d_max: 1.0   # ~0.7 L₀
+  d_min: 0.10  # ~0.07 L₀
 ```
 
-**效果**：转弯半径收紧到匹配 Hybrid A* 的 1.05m，同时在 0.5m 内检测到障碍物时仍能及时避让。
+这些数值只是初始配置，不代表已经在当前实车上验证通过。
 
 ## 调参流程 (通用)
 
@@ -192,9 +192,10 @@ d_min ≈ 0.07 × L₀
 
 | 文件 | 说明 |
 |------|------|
-| `src/neupan_ros2/config/robots/ackermann_robot/planner.yaml` | MPC + 控制参数 |
-| `src/neupan_ros2/config/robots/ackermann_robot/robot.yaml` | 机器人几何 + 话题 + LiDAR |
-| `src/hybrid_astar_planner/standalone_planner/config/planner_params.yaml` | 全局规划参数 |
+| `src/neupan_ros2/config/robots/real_vehicle/planner.yaml` | MPC + 控制参数 |
+| `src/neupan_ros2/config/robots/real_vehicle/robot.yaml` | NeuPAN 话题与节点参数 |
+| `src/vehicle_config/config/real_vehicle.yaml` | 实车几何、运动学限制与 LiDAR 参数 |
+| `src/hybrid_astar_planner/standalone_planner/config/planner_params_real.yaml` | 全局规划算法参数 |
 | `src/hybrid_astar_planner/core/` | Hybrid A* 源码 (A*, SE2 node, collision checker) |
 | `/home/young/NeuPAN/neupan/blocks/nrmp.py` | NRMP MPC 求解器源码 |
 | `/home/young/NeuPAN/neupan/blocks/pan.py` | PAN 交替优化框架 |

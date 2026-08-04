@@ -27,6 +27,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from vehicle_config import lidar_transform, load_real_vehicle_config
 
 
 def generate_launch_description():
@@ -39,6 +40,9 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('neupan_ros2')
     robot_config_dir = os.path.join(pkg_share, 'config', 'robots', 'real_vehicle')
     robot_config = os.path.join(robot_config_dir, 'robot.yaml')
+    vehicle = load_real_vehicle_config()
+    lidar = lidar_transform(vehicle)
+    lidar_frames = vehicle['sensors']['lidar']['frames']
 
     # ---- Static TF: map → base_link (bootstrap until localization is ready) ----
     # Without this, NeuPAN's _get_robot_transform() fails silently and
@@ -64,9 +68,13 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='static_tf_base_to_lidar',
         arguments=[
-            '--x', '0.0', '--y', '0.0', '--z', '0.4',
-            '--yaw', '0.0', '--pitch', '0.0', '--roll', '0.0',
-            '--frame-id', 'base_link', '--child-frame-id', 'hesai_lidar'
+            '--x', str(lidar['x']),
+            '--y', str(lidar['y']),
+            '--z', str(lidar['z']),
+            '--yaw', str(lidar['yaw']), '--pitch', str(lidar['pitch']),
+            '--roll', str(lidar['roll']),
+            '--frame-id', lidar_frames['scan_target'],
+            '--child-frame-id', lidar_frames['sensor'],
         ],
         parameters=[{'use_sim_time': False}],
     )
@@ -91,7 +99,7 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         output='screen',
-        arguments=['-d', os.path.join(pkg_share, 'rviz', 'neupan_sim.rviz')],
+        arguments=['-d', os.path.join(pkg_share, 'rviz', 'neupan.rviz')],
         condition=IfCondition(LaunchConfiguration('use_rviz'))
     )
 

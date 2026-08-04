@@ -18,7 +18,7 @@ def generate_launch_description():
             share_dir, 'config', 'params.yaml'),
         description='FPath to the ROS2 parameters file to use.')
 
-    sim_time_param = {'use_sim_time': True}
+    real_time_param = {'use_sim_time': False}
 
     return LaunchDescription([
         params_declare,
@@ -26,7 +26,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             arguments='0.0 0.0 0.0 0.0 0.0 0.0 map odom'.split(' '),
-            parameters=[parameter_file, sim_time_param],
+            parameters=[parameter_file, real_time_param],
             output='screen'
             ),
         # robot_state_publisher 由车辆 launch 提供（display.urdf），
@@ -35,28 +35,28 @@ def generate_launch_description():
             package='lio_sam',
             executable='lio_sam_imuPreintegration',
             name='lio_sam_imuPreintegration',
-            parameters=[parameter_file, sim_time_param],
+            parameters=[parameter_file, real_time_param],
             output='screen'
         ),
         Node(
             package='lio_sam',
             executable='lio_sam_imageProjection',
             name='lio_sam_imageProjection',
-            parameters=[parameter_file, sim_time_param],
+            parameters=[parameter_file, real_time_param],
             output='screen'
         ),
         Node(
             package='lio_sam',
             executable='lio_sam_featureExtraction',
             name='lio_sam_featureExtraction',
-            parameters=[parameter_file, sim_time_param],
+            parameters=[parameter_file, real_time_param],
             output='screen'
         ),
         Node(
             package='lio_sam',
             executable='lio_sam_mapOptimization',
             name='lio_sam_mapOptimization',
-            parameters=[parameter_file, sim_time_param],
+            parameters=[parameter_file, real_time_param],
             output='screen'
         ),
         Node(
@@ -64,7 +64,7 @@ def generate_launch_description():
             executable='rviz2',
             name='rviz2',
             arguments=['-d', rviz_config_file],
-            parameters=[sim_time_param],
+            parameters=[real_time_param],
             output='screen'
         )
     ])

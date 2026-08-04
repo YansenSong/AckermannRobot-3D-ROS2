@@ -1,8 +1,7 @@
 # NeuPAN Planner Configuration — Real Vehicle
 #
-# Vehicle: Ackermann steering, 0.97m wheelbase, max steering 30° (0.524 rad)
-# Min turning radius: 1.68m = wheelbase / tan(30°) = 0.97 / 0.577
-# Supports reverse: min_vel_x = -0.5 m/s
+# Vehicle geometry, speed/steering limits, and turning radius are injected
+# from vehicle_config.
 #
 # This is the RUNTIME config. The DUNE checkpoint path is set at runtime
 # by neupan_node (via the pan.dune_checkpoint override).
@@ -21,18 +20,15 @@ collision_threshold: 0.10               # Emergency stop distance (m) — wider 
 # ---- Robot Geometry -------------------------------------------------
 robot:
   kinematics: 'acker'
-  max_speed: [2.0, 0.524]              # [linear m/s, steering rad] = [2.0 m/s, 30°]
-  min_speed: [-0.5, -0.524]            # Allow reverse with full steering
+  # max_speed and min_speed are injected from the shared vehicle limits.
   max_acce: [0.5, 0.3]                 # [linear m/s², steering rad/s²] — conservative for real vehicle
-  length: 1.40                          # Overall length (m) — confirmed
-  width: 0.93                           # Overall width (m) — confirmed
-  wheelbase: 0.97                       # Front-rear axle distance (m) — REAL VEHICLE
+  # length, width, and wheelbase are injected by neupan_node.
 
 # ---- Initial Path ---------------------------------------------------
 ipath:
   interval: 0.1                         # Waypoint spacing (m)
   curve_style: 'reeds'                  # Reeds-Shepp: forward + reverse, ackermann-aware
-  min_radius: 1.68                      # Min turn radius (m) = 0.97 / tan(30°)
+  # min_radius is derived from shared wheelbase and max_steer_deg.
   loop: false
   arrive_threshold: 0.5                 # "Arrived" distance (m)
   close_threshold: 0.1

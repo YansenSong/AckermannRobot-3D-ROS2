@@ -22,6 +22,7 @@
   <depend condition="$ROS_VERSION == 2">std_msgs</depend>
   <depend condition="$ROS_VERSION == 2">ament_index_cpp</depend>
   <depend condition="$ROS_VERSION == 2">rclcpp_action</depend>
+  <exec_depend condition="$ROS_VERSION == 2">vehicle_config</exec_depend>
 
   <!-- ROS2 -->
   <member_of_group condition="$ROS_VERSION == 2">rosidl_interface_packages</member_of_group>

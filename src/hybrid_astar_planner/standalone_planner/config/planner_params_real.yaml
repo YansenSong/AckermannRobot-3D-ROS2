@@ -6,16 +6,10 @@
     origin_x: 0.0
     origin_y: 0.0
 
-    # ---- Vehicle Kinematics (Real: 0.70m × 0.52m, wheelbase=0.97m) ----
-    minimum_turning_radius: 1.68        # 0.97 / tan(30°)
+    # ---- Vehicle Kinematics ----
+    # Geometry and minimum_turning_radius are injected from vehicle_config.
     angle_quantization: 72              # 5° per bin (360/72)
     motion_model: "REEDS_SHEPP"         # Forward + reverse
-
-    # ---- Vehicle Dimensions (relative to rear axle) ----
-    # TODO: rear_axle_offset_x needs measurement (rear axle offset from geometric center)
-    rear_axle_offset_x: -0.25           # Rear axle behind geometric center
-    vehicle_length: 1.40                # Total length (m)
-    vehicle_width: 0.93                 # Total width (m)
 
     # ---- Search Parameters ----
     max_iterations: 50000

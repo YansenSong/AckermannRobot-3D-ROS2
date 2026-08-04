@@ -1,6 +1,6 @@
 # NeuPAN ROS2 Configuration — Real Vehicle
 #
-# Vehicle: Ackermann steering, 0.97m wheelbase, Hesai PandarXT-16 LiDAR
+# Vehicle: Ackermann steering with shared real-sensor configuration
 # TF: map → base_link (static bootstrap until localization ready)
 #     base_link → hesai_lidar (static, LiDAR mounting position)
 
@@ -10,7 +10,7 @@ neupan_node:
 
     # Robot identification
     robot_type: 'real_vehicle'
-    robot_description: 'Real Ackermann vehicle (0.97m wheelbase, Hesai PandarXT-16)'
+    robot_description: 'Real Ackermann vehicle (shared vehicle and sensor config)'
 
     # Configuration file paths (relative to robot directory)
     planner_config_file: 'planner.yaml'
@@ -19,11 +19,11 @@ neupan_node:
     # ---- TF Frame Configuration -------------------------------------
     map_frame: 'map'
     base_frame: 'base_link'
-    lidar_frame: 'base_link'                # pcl_to_scan outputs scan in base_link frame
+    # lidar_frame is injected from the shared sensor configuration.
 
     # ---- Topic Configuration ----------------------------------------
     cmd_vel_topic: '/cmd_vel'               # Direct to motion_control bridge_node
-    scan_topic: '/scan'                     # From pointcloud_to_laserscan
+    # scan_topic is injected from the shared sensor configuration.
     plan_input_topic: '/plan'               # From hybrid_astar_planner
     goal_topic: '/goal_pose'                # Nav2 goal (optional)
     plan_output_topic: '/neupan_plan'       # Optimized trajectory (visualization)
@@ -41,13 +41,8 @@ neupan_node:
     marker_size: 0.05
     marker_z: 0.5
 
-    # ---- Laser Scan Processing --------------------------------------
-    # Hesai PandarXT-16: 360° horizontal, 0.3-30m range
-    scan_angle_max: 3.14                    # 180° (half-circle — other half reversed)
-    scan_angle_min: -3.14                   # -180°
-    scan_downsample: 2                      # Every 2nd ray (720 → ~360 points)
-    scan_range_max: 30.0                    # Conservative max range
-    scan_range_min: 0.3                     # Filter out vehicle body self-returns
+    # Laser scan frame/topic/filtering parameters are injected from
+    # vehicle_config/config/real_vehicle.yaml.
 
     # ---- Path Planning ----------------------------------------------
     flip_angle: false

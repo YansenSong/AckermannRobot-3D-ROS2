@@ -17,12 +17,19 @@ from typing import Optional, Tuple, Dict, Any, List
 import numpy as np
 import numpy.typing as npt
 import rclpy
+import yaml
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from ament_index_python.packages import get_package_share_directory
 import tf2_ros
+from vehicle_config import (
+    load_real_vehicle_config,
+    neupan_ipath_parameters,
+    neupan_robot_parameters,
+    neupan_scan_parameters,
+)
 
 from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Path
@@ -131,6 +138,11 @@ class NeupanCore(Node):
             self.get_parameter("robot_description")
             .get_parameter_value().string_value
         )
+        vehicle_config = None
+        shared_scan = None
+        if robot_type == 'real_vehicle':
+            vehicle_config = load_real_vehicle_config()
+            shared_scan = neupan_scan_parameters(vehicle_config)
 
         self.get_logger().info(f"Loading robot configuration: {robot_type}")
         self.get_logger().info(f"Description: {robot_description}")
@@ -166,24 +178,31 @@ class NeupanCore(Node):
         # Load other parameters
         self.map_frame = self.get_parameter("map_frame").get_parameter_value().string_value
         self.base_frame = self.get_parameter("base_frame").get_parameter_value().string_value
-        self.lidar_frame = self.get_parameter("lidar_frame").get_parameter_value().string_value
+        self.lidar_frame = (
+            shared_scan['lidar_frame'] if shared_scan else
+            self.get_parameter("lidar_frame").get_parameter_value().string_value
+        )
         self.marker_size = self.get_parameter("marker_size").get_parameter_value().double_value
         self.marker_z = self.get_parameter("marker_z").get_parameter_value().double_value
 
-        self.scan_range = np.array([
-            self.get_parameter("scan_range_min").get_parameter_value().double_value,
-            self.get_parameter("scan_range_max").get_parameter_value().double_value
-        ])
-
-        self.scan_angle_range = np.array([
-            self.get_parameter("scan_angle_min").get_parameter_value().double_value,
-            self.get_parameter("scan_angle_max").get_parameter_value().double_value
-        ])
-
-        self.scan_downsample = (
-            self.get_parameter("scan_downsample")
-            .get_parameter_value().integer_value
-        )
+        if shared_scan:
+            self.scan_range = np.array([
+                shared_scan['scan_range_min'], shared_scan['scan_range_max']])
+            self.scan_angle_range = np.array([
+                shared_scan['scan_angle_min'], shared_scan['scan_angle_max']])
+            self.scan_downsample = shared_scan['scan_downsample']
+            self.scan_topic = shared_scan['scan_topic']
+        else:
+            self.scan_range = np.array([
+                self.get_parameter("scan_range_min").value,
+                self.get_parameter("scan_range_max").value,
+            ])
+            self.scan_angle_range = np.array([
+                self.get_parameter("scan_angle_min").value,
+                self.get_parameter("scan_angle_max").value,
+            ])
+            self.scan_downsample = self.get_parameter("scan_downsample").value
+            self.scan_topic = self.get_parameter("scan_topic").value
 
         self.refresh_initial_path = (
             self.get_parameter("refresh_initial_path")
@@ -224,8 +243,30 @@ class NeupanCore(Node):
                 "Please set the parameter 'config_file'"
             )
 
-        pan = {'dune_checkpoint': self.dune_checkpoint}
-        self.neupan_planner = neupan.init_from_yaml(self.planner_config_file, pan=pan)
+        # Merge algorithm-specific planner tuning with the shared vehicle source.
+        # Passing these sections explicitly prevents geometry copies from drifting
+        # across planner and controller packages.
+        with open(self.planner_config_file, 'r', encoding='utf-8') as stream:
+            planner_config = yaml.safe_load(stream) or {}
+
+        robot_config = dict(planner_config.get('robot', {}))
+        ipath_config = dict(planner_config.get('ipath', {}))
+        if vehicle_config:
+            robot_config.update(neupan_robot_parameters(vehicle_config))
+            ipath_config.update(neupan_ipath_parameters(vehicle_config))
+        pan_config = dict(planner_config.get('pan', {}))
+        pan_config['dune_checkpoint'] = self.dune_checkpoint
+
+        if vehicle_config:
+            self.get_logger().info(
+                f"Shared vehicle config: {vehicle_config['_config_file']}"
+            )
+        self.neupan_planner = neupan.init_from_yaml(
+            self.planner_config_file,
+            robot=robot_config,
+            ipath=ipath_config,
+            pan=pan_config,
+        )
 
         # Log robot dimensions for verification
         self.get_logger().info(
@@ -302,7 +343,7 @@ class NeupanCore(Node):
         scan_qos_profile = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.BEST_EFFORT)
         self.create_subscription(
             LaserScan,
-            self.get_parameter("scan_topic").get_parameter_value().string_value,
+            self.scan_topic,
             self.scan_callback,
             scan_qos_profile,
             callback_group=self.callback_group

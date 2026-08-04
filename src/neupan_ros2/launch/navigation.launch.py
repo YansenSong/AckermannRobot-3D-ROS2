@@ -32,6 +32,13 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Opaq
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+from vehicle_config import (
+    hybrid_astar_parameters,
+    lidar_transform,
+    load_real_vehicle_config,
+    materialize_lidar_driver_config,
+    pointcloud_to_laserscan_parameters,
+)
 
 
 def launch_setup(context):
@@ -59,6 +66,12 @@ def launch_setup(context):
 
     pkg_neupan = get_package_share_directory('neupan_ros2')
     pkg_hybrid = get_package_share_directory('hybrid_astar_planner')
+    pkg_lidar = get_package_share_directory('lidar_driver')
+    vehicle = load_real_vehicle_config()
+    lidar = vehicle['sensors']['lidar']
+    lidar_mount = lidar_transform(vehicle)
+    lidar_driver_config = materialize_lidar_driver_config(
+        vehicle, os.path.join(pkg_lidar, 'config', 'config.yaml'))
 
     # ---- 1. Hesai LiDAR driver (node only, no rviz2) ----
     lidar_node = Node(
@@ -66,6 +79,24 @@ def launch_setup(context):
         executable='lidar_driver_node',
         name='lidar_driver',
         output='screen',
+        parameters=[{'config_path': lidar_driver_config}],
+    )
+
+    static_tf_base_to_lidar = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tf_base_to_lidar',
+        arguments=[
+            '--x', str(lidar_mount['x']),
+            '--y', str(lidar_mount['y']),
+            '--z', str(lidar_mount['z']),
+            '--yaw', str(lidar_mount['yaw']),
+            '--pitch', str(lidar_mount['pitch']),
+            '--roll', str(lidar_mount['roll']),
+            '--frame-id', lidar['frames']['scan_target'],
+            '--child-frame-id', lidar['frames']['sensor'],
+        ],
+        parameters=[{'use_sim_time': False}],
     )
 
     # ---- 2. PointCloud2 → LaserScan ----
@@ -74,12 +105,15 @@ def launch_setup(context):
         executable='pointcloud_to_laserscan_node',
         name='pointcloud_to_laserscan',
         output='screen',
-        parameters=[os.path.join(
-            pkg_neupan, 'config', 'robots', 'real_vehicle', 'pcl_to_scan.yaml'
-        )],
+        parameters=[
+            os.path.join(
+                pkg_neupan, 'config', 'robots', 'real_vehicle',
+                'pcl_to_scan.yaml'),
+            pointcloud_to_laserscan_parameters(vehicle),
+        ],
         remappings=[
-            ('cloud_in', '/lidar_points'),
-            ('scan', '/scan'),
+            ('cloud_in', lidar['topics']['points']),
+            ('scan', lidar['topics']['scan']),
         ],
     )
 
@@ -91,7 +125,7 @@ def launch_setup(context):
         output='screen',
         parameters=[os.path.join(
             pkg_hybrid, 'config', 'planner_params_real.yaml'
-        ), {
+        ), hybrid_astar_parameters(vehicle), {
             'use_sim_time': False,
             'map_path': map_pgm,
             'resolution': resolution,
@@ -110,6 +144,7 @@ def launch_setup(context):
 
     return [
         lidar_node,
+        static_tf_base_to_lidar,
         pcl_to_scan,
         hybrid_planner,
         bridge_launch,

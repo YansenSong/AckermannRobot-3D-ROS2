@@ -8,7 +8,7 @@ This directory contains the real-vehicle robot configuration for NeuPAN.
 robots/
 ├── real_vehicle/            # Real ackermann vehicle deployment
 │   ├── robot.yaml           # ROS node parameters (TF, topics, scan)
-│   ├── planner.yaml         # NeuPAN planner configuration (MPC, geometry, tuning)
+│   ├── planner.yaml         # NeuPAN planner configuration (MPC and tuning)
 │   ├── pcl_to_scan.yaml     # pointcloud_to_laserscan node config
 │   └── models/
 │       └── dune_model_5000.pth  (place trained model here)
@@ -23,15 +23,17 @@ robots/
 
 ## Real Vehicle
 
+Physical dimensions, kinematic limits, and the LiDAR mounting transform come
+from `vehicle_config/config/real_vehicle.yaml`. Edit that file only when the
+real vehicle changes.
+
 | Property | Value |
 |----------|-------|
 | Kinematics | Ackermann |
-| Dimensions (L×W) | 0.70m × 0.52m |
-| Wheelbase | 0.97m |
-| Max steering | 30° (0.524 rad) |
-| Min turning radius | 1.68m |
-| Max speed | 2.0 m/s forward, -0.5 m/s reverse |
-| LiDAR | Hesai PandarXT-16 (16-line 3D) |
+| Dimensions / wheelbase / wheel radius | Shared `vehicle_config` |
+| Steering and speed limits | Shared `vehicle_config` |
+| Min turning radius | Derived from wheelbase and steering limit |
+| LiDAR model/network/scan parameters | Shared `vehicle_config` |
 | Control | STM32 via UDP (192.168.1.50:5000) |
 
 ## Launch
@@ -59,8 +61,10 @@ ROS integration parameters for the `neupan_node`:
 ### planner.yaml
 
 NeuPAN planner parameters:
-- `wheelbase: 0.97` — must match bridge_params.yaml exactly
-- `min_radius: 1.68` — wheelbase / tan(30°)
+- Geometry and speed limits are injected from the shared vehicle config
+- `min_radius` is calculated as `wheelbase / tan(max_steer_deg)`
+- Wheel radius is physical metadata only; the current bridge sends
+  linear speed in m/s and does not perform wheel encoder/RPM conversion
 - Collision and acceleration parameters set conservatively for real vehicle safety
 - Tuning weights (`adjust` section) are a starting point — adjust per `docs/neupan_tuning.md`
 
@@ -76,7 +80,7 @@ Configuration for `pointcloud_to_laserscan` node:
 ### DUNE Model
 
 The DUNE neural network model must be placed in `real_vehicle/models/dune_model_5000.pth`.
-The model must be trained for the geometry in `planner.yaml` (0.97m wheelbase, ackermann kinematics).
+The model must be trained for the geometry in the shared vehicle configuration.
 
 ### Localization
 
@@ -95,7 +99,7 @@ Remove the static TF publisher once localization is operational.
 
 ```
 NeuPAN → /cmd_vel (Twist)
-  → bridge_node (Ackermann conversion, δ = atan2(ω×0.97, |v|+ε))
+  → bridge_node (Ackermann conversion, δ = atan2(ω×wheelbase, |v|+ε))
   → 26-byte UDP frame → STM32 (192.168.1.50:5000)
   → CAN → RT49 drive + EPS steering + SEB brake
 ```
@@ -114,7 +118,7 @@ STM32 has independent 500ms timeout.
 ### Model loading error
 - Verify `models/dune_model_5000.pth` exists
 - Check it's a valid PyTorch checkpoint
-- Ensure it was trained for 0.97m wheelbase geometry
+- Ensure it was trained for the geometry in `vehicle_config/config/real_vehicle.yaml`
 
 ### No /scan output
 - Verify LiDAR is running: `ros2 topic echo /lidar_points --once`

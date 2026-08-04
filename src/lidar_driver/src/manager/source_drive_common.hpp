@@ -17,9 +17,9 @@ public:
         YamlRead<int>(        driver_config, "source_type",             source_type, 0);
         driver_param.input_param.source_type = SourceType(source_type);
         if (source_type == 1) {
-            YamlRead<std::string>(driver_config["lidar_udp_type"], "device_ip_address",       driver_param.input_param.device_ip_address, "192.168.1.201");
-            YamlRead<uint16_t>(   driver_config["lidar_udp_type"], "udp_port",                driver_param.input_param.udp_port, 2368);
-            YamlRead<uint16_t>(   driver_config["lidar_udp_type"], "ptc_port",                driver_param.input_param.ptc_port, 9347);
+            YamlRead<std::string>(driver_config["lidar_udp_type"], "device_ip_address",       driver_param.input_param.device_ip_address, "");
+            YamlRead<uint16_t>(   driver_config["lidar_udp_type"], "udp_port",                driver_param.input_param.udp_port, 0);
+            YamlRead<uint16_t>(   driver_config["lidar_udp_type"], "ptc_port",                driver_param.input_param.ptc_port, 0);
             YamlRead<std::string>(driver_config["lidar_udp_type"], "multicast_ip_address",    driver_param.input_param.multicast_ip_address, "");
             YamlRead<bool>(       driver_config["lidar_udp_type"], "use_ptc_connected",       driver_param.input_param.use_ptc_connected, true);
             YamlRead<uint16_t>(   driver_config["lidar_udp_type"], "host_ptc_port",           driver_param.input_param.host_ptc_port, 0);
