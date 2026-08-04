@@ -29,7 +29,6 @@ find_package(builtin_interfaces REQUIRED)
 find_package(ompl REQUIRED)
 find_package(Eigen3 3.3 REQUIRED)
 find_package(Ceres REQUIRED)
-
 # ---- 包含路径 ----
 # core/          — 核心算法模板 (a_star.hpp, node_se2.hpp, ...)
 # footprint-collision-checker/ — git submodule (header-only)
@@ -59,8 +58,10 @@ ament_target_dependencies(hybrid_astar_planner_node
   builtin_interfaces
 )
 
+target_include_directories(hybrid_astar_planner_node PRIVATE ${OMPL_INCLUDE_DIRS})
+
 target_link_libraries(hybrid_astar_planner_node
-  ompl::ompl
+  ${OMPL_LIBRARIES}
   Eigen3::Eigen
   ceres
 )

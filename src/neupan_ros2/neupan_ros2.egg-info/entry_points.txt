@@ -1,0 +1,2 @@
+[console_scripts]
+neupan_node = neupan_ros2.neupan_node:main

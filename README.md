@@ -52,9 +52,16 @@ sudo apt update && sudo apt install -y \
 **NeuPAN 额外依赖** (conda 环境):
 
 ```bash
+# 1. 克隆并安装 NeuPAN 核心包（神经网络 MPC 规划器）
+git clone https://github.com/hanruihua/NeuPAN ~/NeuPAN
 conda create -n neupan python=3.10
 conda activate neupan
-pip install torch numpy
+pip install -e ~/NeuPAN
+
+# 2. 编译 neupan_ros2 ROS 2 桥接包
+cd ~/AckermannRobot-3D-ROS2
+colcon build --symlink-install --packages-select neupan_ros2
+source install/setup.bash
 ```
 
 ### 编译
