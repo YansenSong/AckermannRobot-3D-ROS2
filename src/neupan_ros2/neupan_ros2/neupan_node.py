@@ -818,8 +818,8 @@ class NeupanCore(Node):
         """Generate ROS Twist message from velocity command.
 
         Args:
-            vel: Velocity array (2, 1)
-                 containing [linear_speed, angular_speed], or None
+            vel: Velocity array (2, 1) containing
+                 [linear_speed_mps, front_steering_angle_rad], or None
             stop: Whether the robot should stop (collision risk)
             arrive: Whether the robot has arrived at goal
 

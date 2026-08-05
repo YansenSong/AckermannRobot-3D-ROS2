@@ -109,7 +109,6 @@ def bridge_parameters(config):
     """Map shared vehicle fields to motion_control ROS parameters."""
     vehicle = config['vehicle']
     return {
-        'wheelbase': vehicle['wheelbase'],
         'max_speed': vehicle['max_forward_speed'],
         'max_reverse_speed': vehicle['max_reverse_speed'],
         'max_steer_deg': vehicle['max_steer_deg'],

@@ -18,4 +18,5 @@ setup(
     maintainer_email='user@example.com',
     description='Single source of truth for real Ackermann vehicle parameters',
     license='Apache-2.0',
+    tests_require=['pytest'],
 )

@@ -31,7 +31,10 @@ def test_real_vehicle_parameter_mappings():
     assert math.isclose(
         neupan['max_speed'][1], math.radians(vehicle['max_steer_deg']))
 
-    assert bridge_parameters(config)['wheelbase'] == vehicle['wheelbase']
+    bridge = bridge_parameters(config)
+    assert bridge['max_speed'] == vehicle['max_forward_speed']
+    assert bridge['max_reverse_speed'] == vehicle['max_reverse_speed']
+    assert bridge['max_steer_deg'] == vehicle['max_steer_deg']
     assert hybrid_astar_parameters(config)['vehicle_width'] == vehicle['width']
     assert math.isclose(
         minimum_turning_radius(config),

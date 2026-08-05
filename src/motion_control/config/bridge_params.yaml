@@ -21,8 +21,6 @@
     enable_mask: 7
 
     # --- Control timing ---
-    # Speed dead zone: |v| below this → steering commanded to 0
-    speed_deadzone: 0.01
     # Frame publish rate (Hz), matches STM32 20ms control period
     publish_rate: 20.0
     # Seconds without cmd_vel before sending zero-velocity safety frame
