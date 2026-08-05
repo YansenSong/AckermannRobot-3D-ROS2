@@ -2,13 +2,14 @@
 #
 # 车体尺寸、运动学限制和传感器安装位姿只在此处修改。
 # NeuPAN、Hybrid A* 和 motion_control 会在启动时自动读取并注入这些参数。
+# 坐标约定：base_link 原点位于后轴中心，X 轴向前、Y 轴向左、Z 轴向上。
 
 vehicle:
-  length: 1.40                 # 车辆总长，从前端到后端（m）
+  length: 1.34                 # 车辆总长，从前端到后端（m）
   width: 0.91                  # 车辆总宽（m）
   wheelbase: 0.97              # 前后轴中心距离（m）
   wheel_radius: 0.205          # 轮子实际半径（m）
-  rear_axle_offset_x: -0.25    # 后轴相对车体几何中心的 X 向偏移（m），待实车测量
+  rear_axle_offset_x: 0.0      # 后轴中心相对 base_link 的 X 向偏移（m）；两者重合
 
   max_steer_deg: 30.0          # 单侧最大转向角（度）
   max_forward_speed: 2.0       # 最大前进指令速度（m/s）
@@ -49,7 +50,7 @@ sensors:
       # 以下是二维扫描处理初值，并非全部来自雷达铭牌；实车采样后需要标定。
       angle_min: -3.14159                    # 暂按 360° 水平视场设置（rad）
       angle_max: 3.14159                     # 暂按 360° 水平视场设置（rad）
-      angle_increment: 0.0087                # 输出栅格约 0.5°，待按点云密度确认
+      angle_increment: 0.00314                # 输出栅格约 0.5°，待按点云密度确认
       scan_time: 0.1                         # 对应 10 Hz 帧率；修改帧率时同步修改
       range_min: 0.3                         # 近距过滤阈值，待根据车体自反射标定
       range_max: 30.0                        # 算法处理上限，待根据场景标定

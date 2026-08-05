@@ -21,7 +21,8 @@
 
     # Export settings
     savePCD: false                               # https://github.com/TixiaoShan/LIO-SAM/issues/3
-    savePCDDirectory: "/home/young/AckermannRobot-3D/src/maps/"
+    # LIO-SAM 运行时会在前面拼接 $HOME，避免写死具体用户名。
+    savePCDDirectory: "/AckermannRobot-3D/src/maps/"
 
     # Sensor Settings
     sensor: velodyne                             # lidar sensor type, either 'velodyne', 'ouster' or 'livox'

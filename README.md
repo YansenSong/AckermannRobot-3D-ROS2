@@ -33,7 +33,7 @@ Hybrid A* 和 NeuPAN。不要再在各功能包中重复定义这些值。IMU �
 ## 编译
 
 ```bash
-cd /home/young/AckermannRobot-3D
+cd ~/AckermannRobot-3D
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
