@@ -50,6 +50,23 @@ bash scripts/start_vehicle.sh lidar
 # 仅运控桥
 bash scripts/start_vehicle.sh bridge
 
+    # 直行 0.2 m/s（推荐从低速起步）
+    ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}, 
+    angular: {z: 0.0}}"
+
+    # 左转 ~17°（0.3 弧度）
+    ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, 
+    angular: {z: 0.3}}"
+
+    # 右转
+    ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, 
+    angular: {z: -0.3}}"
+
+    # 停车（Ctrl+C 停掉 pub 即可，0.5s 无指令自动发零速帧；或显式发零）
+    ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, 
+    angular: {z: 0.0}}"
+
+
 # 雷达、运控桥和 RViz
 bash scripts/start_vehicle.sh all
 

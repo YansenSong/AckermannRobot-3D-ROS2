@@ -14,7 +14,7 @@ Protocol: Chapter 3 of 普通车运控项目通信协议说明_V1.0
   - Header "cmd__" (5 bytes)
   - Version, Mode, Flags, EnableMask
   - V_RAW (int32 BE): target speed m/s × 10000
-  - EPS_RAW (int32 BE): steering angle (degrees) × 10000
+  - EPS_RAW (int32 BE): steering angle in 0.1° units × 10000
   - SEB_MODE, SEB_VALUE, Light, Counter
   - Checksum: uint32 BE sum of bytes 0-21
 
@@ -42,7 +42,8 @@ class VehicleBridgeNode(Node):
     VERSION = 0x01     # byte 5
     MODE_AUTO = 0x01   # byte 6
     SPEED_SCALE = 10000       # v(m/s) → v_raw
-    EPS_SCALE = 10000         # steering angle (degrees) → protocol raw
+    EPS_SCALE = 10000         # EPS raw (0.1° units) × 10000 → protocol field
+    EPS_DEG_PER_RAW = 0.1     # degrees per EPS raw unit (matches uart_vehicle_bridge)
     FRAME_LENGTH = 26
     CHECKSUM_OFFSET = 22      # checksum covers bytes 0-21
     SHUTDOWN_STOP_FRAME_COUNT = 3
@@ -237,7 +238,11 @@ class VehicleBridgeNode(Node):
         """
         Convert a front-wheel steering angle in radians to protocol EPS raw.
 
-        Protocol: EPS raw = steering angle (degrees) × 10000.
+        Protocol: EPS raw = steering angle in units of 0.1° (deg / 0.1);
+        _build_frame then scales by EPS_SCALE (× 10000), so the wire field
+        equals angle_deg × 100000. This matches the empirically verified
+        uart_vehicle_bridge; the protocol doc's "degrees × 10000" alone does
+        not match the STM32 firmware.
         """
         steer_deg = math.degrees(steer_rad)
 
@@ -247,7 +252,7 @@ class VehicleBridgeNode(Node):
             min(self._max_steer_deg, steer_deg),
         )
 
-        return int(round(steer_deg * self.EPS_SCALE))
+        return int(round(steer_deg / self.EPS_DEG_PER_RAW))
 
     # ------------------------------------------------------------------
     # Frame builder
@@ -265,7 +270,7 @@ class VehicleBridgeNode(Node):
             7       Flags       0x00
             8       EnableMask  bit0=RT49, bit1=EPS, bit2=SEB
             9-12    V_RAW       int32: v(m/s) × 10000
-            13-16   EPS_RAW     int32: steering angle (degrees) × 10000
+            13-16   EPS_RAW     int32: steering angle(°) / 0.1° × 10000
             17      SEB_MODE    0 (no brake control)
             18-19   SEB_VALUE   int16: 0
             20      Light       0
@@ -273,6 +278,7 @@ class VehicleBridgeNode(Node):
             22-25   Checksum    uint32: sum of bytes 0-21
         """
         v_raw = int(round(v * self.SPEED_SCALE))
+        eps_raw_scaled = int(round(eps_raw * self.EPS_SCALE))
         # Pack payload bytes (bytes 0-21)
         payload = struct.pack(
             '>5sBBBBi i B h B B',
@@ -282,7 +288,7 @@ class VehicleBridgeNode(Node):
             0x00,                                  # 7:   flags
             self._enable_mask & 0x07,             # 8:   enable_mask
             v_raw,                                 # 9-12: V_RAW (int32 BE)
-            eps_raw,                               # 13-16: EPS_RAW (int32 BE)
+            eps_raw_scaled,                        # 13-16: EPS_RAW (int32 BE)
             0x00,                                  # 17: SEB_MODE
             0,                                # 18-19: SEB_VALUE (int16 BE)
             0x00,                                  # 20: Light

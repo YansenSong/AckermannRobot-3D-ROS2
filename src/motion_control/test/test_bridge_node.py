@@ -27,24 +27,28 @@ def unpack_control_fields(frame):
 def test_steering_angle_uses_protocol_degree_scale():
     bridge = make_bridge()
 
-    assert bridge._compute_eps_raw(math.radians(30.0)) == 300_000
-    assert bridge._compute_eps_raw(math.radians(-30.0)) == -300_000
-    assert bridge._compute_eps_raw(math.radians(45.0)) == 300_000
+    # EPS raw is in 0.1° units; _build_frame scales ×10000 → field = deg × 100000.
+    # 30° → 300 (0.1° units); 45° clamps to 30° → 300.
+    assert bridge._compute_eps_raw(math.radians(30.0)) == 300
+    assert bridge._compute_eps_raw(math.radians(-30.0)) == -300
+    assert bridge._compute_eps_raw(math.radians(45.0)) == 300
 
 
-def test_frame_matches_documented_joint_control_example():
+def test_frame_matches_reference_steering_scale():
+    """30° must produce EPS field 3,000,000 (0x2DC6C0), matching the
+    empirically-verified uart_vehicle_bridge — not the doc's 300,000."""
     bridge = make_bridge(enable_mask=3, counter=1)
     eps_raw = bridge._compute_eps_raw(math.radians(30.0))
 
     frame = bridge._build_frame(0.2, eps_raw)
 
     expected = bytes.fromhex(
-        '63 6D 64 5F 5F 01 01 00 03 00 00 07 D0 00 04 93 E0 '
-        '00 00 00 00 01 00 00 04 46'
+        '63 6D 64 5F 5F 01 01 00 03 00 00 07 D0 00 2D C6 C0 '
+        '00 00 00 00 01 00 00 04 82'
     )
     assert frame == expected
     assert len(frame) == VehicleBridgeNode.FRAME_LENGTH
-    assert unpack_control_fields(frame) == (2_000, 300_000)
+    assert unpack_control_fields(frame) == (2_000, 3_000_000)
 
 
 def test_non_finite_command_is_replaced_with_stop():
