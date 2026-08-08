@@ -54,8 +54,16 @@ def test_real_sensor_parameter_mappings():
     assert neupan['scan_range_max'] == scan['range_max']
     assert pointcloud['target_frame'] == lidar['frames']['scan_target']
     assert pointcloud['angle_increment'] == scan['angle_increment']
-    assert config['sensors']['imu']['installed'] is False
-    assert config['sensors']['imu']['parameters'] == {}
+    imu = config['sensors']['imu']
+    assert imu['installed'] is True
+    assert imu['model'] == 'LPMS-IG1-RS485'
+    assert imu['frame_id'] == 'imu'
+    assert imu['topic'] == '/imu/data'
+    assert imu['mount']['x'] is None
+    assert imu['mount']['y'] is None
+    assert imu['mount']['z'] is None
+    assert imu['parameters']['baudrate'] == 115200
+    assert imu['parameters']['port'] == '/dev/ttyUSB0'
 
     base_config = WORKSPACE / 'src/lidar_driver/config/config.yaml'
     generated_path = materialize_lidar_driver_config(config, str(base_config))

@@ -59,10 +59,10 @@ sensors:
       max_height: 1.0                        # 相对 base_link 的切片上限，待实车标定
 
   imu:
-    installed: false                         # IMU 尚未安装
-    model: null                              # 型号待确认
-    frame_id: null                           # 坐标系待确认
-    topic: null                              # 话题待确认
+    installed: true                          # LPMS-IG1-RS485 已装车并标定
+    model: LPMS-IG1-RS485                    # 型号
+    frame_id: imu                            # 坐标系（驱动节点默认）
+    topic: /imu/data                         # 驱动节点发布（已加 imu/ 前缀）
     mount:                                   # 安装位姿待实车测量
       x: null
       y: null
@@ -70,4 +70,9 @@ sensors:
       roll: null
       pitch: null
       yaw: null
-    parameters: {}                           # 采样率、噪声和零偏等参数待确认
+    parameters:
+      rate: 167                              # 实测 ~167 Hz
+      baudrate: 115200                       # RS485 波特率
+      port: /dev/ttyUSB0                     # USB 转串口设备
+      rs485_control_pin: -1                  # USB 转串口自动方向，无需 GPIO
+      gyro_bias_calibrated: true             # 已做陀螺仪零偏标定
