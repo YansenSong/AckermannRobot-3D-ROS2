@@ -28,8 +28,8 @@ int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     auto n = std::make_shared<rclcpp::Node>("quat_to_euler_node");
-    rpy_publisher = n->create_publisher<geometry_msgs::msg::Vector3>("rpy_angles", 1000);
-    auto quat_subscriber = n->create_subscription<sensor_msgs::msg::Imu>("data", 1000, std::bind(&MsgCallback, _1));
+    rpy_publisher = n->create_publisher<geometry_msgs::msg::Vector3>("imu/rpy_angles", 1000);
+    auto quat_subscriber = n->create_subscription<sensor_msgs::msg::Imu>("imu/data", 1000, std::bind(&MsgCallback, _1));
 
     RCLCPP_INFO(n->get_logger(), "waiting for imu data");
     rclcpp::spin(n);

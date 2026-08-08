@@ -77,23 +77,23 @@ public:
         RCLCPP_INFO(this->get_logger(), "Baudrate: %d", baudrate);
         RCLCPP_INFO(this->get_logger(), "Auto reconnect: %s", autoReconnect? "Enabled":"Disabled");
         
-        imu_pub = this->create_publisher<sensor_msgs::msg::Imu>("data",1);
-        autocalibration_status_pub = this->create_publisher<std_msgs::msg::Bool>("is_autocalibration_active",1);
+        imu_pub = this->create_publisher<sensor_msgs::msg::Imu>("imu/data",1);
+        autocalibration_status_pub = this->create_publisher<std_msgs::msg::Bool>("imu/is_autocalibration_active",1);
 
         autocalibration_serv = this->create_service<std_srvs::srv::SetBool>(
-                "enable_gyro_autocalibration",std::bind(&LpBE1Proxy::setAutocalibration, this,std::placeholders::_1, std::placeholders::_2));
+                "imu/enable_gyro_autocalibration",std::bind(&LpBE1Proxy::setAutocalibration, this,std::placeholders::_1, std::placeholders::_2));
         autoReconnect_serv = this->create_service<std_srvs::srv::SetBool>(
-                "enable_auto_reconnect",std::bind(&LpBE1Proxy::setAutoReconnect, this, std::placeholders::_1, std::placeholders::_2));
+                "imu/enable_auto_reconnect",std::bind(&LpBE1Proxy::setAutoReconnect, this, std::placeholders::_1, std::placeholders::_2));
         gyrocalibration_serv = this->create_service<std_srvs::srv::Trigger>(
-                "calibrate_gyroscope",std::bind(&LpBE1Proxy::calibrateGyroscope, this, std::placeholders::_1, std::placeholders::_2));
+                "imu/calibrate_gyroscope",std::bind(&LpBE1Proxy::calibrateGyroscope, this, std::placeholders::_1, std::placeholders::_2));
         resetHeading_serv = this->create_service<std_srvs::srv::Trigger>(
-                "reset_heading",std::bind(&LpBE1Proxy::resetHeading, this, std::placeholders::_1, std::placeholders::_2));
+                "imu/reset_heading",std::bind(&LpBE1Proxy::resetHeading, this, std::placeholders::_1, std::placeholders::_2));
         getImuData_serv = this->create_service<std_srvs::srv::Trigger>(
-                "get_imu_data",std::bind(&LpBE1Proxy::getImuData, this, std::placeholders::_1, std::placeholders::_2));
+                "imu/get_imu_data",std::bind(&LpBE1Proxy::getImuData, this, std::placeholders::_1, std::placeholders::_2));
         setStreamingMode_serv = this->create_service<std_srvs::srv::Trigger>(
-                "set_streaming_mode",std::bind(&LpBE1Proxy::setStreamingMode, this, std::placeholders::_1, std::placeholders::_2));
+                "imu/set_streaming_mode",std::bind(&LpBE1Proxy::setStreamingMode, this, std::placeholders::_1, std::placeholders::_2));
         setCommandMode_serv = this->create_service<std_srvs::srv::Trigger>(
-                "set_command_mode",std::bind(&LpBE1Proxy::setCommandMode, this, std::placeholders::_1, std::placeholders::_2));
+                "imu/set_command_mode",std::bind(&LpBE1Proxy::setCommandMode, this, std::placeholders::_1, std::placeholders::_2));
         
         // Connects to sensor
         if (!sensor1->connect(comportNo, baudrate))

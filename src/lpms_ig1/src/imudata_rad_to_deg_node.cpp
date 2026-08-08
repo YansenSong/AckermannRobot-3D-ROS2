@@ -37,9 +37,9 @@ int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     auto n = std::make_shared<rclcpp::Node>("imudata_rad_to_deg_node");
-    angular_vel_deg_publisher = n->create_publisher<geometry_msgs::msg::Vector3>("angular_vel_deg", 1000);
-    rpy_deg_publisher = n->create_publisher<geometry_msgs::msg::Vector3>("rpy_deg", 1000);
-    auto quat_subscriber = n->create_subscription<sensor_msgs::msg::Imu>("data", 1000, std::bind(&MsgCallback, _1));
+    angular_vel_deg_publisher = n->create_publisher<geometry_msgs::msg::Vector3>("imu/angular_vel_deg", 1000);
+    rpy_deg_publisher = n->create_publisher<geometry_msgs::msg::Vector3>("imu/rpy_deg", 1000);
+    auto quat_subscriber = n->create_subscription<sensor_msgs::msg::Imu>("imu/data", 1000, std::bind(&MsgCallback, _1));
 
     RCLCPP_INFO(n->get_logger(), "waiting for imu data");
     rclcpp::spin(n);
