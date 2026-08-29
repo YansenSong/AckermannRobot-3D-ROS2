@@ -12,7 +12,9 @@
     motion_model: "REEDS_SHEPP"         # 支持前进+倒车
 
     # ---- 车体尺寸 (相对后轴) ----
-    rear_axle_offset_x: -0.25           # 后轴在几何中心后方
+    robot_state_frame: rear_axle_link   # A* state/reference point
+    goal_pose_is_base_link: true        # RViz goal denotes the vehicle center
+    rear_axle_offset_x: -0.30449        # URDF rear axle x relative to base_link
     vehicle_length: 0.70                # 总长 (m)
     vehicle_width: 0.52                 # 总宽 (m)
 

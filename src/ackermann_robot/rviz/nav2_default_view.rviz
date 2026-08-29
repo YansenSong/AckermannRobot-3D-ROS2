@@ -100,6 +100,10 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        rear_axle_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
         right_front_wheel_link:
           Alpha: 1
           Show Axes: false
@@ -131,8 +135,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 0.04302051290869713
-        Min Value: -0.023169703781604767
+        Max Value: 0.05289030075073242
+        Min Value: -0.025035232305526733
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -298,12 +302,12 @@ Visualization Manager:
         Value: /neupan_plan
       Value: true
     - Class: rviz_default_plugins/Axes
-      Enabled: true
+      Enabled: false
       Length: 0.5
       Name: Axes
       Radius: 0.10000000149011612
       Reference Frame: base_link
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -347,7 +351,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: 0.0041992682963609695
+      Angle: -0.020800728350877762
       Class: rviz_default_plugins/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
@@ -357,11 +361,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 88.40936279296875
+      Scale: 493.213134765625
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
-      X: 1.2844520807266235
-      Y: -1.2624553442001343
+      X: 1.2024823427200317
+      Y: -1.0227640867233276
     Saved: ~
 Window Geometry:
   Displays:

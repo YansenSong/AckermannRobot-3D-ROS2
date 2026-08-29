@@ -31,6 +31,18 @@
         </collision>
     </link>
 
+    <!--
+        NeuPAN and Hybrid A* use the rear axle center as the Ackermann
+        bicycle-model reference point.  Keep base_link as the vehicle/odom
+        reference used by ros2_control and robot_localization.
+    -->
+    <link name="rear_axle_link"/>
+    <joint name="rear_axle_joint" type="fixed">
+        <origin xyz="-0.30449 0 0.045" rpy="0 0 0" />
+        <parent link="base_link" />
+        <child link="rear_axle_link" />
+    </joint>
+
     <!-- <joint name="base_joint" type="fixed">
         <parent link="base_footprint"/>
         <child link="base_link"/>

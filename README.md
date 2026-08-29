@@ -10,6 +10,7 @@ AckermannRobot-3D/
 ├── src/
 │   ├── ackermann_robot/  # 机器人模型、ros2_control、cmd_vel_mux
 │   ├── neupan_ros2/      # NeuPAN 神经网络局部规划器（conda 环境）
+│   ├── NeuPAN/           # NeuPAN 算法源码子模块（运行时优先使用）
 │   ├── hybrid_astar_planner/  # Hybrid A* 全局路径规划（独立节点，无 Nav2 依赖）
 │   ├── robot_slam/       # hdl_localization 3D NDT 定位 + 启动文件
 │   ├── LIO-SAM/          # 3D LiDAR-IMU SLAM 建图
@@ -76,7 +77,7 @@ source install/setup.bash
 ## 重要注意事项
 
 1. **里程计重映射：** ros2_control 原始里程计已重映射 `odom` → `odom_wheel`，EKF 融合后输出 `/odometry/filtered`。
-2. **控制接口：** `ackermann_steering_controller` 接收 `TwistStamped`，`cmd_vel_mux` 将 NeuPAN 的 `Twist` 转为 `TwistStamped`。
+2. **控制接口：** NeuPAN 输出 `[线速度 v, 前轮转角 ψ]`，`neupan_node` 先转换为车体角速度 `ω = v·tan(ψ)/wheelbase`，再由 `cmd_vel_mux` 转为控制器需要的 `TwistStamped`。
 3. **IMU 话题：** 统一使用 `/imu/data`。
 4. **/scan：** 由 `pointcloud_to_laserscan` 将 3D LiDAR (`/points_raw`) 转成 2D LaserScan，供 NeuPAN 避障。
 5. **LIO-SAM 点云：** Gazebo 原始点云发布到 `/points_raw`，`gazebo_lidar_adapter` 为其补充 `ring/time` 字段并发布 `/points_lio`，LIO-SAM 使用 `/points_lio`。
@@ -155,6 +156,10 @@ src/gazebo_worlds/worlds/mini/maps/map.pgm
 
 使用 **hdl_localization** (3D NDT) 定位 + **Hybrid A\*** 全局规划 + **NeuPAN** 局部规划。
 
+Ackermann 状态参考点统一为后轴中心 `rear_axle_link`；`base_link` 仍由 EKF 和 ros2_control 用作车体/里程计坐标。
+
+NeuPAN 仿真和实车调参、启动及故障判断见 [`docs/neupan_tuning.md`](docs/neupan_tuning.md)。
+
 ### hdl + NeuPAN
 
 ```bash
@@ -197,13 +202,15 @@ GlobalMap.pcd → hdl_localization → map→odom TF
 ### TF 树
 
 ```
-map ←(hdl NDT)← odom ←(EKF)← base_link ←(URDF)← laser_link
+map ←(hdl NDT)← odom ←(EKF)← base_link ←(URDF)← rear_axle_link
+                                      └──────→ laser_link
 ```
 
 | TF | 发布者 | 来源 |
 |----|--------|------|
 | `map→odom` | hdl_localization | NDT 3D 点云匹配 |
 | `odom→base_link` | EKF (`robot_localization`) | `/odom_wheel` + `/imu/data` 融合 |
+| `base_link→rear_axle_link` | `robot_state_publisher` | URDF 固定后轴参考点 |
 | `base_link→laser_link` | `robot_state_publisher` | URDF 静态变换 |
 
 ### 关键参数

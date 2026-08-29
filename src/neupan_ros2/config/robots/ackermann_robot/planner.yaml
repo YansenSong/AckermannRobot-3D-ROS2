@@ -13,10 +13,17 @@
 # ---- MPC ------------------------------------------------------------
 receding: 15                     # Horizon steps (15 × 0.2s = 3s look-ahead)
 step_time: 0.2                   # Time per step (s)
-ref_speed: 1.0                   # Reference cruise speed (m/s)
+ref_speed: 0.8                   # Leave time for the ~1 Hz CPU PAN solve to react
 device: 'cpu'
 time_print: false
 collision_threshold: 0.05        # Emergency stop distance (m)
+
+# Seed a smooth left/right homotopy when a temporary obstacle lies exactly
+# on the global path.  PAN then optimizes this dynamically feasible S-turn.
+avoidance_seed_enabled: true
+avoidance_seed_distance: 1.2
+avoidance_seed_clearance: 0.15
+avoidance_seed_steer: 0.25
 
 # ---- Robot Geometry -------------------------------------------------
 robot:
@@ -33,6 +40,7 @@ ipath:
   interval: 0.1                   # Waypoint spacing (m)
   curve_style: 'reeds'            # Reeds-Shepp: forward + reverse, ackermann-aware
   min_radius: 1.05                # Min turn radius (m) = wheelbase / tan(0.52)
+  ind_range: 0                     # Search the whole remaining path; avoid lagging behind the robot
   loop: false
   arrive_threshold: 0.5           # "Arrived" distance (m)
   close_threshold: 0.1
@@ -46,12 +54,12 @@ pan:
   dune_checkpoint: null           # Set at runtime by neupan_node
 
 # ---- Control Tuning -------------------------------------------------
-# Weights are normalized for a 0.7m×0.52m robot (L₀=0.7m, v₀=1.0m/s).
+# Weights are tuned for a 0.7m×0.52m robot (L₀=0.7m, v₀=0.8m/s).
 # Δx/L₀≈0.3  →  q_s² gives meaningful tracking cost
 # d_max/L₀≈0.7 →  η balanced so avoidance doesn't drown tracking
 adjust:
-  q_s: 0.5                        # State tracking weight (↑ 0.15→0.5, small robot needs it)
-  p_u: 0.3                        # Control effort weight (↓ 0.5→0.3)
-  eta: 4.0                        # Collision avoidance weight (↓ 15→4, 1m obstacles aren't critical)
-  d_max: 0.5                      # Max obstacle distance for barrier (m)
-  d_min: 0.05                     # Min obstacle distance for barrier (m)
+  q_s: 0.8                        # Return to the global path after the bypass
+  p_u: 1.0                        # Prefer forward bypass over stopping/reversing
+  eta: 0.5                        # Balanced with the longer 1.2m influence range
+  d_max: 1.2                      # Start avoidance before the 1.05m turning radius is consumed
+  d_min: 0.15                     # Maintain practical body clearance during bypass

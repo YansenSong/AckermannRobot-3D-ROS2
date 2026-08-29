@@ -1,7 +1,7 @@
 # NeuPAN ROS2 Configuration — Ackermann Robot (AckermannRobot-2D)
 #
 # Vehicle: 0.70m × 0.52m, wheelbase 0.593m, 360° 2D LiDAR
-# TF: map → odom → base_link → laser_link
+# TF: map → odom → base_link → rear_axle_link; base_link → laser_link
 
 neupan_node:
   ros__parameters:
@@ -17,14 +17,22 @@ neupan_node:
 
     # ---- TF Frame Configuration -------------------------------------
     map_frame: 'map'
-    base_frame: 'base_link'
+    odom_frame: 'odom'
+    # NeuPAN's Ackermann state and footprint are rear-axle referenced.
+    base_frame: 'rear_axle_link'
     lidar_frame: 'laser_link'
+    # Reject stale odom-to-lidar transforms instead of moving scan points
+    # into the wrong place while the robot is moving.
+    scan_tf_max_age: 0.25
+    # Tolerate isolated scan/TF misses.  The previous valid obstacle set is
+    # already in map coordinates and remains usable during this interval.
+    scan_data_timeout: 0.50
 
     # ---- Topic Configuration ----------------------------------------
     cmd_vel_topic: '/neupan_cmd_vel'      # NeuPAN output (separate from DWB /cmd_vel)
     scan_topic: '/scan'                    # 360° 2D LaserScan
     plan_input_topic: '/plan'             # From Nav2 planner_server (global path)
-    goal_topic: '/goal_pose'              # Nav2 goal (optional, path-based navigation)
+    goal_topic: '/neupan_goal_pose'       # Disabled here; Hybrid A* owns /goal_pose
     plan_output_topic: '/neupan_plan'     # Optimized trajectory (visualization)
     ref_state_topic: '/neupan_ref_state'  # Reference state (visualization)
     initial_path_topic: '/neupan_initial_path'
@@ -52,4 +60,7 @@ neupan_node:
     flip_angle: false
     refresh_initial_path: true     # Re-plan when new global path arrives
     include_initial_path_direction: true   # Detect gear from path pose orientations
+    direct_goal_planning: false    # Use Hybrid A* /plan, avoid replacing it with a local RS path
     control_frequency: 20.0        # 20 Hz (matching controller frequency)
+    command_rate_limit: true       # Limit [v, steering angle] changes to max_acce per second
+    executor_threads: 4            # Control, scan and TF callbacks must remain concurrent

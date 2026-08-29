@@ -2,11 +2,11 @@
  * Hybrid A* 全局路径规划器 — ROS2 节点 (适配 AckermannRobot-3D)
  *
  * - 加载 PGM 栅格地图，无需 Nav2 costmap
- * - 通过 TF 查 map→base_link 获取当前位姿作为规划起点
+ * - 通过 TF 查 map→rear_axle_link 获取当前位姿作为规划起点
  * - 暴露 /plan 话题 (NeuPAN 订阅) 和 /plan 服务 (GetPlan)
  * - 发布 /map (OccupancyGrid, latched) 供 RViz2 显示
  *
- * TF 树: map ←(hdl NDT)← odom ←(EKF)← base_link ←(URDF)← laser_link
+ * TF 树: map ←(hdl NDT)← odom ←(EKF)← base_link ←(URDF)← rear_axle_link
  * hdl_localization 负责 map→odom，本节点不广播 TF。
  *
  * 车辆: 小型阿克曼, 0.70m×0.52m, wheelbase=0.593m, min turning radius=1.05m
@@ -62,7 +62,8 @@ public:
     a_star_   = std::make_unique<AStarT>(_motion_model, _search_info);
     smoother_ = std::make_unique<SmootherT>();
 
-    // TF 监听器 — 查 map→base_link 获取当前位姿 (hdl_localization 提供 map→odom)
+    // TF 监听器 — 查 map→robot_state_frame 获取当前位姿
+    // (hdl_localization 仍通过 base_link 提供 map→odom)
     tf_buffer_   = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -134,9 +135,12 @@ private:
     _smoother_params.max_time = this->declare_parameter("smooth_max_time", 0.1);
     _optimizer_params.max_iterations = this->declare_parameter("smooth_max_iterations", 50);
 
-    // ---- 车体尺寸 (0.70m×0.52m, 后轴在几何中心后方 ~0.25m) ----
+    // ---- 车体尺寸 (0.70m×0.52m, 后轴在几何中心后方) ----
     _vehicle_length = this->declare_parameter("vehicle_length", 0.70);
     _vehicle_width  = this->declare_parameter("vehicle_width",  0.52);
+    _robot_state_frame = this->declare_parameter(
+      "robot_state_frame", std::string("base_link"));
+    _goal_pose_is_base_link = this->declare_parameter("goal_pose_is_base_link", true);
     _rear_axle_offset_x = this->declare_parameter("rear_axle_offset_x", -0.25);
 
     // ---- 分析扩展 ----
@@ -184,13 +188,13 @@ private:
   }
 
   // ================================================================
-  // TF 查 map→base_link, 返回 map 坐标系下的当前位姿
+  // TF 查 map→robot_state_frame, 返回 map 坐标系下的当前位姿
   // ================================================================
-  bool lookupMapToBaseLink(geometry_msgs::msg::PoseStamped & pose_out)
+  bool lookupMapToRobotState(geometry_msgs::msg::PoseStamped & pose_out)
   {
     try {
       auto transform = tf_buffer_->lookupTransform(
-        "map", "base_link", tf2::TimePointZero, tf2::durationFromSec(0.5));
+        "map", _robot_state_frame, tf2::TimePointZero, tf2::durationFromSec(0.5));
       pose_out.header = transform.header;
       pose_out.header.frame_id = "map";
       pose_out.pose.position.x = transform.transform.translation.x;
@@ -200,9 +204,31 @@ private:
       return true;
     } catch (const tf2::TransformException & e) {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-        "TF lookup map→base_link failed: %s", e.what());
+        "TF lookup map→%s failed: %s", _robot_state_frame.c_str(), e.what());
       return false;
     }
+  }
+
+  // RViz's 2D Goal Pose represents the vehicle/base pose.  When the planner
+  // state is the rear axle, shift that target by the configured fixed offset
+  // along the target heading so that the vehicle center reaches the clicked
+  // goal after the rear axle reaches the converted target.
+  geometry_msgs::msg::PoseStamped goalToPlanningReference(
+    const geometry_msgs::msg::PoseStamped & goal) const
+  {
+    auto converted = goal;
+    if (!_goal_pose_is_base_link || _robot_state_frame == "base_link") {
+      return converted;
+    }
+
+    tf2::Quaternion tf_q(
+      goal.pose.orientation.x, goal.pose.orientation.y,
+      goal.pose.orientation.z, goal.pose.orientation.w);
+    double roll, pitch, yaw;
+    tf2::Matrix3x3(tf_q).getRPY(roll, pitch, yaw);
+    converted.pose.position.x += _rear_axle_offset_x * std::cos(yaw);
+    converted.pose.position.y += _rear_axle_offset_x * std::sin(yaw);
+    return converted;
   }
 
   // ================================================================
@@ -231,18 +257,22 @@ private:
   void goalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr goal)
   {
     geometry_msgs::msg::PoseStamped start;
-    if (!lookupMapToBaseLink(start)) {
+    if (!lookupMapToRobotState(start)) {
       RCLCPP_WARN(this->get_logger(),
-        "No TF map→base_link yet, cannot plan. Has hdl_localization started?");
+        "No TF map→%s yet, cannot plan. Has hdl_localization started?",
+        _robot_state_frame.c_str());
       return;
     }
 
-    RCLCPP_INFO(this->get_logger(),
-      "Goal: (%.2f, %.2f), start: (%.2f, %.2f) [from TF map→base_link]",
-      goal->pose.position.x, goal->pose.position.y,
-      start.pose.position.x, start.pose.position.y);
+    const auto planning_goal = goalToPlanningReference(*goal);
 
-    auto path = doPlan(start, *goal, start.header);
+    RCLCPP_INFO(this->get_logger(),
+      "Goal: (%.2f, %.2f), start: (%.2f, %.2f) [state frame: %s]",
+      planning_goal.pose.position.x, planning_goal.pose.position.y,
+      start.pose.position.x, start.pose.position.y,
+      _robot_state_frame.c_str());
+
+    auto path = doPlan(start, planning_goal, start.header);
     if (!path.poses.empty()) {
       // 发布到 /plan (NeuPAN) 和 /plan_path (RViz)
       plan_pub_->publish(path);
@@ -431,6 +461,7 @@ private:
 
   // 配置参数
   std::string  map_path_;
+  std::string  _robot_state_frame = "base_link";
   double       resolution_   = 0.05;
   double       origin_x_     = 0.0;
   double       origin_y_     = 0.0;
@@ -441,6 +472,7 @@ private:
   double       _tolerance_meters     = 0.5;
   bool         _allow_unknown        = true;
   bool         _use_smoother         = false;
+  bool         _goal_pose_is_base_link = true;
   double       _vehicle_length       = 0.70;
   double       _vehicle_width        = 0.52;
   double       _rear_axle_offset_x   = -0.25;
