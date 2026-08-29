@@ -54,13 +54,20 @@ void write_pgm(const std::string &path,
     }
     f << "P5\n" << width << " " << height << "\n255\n";
 
-    // 0 (free) → 254 (白), 100 (occupied) → 0 (黑), -1 (unknown) → 205 (灰)
-    for (int i = 0; i < width * height; ++i) {
-        uint8_t v;
-        if (data[i] == 100)       v = 0;    // 占据 → 黑
-        else if (data[i] == 0)    v = 254;  // 空闲 → 白
-        else                       v = 205;  // 未知 → 灰
-        f.write(reinterpret_cast<const char*>(&v), 1);
+    // data uses ROS map indexing: row 0 is the south/bottom of the map.
+    // PGM uses image indexing: row 0 is the north/top of the image.
+    // Reverse rows here so map_server and the planner's PGM adapter recover
+    // the original ROS y direction instead of mirroring the map vertically.
+    for (int image_row = 0; image_row < height; ++image_row) {
+        const int map_row = height - 1 - image_row;
+        for (int col = 0; col < width; ++col) {
+            const int8_t cell = data[map_row * width + col];
+            uint8_t v;
+            if (cell == 100)       v = 0;    // 占据 → 黑
+            else if (cell == 0)    v = 254;  // 空闲 → 白
+            else                   v = 205;  // 未知 → 灰
+            f.write(reinterpret_cast<const char*>(&v), 1);
+        }
     }
     std::cout << "Saved: " << path << " (" << width << "x" << height << ")\n";
 }

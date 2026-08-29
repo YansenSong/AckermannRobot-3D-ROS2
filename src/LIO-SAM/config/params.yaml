@@ -2,7 +2,7 @@
   ros__parameters:
 
     # Topics
-    pointCloudTopic: "/points_raw"               # Point cloud data (from Gazebo velodyne plugin)
+    pointCloudTopic: "/points_lio"               # Point cloud with ring/time fields from Gazebo adapter
     imuTopic: "/imu/data"                         # IMU data (from Gazebo)
     odomTopic: "odometry/imu"                    # IMU pre-preintegration odometry, same frequency as IMU
     gpsTopic: "odometry/gpsz"                    # GPS odometry topic from navsat, see module_navsat.launch file

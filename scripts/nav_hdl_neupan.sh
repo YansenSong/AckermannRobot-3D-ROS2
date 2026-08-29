@@ -13,7 +13,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$PROJECT_DIR/install/setup.bash"
 
 echo "=== Gazebo + 机器人 ==="
-ros2 launch ackermann_robot gazebo.launch.py &
+ros2 launch ackermann_robot gazebo.launch.py publish_ekf_tf:=true &
 sleep 5
 
 echo "=== hdl_localization + Hybrid A* + NeuPAN ==="

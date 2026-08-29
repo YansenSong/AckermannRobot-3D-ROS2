@@ -664,10 +664,17 @@ private:
 
   void publish_odometry(const rclcpp::Time& stamp, const Eigen::Matrix4f& pose) {
     if (send_tf_transforms) {
+      // The localization pose and the incoming point cloud refer to `stamp`.
+      // Looking up the latest odom->base_link transform here and publishing
+      // the result with `stamp` creates a time-skewed map->odom TF while the
+      // robot is moving. RViz then transforms /scan with a mismatched pose;
+      // the error disappears after the robot stops. Use the odom transform at
+      // the same timestamp as the scan instead.
       if (tf_buffer->canTransform(
             robot_odom_frame_id,
             odom_child_frame_id,
-            rclcpp::Time((int64_t)0, get_clock()->get_clock_type()))) {
+            stamp,
+            rclcpp::Duration(std::chrono::milliseconds(100)))) {
         geometry_msgs::msg::TransformStamped map_wrt_frame =
           tf2::eigenToTransform(Eigen::Isometry3d(pose.inverse().cast<double>()));
         map_wrt_frame.header.stamp = stamp;
@@ -678,7 +685,7 @@ private:
           tf_buffer->lookupTransform(
             robot_odom_frame_id,
             odom_child_frame_id,
-            rclcpp::Time((int64_t)0, get_clock()->get_clock_type()),
+            stamp,
             rclcpp::Duration(std::chrono::milliseconds(100)));
 
         geometry_msgs::msg::TransformStamped map_wrt_odom;

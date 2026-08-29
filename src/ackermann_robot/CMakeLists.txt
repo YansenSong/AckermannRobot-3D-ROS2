@@ -16,6 +16,7 @@ install(PROGRAMS
   scripts/arrow_key_control.py
   scripts/cmd_vel_stamper.py
   scripts/cmd_vel_mux.py
+  scripts/gazebo_lidar_adapter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -27,6 +28,12 @@ install(DIRECTORY
   rviz
   models
   xacro
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# Gazebo resolves model://ackermann_robot/... from the package directory.
+install(FILES
+  models/model.config
   DESTINATION share/${PROJECT_NAME}
 )
 

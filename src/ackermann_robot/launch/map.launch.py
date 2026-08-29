@@ -1,17 +1,23 @@
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import PathJoinSubstitution, Command
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from ament_index_python.packages import get_package_share_directory, get_package_prefix
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     package_name = 'ackermann_robot'
     pkg_share = get_package_share_directory(package_name)
+
+    publish_ekf_tf_arg = DeclareLaunchArgument(
+        'publish_ekf_tf',
+        default_value='true',
+        description='Publish odom -> base_link from EKF (disable when LIO-SAM owns this TF)',
+    )
 
     # 1. 解析 URDF (XACRO)
     xacro_file = os.path.join(pkg_share, 'xacro', 'robot.xacro')
@@ -23,7 +29,7 @@ def generate_launch_description():
     world_file_path = os.path.join(get_package_share_directory('gazebo_worlds'), 'worlds', 'mini', 'mini.world')
 
     # 设置 GAZEBO_MODEL_PATH 环境变量
-    pkg_share_env = os.pathsep + os.path.join(get_package_prefix(package_name), 'share')
+    pkg_share_env = os.pathsep + os.path.dirname(pkg_share)
     if 'GAZEBO_MODEL_PATH' in os.environ:
         os.environ['GAZEBO_MODEL_PATH'] += pkg_share_env
     else:
@@ -72,6 +78,14 @@ def generate_launch_description():
         output='screen'
     )
 
+    lidar_adapter_node = Node(
+        package='ackermann_robot',
+        executable='gazebo_lidar_adapter.py',
+        name='gazebo_lidar_adapter',
+        output='screen',
+        parameters=[{'use_sim_time': True}],
+    )
+
     # ================= NEW: 加载 ROS 2 Controllers =================
     
     # 加载关节状态广播器 (负责发布 /joint_states)
@@ -98,7 +112,14 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_filter_node',
         output='screen',
-        parameters=[ekf_config_path, {'use_sim_time': True}],
+        parameters=[
+            ekf_config_path,
+            {
+                'use_sim_time': True,
+                'publish_tf': ParameterValue(
+                    LaunchConfiguration('publish_ekf_tf'), value_type=bool),
+            },
+        ],
         remappings=[('/odometry/filtered', '/odometry/filtered')] 
     )
 
@@ -114,9 +135,11 @@ def generate_launch_description():
     
     # ================= 返回 Launch Description =================
     return LaunchDescription([
+        publish_ekf_tf_arg,
         robot_state_publisher,
         gazebo_launch,
         spawn_entity,
+        lidar_adapter_node,
         ekf_node,
 
         # 立即启动转换节点，不需要等待其他事件

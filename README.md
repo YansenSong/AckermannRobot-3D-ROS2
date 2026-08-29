@@ -79,6 +79,7 @@ source install/setup.bash
 2. **控制接口：** `ackermann_steering_controller` 接收 `TwistStamped`，`cmd_vel_mux` 将 NeuPAN 的 `Twist` 转为 `TwistStamped`。
 3. **IMU 话题：** 统一使用 `/imu/data`。
 4. **/scan：** 由 `pointcloud_to_laserscan` 将 3D LiDAR (`/points_raw`) 转成 2D LaserScan，供 NeuPAN 避障。
+5. **LIO-SAM 点云：** Gazebo 原始点云发布到 `/points_raw`，`gazebo_lidar_adapter` 为其补充 `ring/time` 字段并发布 `/points_lio`，LIO-SAM 使用 `/points_lio`。
 
 ---
 
@@ -103,24 +104,49 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r /cmd_vel:=/ne
 
 ## 3D SLAM 建图（LIO-SAM）
 
-```bash
-# 1. 启动 Gazebo
-ros2 launch ackermann_robot gazebo.launch.py
+推荐使用一键启动入口。建图模式会关闭 EKF 的 `odom → base_link` TF，避免 EKF 与 LIO-SAM 同时发布同一条 TF；同时启动点云适配器和 LIO-SAM RViz。
 
-# 2. 启动 LIO-SAM 建图
+```bash
+# 1. 启动 Gazebo + LIO-SAM + 点云适配器
+ros2 launch ackermann_robot mapping.launch.py
+
+# 2. 新终端：键盘控制小车移动建图
+source /opt/ros/humble/setup.bash
+source ~/AckermannRobot-3D/install/setup.bash
+ros2 launch ackermann_robot keyboard_control.launch.py
+```
+
+如果需要分别启动，也必须关闭 Gazebo 侧 EKF TF：
+
+```bash
+# 终端 1
+ros2 launch ackermann_robot gazebo.launch.py publish_ekf_tf:=false use_rviz:=false
+
+# 终端 2
 ros2 launch lio_sam run.launch.py
 
-# 3. 键盘控制小车移动建图
+# 终端 3：键盘控制
 ros2 launch ackermann_robot keyboard_control.launch.py
 
-# 4. 保存地图：
-ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap "{resolution: 0.2, destination: /AckermannRobot-3D/src/maps/}"
+# 3. 建图完成后保存三维地图
+mkdir -p ~/AckermannRobot-3D/src/gazebo_worlds/worlds/mini/maps
+ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap "{resolution: 0.2, destination: /home/young/AckermannRobot-3D/src/gazebo_worlds/worlds/mini/maps/}"
 # → GlobalMap.pcd
 
-# 5. 转为 2D PGM (给 Hybrid A* 用)：
+# 4. 转为 2D PGM (给 Hybrid A* 用)：
 cd ~/AckermannRobot-3D
-./src/pcd2pgm/build/pcd2gridmap src/maps/GlobalMap.pcd -o src/maps/map
-# → src/maps/map.pgm + src/maps/map.yaml
+./build/pcd2gridmap/pcd2gridmap \
+  src/gazebo_worlds/worlds/mini/maps/GlobalMap.pcd \
+  -o src/gazebo_worlds/worlds/mini/maps/map
+# → src/gazebo_worlds/worlds/mini/maps/map.pgm + map.yaml
+```
+
+导航脚本默认从以下目录读取地图文件：
+
+```text
+src/gazebo_worlds/worlds/mini/maps/GlobalMap.pcd
+src/gazebo_worlds/worlds/mini/maps/map.yaml
+src/gazebo_worlds/worlds/mini/maps/map.pgm
 ```
 
 ---

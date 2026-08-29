@@ -16,6 +16,10 @@
 
 #include <gtsam/nonlinear/ISAM2.h>
 
+#include <cstdlib>
+#include <filesystem>
+#include <system_error>
+
 using namespace gtsam;
 
 using symbol_shorthand::X; // Pose3 (x,y,z,r,p,y)
@@ -178,18 +182,58 @@ public:
 
         auto saveMapService = [this](const std::shared_ptr<rmw_request_id_t> request_header, const std::shared_ptr<lio_sam::srv::SaveMap::Request> req, std::shared_ptr<lio_sam::srv::SaveMap::Response> res) -> void {
             (void)request_header;
+            namespace fs = std::filesystem;
             string saveMapDirectory;
             cout << "****************************************************" << endl;
             cout << "Saving map to pcd files ..." << endl;
-            if(req->destination.empty()) saveMapDirectory = std::getenv("HOME") + savePCDDirectory;
-            else saveMapDirectory = std::getenv("HOME") + req->destination;
+
+            const char *homeEnvironment = std::getenv("HOME");
+            if (homeEnvironment == nullptr) {
+                RCLCPP_ERROR(this->get_logger(), "Cannot save map: HOME environment variable is not set");
+                res->success = false;
+                return;
+            }
+
+            const fs::path homeDirectory(homeEnvironment);
+            if (req->destination.empty()) {
+                // savePCDDirectory historically stores a path relative to HOME,
+                // even though it starts with '/'.
+                fs::path configuredDirectory(savePCDDirectory);
+                if (configuredDirectory.is_absolute()) {
+                    configuredDirectory = configuredDirectory.relative_path();
+                }
+                saveMapDirectory = (homeDirectory / configuredDirectory).lexically_normal().string();
+            } else {
+                const fs::path requestedDirectory(req->destination);
+                saveMapDirectory = (requestedDirectory.is_absolute()
+                    ? requestedDirectory
+                    : homeDirectory / requestedDirectory).lexically_normal().string();
+            }
+
             cout << "Save destination: " << saveMapDirectory << endl;
-            // create directory and remove old files;
-            int unused = system((std::string("exec rm -r ") + saveMapDirectory).c_str());
-            unused = system((std::string("mkdir -p ") + saveMapDirectory).c_str());
+
+            // Do not remove the whole directory: it may contain map.yaml, map.pgm,
+            // or other user files. Existing PCD files below are overwritten by PCL.
+            std::error_code directoryError;
+            fs::create_directories(fs::path(saveMapDirectory), directoryError);
+            if (directoryError) {
+                RCLCPP_ERROR(this->get_logger(), "Cannot create map directory '%s': %s",
+                    saveMapDirectory.c_str(), directoryError.message().c_str());
+                res->success = false;
+                return;
+            }
+
+            bool saveOk = true;
+            const auto savePcd = [&saveOk](const string &path, const auto &cloud) {
+                if (pcl::io::savePCDFileBinary(path, *cloud) != 0) {
+                    saveOk = false;
+                    std::cerr << "Failed to save PCD: " << path << std::endl;
+                }
+            };
+
             // save key frame transformations
-            pcl::io::savePCDFileBinary(saveMapDirectory + "/trajectory.pcd", *cloudKeyPoses3D);
-            pcl::io::savePCDFileBinary(saveMapDirectory + "/transformations.pcd", *cloudKeyPoses6D);
+            savePcd((fs::path(saveMapDirectory) / "trajectory.pcd").string(), cloudKeyPoses3D);
+            savePcd((fs::path(saveMapDirectory) / "transformations.pcd").string(), cloudKeyPoses6D);
             // extract global point cloud map
             pcl::PointCloud<PointType>::Ptr globalCornerCloud(new pcl::PointCloud<PointType>());
             pcl::PointCloud<PointType>::Ptr globalCornerCloudDS(new pcl::PointCloud<PointType>());
@@ -209,25 +253,25 @@ public:
                downSizeFilterCorner.setInputCloud(globalCornerCloud);
                downSizeFilterCorner.setLeafSize(req->resolution, req->resolution, req->resolution);
                downSizeFilterCorner.filter(*globalCornerCloudDS);
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/CornerMap.pcd", *globalCornerCloudDS);
+               savePcd((fs::path(saveMapDirectory) / "CornerMap.pcd").string(), globalCornerCloudDS);
                // down-sample and save surf cloud
                downSizeFilterSurf.setInputCloud(globalSurfCloud);
                downSizeFilterSurf.setLeafSize(req->resolution, req->resolution, req->resolution);
                downSizeFilterSurf.filter(*globalSurfCloudDS);
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/SurfMap.pcd", *globalSurfCloudDS);
+               savePcd((fs::path(saveMapDirectory) / "SurfMap.pcd").string(), globalSurfCloudDS);
             }
             else
             {
             // save corner cloud
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/CornerMap.pcd", *globalCornerCloud);
+               savePcd((fs::path(saveMapDirectory) / "CornerMap.pcd").string(), globalCornerCloud);
                // save surf cloud
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/SurfMap.pcd", *globalSurfCloud);
+               savePcd((fs::path(saveMapDirectory) / "SurfMap.pcd").string(), globalSurfCloud);
             }
             // save global point cloud map
             *globalMapCloud += *globalCornerCloud;
             *globalMapCloud += *globalSurfCloud;
-            int ret = pcl::io::savePCDFileBinary(saveMapDirectory + "/GlobalMap.pcd", *globalMapCloud);
-            res->success = ret == 0;
+            savePcd((fs::path(saveMapDirectory) / "GlobalMap.pcd").string(), globalMapCloud);
+            res->success = saveOk;
             downSizeFilterCorner.setLeafSize(mappingCornerLeafSize, mappingCornerLeafSize, mappingCornerLeafSize);
             downSizeFilterSurf.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
             cout << "****************************************************" << endl;

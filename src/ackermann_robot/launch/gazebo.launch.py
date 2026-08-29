@@ -1,18 +1,30 @@
 # gazebo.launch.py
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import PathJoinSubstitution, Command
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
+from launch.conditions import IfCondition
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from ament_index_python.packages import get_package_share_directory, get_package_prefix
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     package_name = 'ackermann_robot'
     pkg_share = get_package_share_directory(package_name)
+
+    publish_ekf_tf_arg = DeclareLaunchArgument(
+        'publish_ekf_tf',
+        default_value='true',
+        description='Publish odom -> base_link from EKF (disable when LIO-SAM owns this TF)',
+    )
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
+        description='Start the robot RViz instance',
+    )
 
     # 1. 解析 URDF (XACRO)
     xacro_file = os.path.join(pkg_share, 'xacro', 'robot.xacro')
@@ -24,7 +36,9 @@ def generate_launch_description():
     world_file_path = os.path.join(get_package_share_directory('gazebo_worlds'), 'worlds', 'mini', 'mini.world')
 
     # 设置 GAZEBO_MODEL_PATH 环境变量
-    pkg_share_env = os.pathsep + os.path.join(get_package_prefix(package_name), 'share')
+    # model://ackermann_robot/... is resolved relative to the directory that
+    # contains the ackermann_robot package directory.
+    pkg_share_env = os.pathsep + os.path.dirname(pkg_share)
     if 'GAZEBO_MODEL_PATH' in os.environ:
         os.environ['GAZEBO_MODEL_PATH'] += pkg_share_env
     else:
@@ -73,6 +87,16 @@ def generate_launch_description():
         output='screen'
     )
 
+    # Gazebo's ray sensor does not publish Velodyne ring/time fields.  This
+    # adapter adds them for LIO-SAM while preserving the original /points_raw.
+    lidar_adapter_node = Node(
+        package='ackermann_robot',
+        executable='gazebo_lidar_adapter.py',
+        name='gazebo_lidar_adapter',
+        output='screen',
+        parameters=[{'use_sim_time': True}],
+    )
+
     # ================= NEW: 加载 ROS 2 Controllers =================
     
     # 加载关节状态广播器 (负责发布 /joint_states)
@@ -98,7 +122,14 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_filter_node',
         output='screen',
-        parameters=[ekf_config_path, {'use_sim_time': True}],
+        parameters=[
+            ekf_config_path,
+            {
+                'use_sim_time': True,
+                'publish_tf': ParameterValue(
+                    LaunchConfiguration('publish_ekf_tf'), value_type=bool),
+            },
+        ],
         remappings=[('/odometry/filtered', '/odometry/filtered')],
     )
 
@@ -109,14 +140,18 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         output='screen',
-        arguments=['-d', rviz_config_file]
+        arguments=['-d', rviz_config_file],
+        condition=IfCondition(LaunchConfiguration('use_rviz')),
     )
 
     # ================= 返回 Launch Description =================
     return LaunchDescription([
+        publish_ekf_tf_arg,
+        use_rviz_arg,
         robot_state_publisher,
         gazebo_launch,
         spawn_entity,
+        lidar_adapter_node,
 
         # 使用事件处理器确保控制器在模型生成后启动
         RegisterEventHandler(
