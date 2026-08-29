@@ -221,13 +221,3 @@ map ←(hdl NDT)← odom ←(EKF)← base_link ←(URDF)← laser_link
 | 定位 | hdl_localization (3D NDT + UKF) |
 | ndt_resolution | 1.0m |
 | downsample_resolution | 0.4m |
-
-### 定位方式对比
-
-| | hdl_localization | AMCL (已废弃) |
-|---|---|---|
-| 算法 | 3D NDT 扫描匹配 + UKF | 2D 粒子滤波 + 似然场 |
-| 输入 | `/points_raw` (3D PointCloud2) | `/scan` (2D LaserScan) |
-| 初始位姿 | RViz 手动设置 | 必须手动 "2D Pose Estimate" |
-| 输出 | `map→odom` TF | `map→odom` TF |
-| 鲁棒性 | ★★★★★ | ★★ |

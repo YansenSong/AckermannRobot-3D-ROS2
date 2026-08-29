@@ -82,7 +82,7 @@ def parse_map_yaml(context):
     # ====== hdl_localization ======
     globalmap_server = Node(
         package='hdl_localization',
-        executable='globalmap_server_node',
+        executable='hdl_localization_map_server',
         name='globalmap_server',
         output='screen',
         parameters=[{

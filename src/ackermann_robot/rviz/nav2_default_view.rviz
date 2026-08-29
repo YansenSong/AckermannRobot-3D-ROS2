@@ -6,6 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
+        - /LaserScan1
         - /MarkerArray2/Topic1
       Splitter Ratio: 0.5833333134651184
     Tree Height: 1129
@@ -130,8 +131,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 0.05852024629712105
-        Min Value: -0.04361343756318092
+        Max Value: 0.04302051290869713
+        Min Value: -0.023169703781604767
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -148,7 +149,7 @@ Visualization Manager:
       Name: LaserScan
       Position Transformer: XYZ
       Selectable: true
-      Size (Pixels): 3
+      Size (Pixels): 10
       Size (m): 0.009999999776482582
       Style: Points
       Topic:
@@ -346,7 +347,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: -0.010800729505717754
+      Angle: 0.0041992682963609695
       Class: rviz_default_plugins/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
@@ -356,7 +357,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 97.88101196289062
+      Scale: 88.40936279296875
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
       X: 1.2844520807266235
