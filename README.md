@@ -1,34 +1,119 @@
-# AckermannRobot-3D
+# AckermannRobot-3D-ROS2
 
-小型阿克曼机器人仿真与自主导航系统（0.70m × 0.52m，轴距 0.593m），基于 ROS 2 Humble + Gazebo Classic 11。
+一个基于 **ROS 2 Humble + Gazebo Classic 11** 的小型阿克曼机器人 3D 建图、定位与自主导航项目。
 
-## 包结构
+与 2D 版本不同，这个仓库以 **3D LiDAR + LIO-SAM + NDT 定位** 为主：建图阶段由 LIO-SAM 生成 PCD 地图；导航阶段使用 hdl_localization 在三维点云地图中定位，同时将 PCD 投影 / 转换为 2D OccupancyGrid，供 Hybrid A* 规划全局路径，再由 NeuPAN 执行局部避障与车辆控制。
 
+## 系统架构
+
+```text
+                         ┌────────────────────┐
+                         │  Gazebo Ackermann  │
+                         └─────────┬──────────┘
+                                   │
+                 ┌─────────────────┼───────────────────┐
+                 ▼                 ▼                   ▼
+            /points_raw        /odom_wheel         /imu/data
+                 │                 │                   │
+                 │                 └────────┬──────────┘
+                 │                          ▼
+                 │                         EKF
+                 │                          │ odom→base_link
+                 │                          ▼
+                 │                   /odometry/filtered
+                 │
+        ┌────────┴─────────────┐
+        ▼                      ▼
+gazebo_lidar_adapter   pointcloud_to_laserscan
+        │ /points_lio          │ /scan
+        ▼                      ▼
+     LIO-SAM                 NeuPAN
+        │                      ▲
+        │ GlobalMap.pcd        │ /plan
+        ▼                      │
+  3D Mapping / Save            │
+                               │
+GlobalMap.pcd ──► hdl_localization ──► map→odom
+        │
+        └─► PCD → PGM/YAML ──► Hybrid A* ──► /plan
+                                                │
+                                                ▼
+                                             NeuPAN
+                                                │
+                                                ▼
+                                          cmd_vel_mux
+                                                │
+                                                ▼
+                                  Ackermann Steering Controller
 ```
-AckermannRobot-3D/
-├── scripts/              # 一键启动脚本
-├── src/
-│   ├── ackermann_robot/  # 机器人模型、ros2_control、cmd_vel_mux
-│   ├── neupan_ros2/      # NeuPAN 神经网络局部规划器（conda 环境）
-│   ├── NeuPAN/           # NeuPAN 算法源码子模块（运行时优先使用）
-│   ├── hybrid_astar_planner/  # Hybrid A* 全局路径规划（独立节点，无 Nav2 依赖）
-│   ├── robot_slam/       # hdl_localization 3D NDT 定位 + 启动文件
-│   ├── LIO-SAM/          # 3D LiDAR-IMU SLAM 建图
-│   ├── hdl_localization/ # NDT 3D 点云定位 (ndt_omp vendored)
-│   ├── pcd2pgm/          # 3D PCD → 2D PGM 地图转换工具
-│   ├── gazebo_worlds/    # Gazebo 仿真世界
-│   └── maps/             # 地图存储目录
-├── install/              # colcon build 产物
-├── build/                # 编译中间文件
-└── log/                  # 运行日志
+
+## 主要能力
+
+- 3D LiDAR + IMU 仿真；
+- LIO-SAM 三维 SLAM 建图；
+- Gazebo LiDAR 点云 `ring/time` 字段适配；
+- PCD 地图保存；
+- PCD → 2D PGM / YAML 地图转换；
+- hdl_localization / NDT 三维定位；
+- wheel odometry + IMU EKF 融合；
+- Hybrid A* 全局规划；
+- NeuPAN 局部避障；
+- 阿克曼运动学控制；
+- RViz 初始位姿与目标点交互；
+- 一键建图 / 导航脚本。
+
+## 车辆参数
+
+| 参数 | 值 |
+|---|---:|
+| 运动模型 | Ackermann |
+| 车体尺寸 | 0.70 m × 0.52 m |
+| 轴距 | 0.593 m |
+| 最大转向角 | ±0.52 rad（约 30°） |
+| 最小转弯半径 | 1.05 m |
+| 最大前进速度 | 1.5 m/s |
+| 最大后退速度 | -0.5 m/s |
+| LiDAR | 16 线、360°、±15°、20 Hz |
+| 全局规划 | Hybrid A* / Reeds-Shepp |
+| 局部规划 | NeuPAN |
+| 3D 定位 | hdl_localization / NDT |
+
+## 项目结构
+
+```text
+AckermannRobot-3D-ROS2/
+├── scripts/                      # 一键启动脚本
+└── src/
+    ├── ackermann_robot/          # URDF/Xacro、Gazebo、ros2_control、cmd_vel_mux
+    ├── robot_slam/               # 3D 定位与导航 launch
+    ├── LIO-SAM/                  # LiDAR-Inertial SLAM
+    ├── hdl_localization/         # NDT 点云定位
+    ├── hybrid_astar_planner/     # 独立 Hybrid A* 全局规划器
+    ├── neupan_ros2/              # NeuPAN ROS 2 封装
+    ├── NeuPAN/                   # NeuPAN 算法源码 / 子模块
+    ├── pcd2pgm/                  # PCD → 2D 地图工具
+    ├── gazebo_worlds/            # Gazebo worlds / models / maps
+    └── maps/                     # 地图资源
 ```
 
-## 编译与环境设置
+> 如果仓库使用 Git submodule，请克隆后执行 `git submodule update --init --recursive`，确保算法依赖完整。
 
-### 依赖安装
+## 环境要求
+
+推荐基线：
+
+- Ubuntu 22.04
+- ROS 2 Humble
+- Gazebo Classic 11
+- `colcon`
+- PCL / Eigen / Ceres / OpenMP
+- NeuPAN 对应 Python / conda 环境
+
+安装主要系统依赖：
 
 ```bash
-sudo apt update && sudo apt install -y \
+sudo apt update
+sudo apt install -y \
   ros-humble-topic-tools \
   ros-humble-robot-localization \
   ros-humble-pointcloud-to-laserscan \
@@ -50,7 +135,7 @@ sudo apt update && sudo apt install -y \
   libceres-dev
 ```
 
-**NeuPAN 额外依赖** (conda 环境):
+NeuPAN 推荐独立环境：
 
 ```bash
 conda create -n neupan python=3.10
@@ -58,15 +143,21 @@ conda activate neupan
 pip install torch numpy
 ```
 
-### 编译
+其余 NeuPAN 依赖以仓库内对应源码 / requirements 为准。
+
+## 编译
 
 ```bash
-cd ~/AckermannRobot-3D
+git clone <repository-url>
+cd AckermannRobot-3D-ROS2
+
+git submodule update --init --recursive
+source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
 ```
 
-### 清除与重新编译
+彻底重新编译：
 
 ```bash
 rm -rf build install log
@@ -74,157 +165,329 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-## 重要注意事项
-
-1. **里程计重映射：** ros2_control 原始里程计已重映射 `odom` → `odom_wheel`，EKF 融合后输出 `/odometry/filtered`。
-2. **控制接口：** NeuPAN 输出 `[线速度 v, 前轮转角 ψ]`，`neupan_node` 先转换为车体角速度 `ω = v·tan(ψ)/wheelbase`，再由 `cmd_vel_mux` 转为控制器需要的 `TwistStamped`。
-3. **IMU 话题：** 统一使用 `/imu/data`。
-4. **/scan：** 由 `pointcloud_to_laserscan` 将 3D LiDAR (`/points_raw`) 转成 2D LaserScan，供 NeuPAN 避障。
-5. **LIO-SAM 点云：** Gazebo 原始点云发布到 `/points_raw`，`gazebo_lidar_adapter` 为其补充 `ring/time` 字段并发布 `/points_lio`，LIO-SAM 使用 `/points_lio`。
-
----
-
-## 运行与演示
-
-### 模型预览
+每个新终端都需要 source：
 
 ```bash
-ros2 launch ackermann_robot review.launch.py        # RViz 预览
-ros2 launch ackermann_robot gazebo.launch.py        # Gazebo 仿真
+source /opt/ros/humble/setup.bash
+source ~/AckermannRobot-3D-ROS2/install/setup.bash
+```
+
+## 最快体验
+
+### RViz 模型预览
+
+```bash
+ros2 launch ackermann_robot review.launch.py
+```
+
+### Gazebo 仿真
+
+```bash
+ros2 launch ackermann_robot gazebo.launch.py
 ```
 
 ### 键盘控制
 
 ```bash
 ros2 launch ackermann_robot keyboard_control.launch.py
-# 或用 ros2 run
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r /cmd_vel:=/neupan_cmd_vel
 ```
 
----
-
-## 3D SLAM 建图（LIO-SAM）
-
-推荐使用一键启动入口。建图模式会关闭 EKF 的 `odom → base_link` TF，避免 EKF 与 LIO-SAM 同时发布同一条 TF；同时启动点云适配器和 LIO-SAM RViz。
+也可以直接发送到 NeuPAN 控制入口：
 
 ```bash
-# 1. 启动 Gazebo + LIO-SAM + 点云适配器
+ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+  --ros-args -r /cmd_vel:=/neupan_cmd_vel
+```
+
+## 3D SLAM 建图
+
+### 1. 启动 Gazebo + LIO-SAM
+
+推荐入口：
+
+```bash
 ros2 launch ackermann_robot mapping.launch.py
+```
 
-# 2. 新终端：键盘控制小车移动建图
+建图模式会处理 TF 发布关系，避免 EKF 与 LIO-SAM 同时争抢同一条变换。
+
+### 2. 控制机器人覆盖环境
+
+新终端：
+
+```bash
 source /opt/ros/humble/setup.bash
-source ~/AckermannRobot-3D/install/setup.bash
+source ~/AckermannRobot-3D-ROS2/install/setup.bash
 ros2 launch ackermann_robot keyboard_control.launch.py
 ```
 
-如果需要分别启动，也必须关闭 Gazebo 侧 EKF TF：
+建图时建议：
+
+- 低速移动；
+- 让 LiDAR 对环境保持足够重叠观测；
+- 避免长时间原地高速旋转；
+- 尽量覆盖未来导航会经过的区域。
+
+### 3. 保存 PCD 地图
+
+先准备输出目录，例如：
 
 ```bash
-# 终端 1
-ros2 launch ackermann_robot gazebo.launch.py publish_ekf_tf:=false use_rviz:=false
+mkdir -p "$PWD/src/gazebo_worlds/worlds/mini/maps"
+```
 
-# 终端 2
-ros2 launch lio_sam run.launch.py
+再调用 LIO-SAM 保存服务，并把 `destination` 换成你机器上的**绝对路径**：
 
-# 终端 3：键盘控制
-ros2 launch ackermann_robot keyboard_control.launch.py
+```bash
+ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap \
+  "{resolution: 0.2, destination: /absolute/path/to/AckermannRobot-3D-ROS2/src/gazebo_worlds/worlds/mini/maps/}"
+```
 
-# 3. 建图完成后保存三维地图
-mkdir -p ~/AckermannRobot-3D/src/gazebo_worlds/worlds/mini/maps
-ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap "{resolution: 0.2, destination: /home/young/AckermannRobot-3D/src/gazebo_worlds/worlds/mini/maps/}"
-# → GlobalMap.pcd
+输出通常包括：
 
-# 4. 转为 2D PGM (给 Hybrid A* 用)：
-cd ~/AckermannRobot-3D
+```text
+GlobalMap.pcd
+```
+
+> 不要直接复制 README 中其他机器的 `/home/...` 路径；ROS service 参数应使用你当前机器的真实绝对路径。
+
+## 生成 2D 地图
+
+Hybrid A* 使用 2D Occupancy Map，因此需要把三维 PCD 转为 PGM / YAML。
+
+项目中提供 PCD 转换工具。编译后可按实际生成的可执行文件调用，例如：
+
+```bash
 ./build/pcd2gridmap/pcd2gridmap \
   src/gazebo_worlds/worlds/mini/maps/GlobalMap.pcd \
   -o src/gazebo_worlds/worlds/mini/maps/map
-# → src/gazebo_worlds/worlds/mini/maps/map.pgm + map.yaml
 ```
 
-导航脚本默认从以下目录读取地图文件：
+输出：
 
 ```text
-src/gazebo_worlds/worlds/mini/maps/GlobalMap.pcd
-src/gazebo_worlds/worlds/mini/maps/map.yaml
-src/gazebo_worlds/worlds/mini/maps/map.pgm
+map.pgm
+map.yaml
 ```
 
----
+导航脚本默认会使用与当前 world 对应的地图资源。
 
-## 导航
+## 自主导航
 
-使用 **hdl_localization** (3D NDT) 定位 + **Hybrid A\*** 全局规划 + **NeuPAN** 局部规划。
+导航组合：
 
-Ackermann 状态参考点统一为后轴中心 `rear_axle_link`；`base_link` 仍由 EKF 和 ros2_control 用作车体/里程计坐标。
+```text
+GlobalMap.pcd
+     │
+     ▼
+hdl_localization
+     │ map→odom
+     ▼
+Robot Pose
 
-NeuPAN 仿真和实车调参、启动及故障判断见 [`docs/neupan_tuning.md`](docs/neupan_tuning.md)。
+map.pgm / map.yaml
+     │
+     ▼
+Hybrid A*
+     │ /plan
+     ▼
+NeuPAN
+     │ /neupan_cmd_vel
+     ▼
+Ackermann Robot
+```
 
-### hdl + NeuPAN
+### 终端 1：Gazebo + NDT + Hybrid A*
 
 ```bash
-# 终端 1：Gazebo + hdl_localization + Hybrid A*
 bash scripts/nav_hdl_neupan.sh
+```
 
-# 终端 2：NeuPAN
+### 终端 2：NeuPAN
+
+```bash
 bash scripts/run_neupan.sh
 ```
 
-### RViz 操作
+## RViz 操作
 
-1. 用 **"2D Pose Estimate"** 设置初始位姿（hdl_localization 需要）
-2. 等待 hdl_localization 收敛（NDT 扫描匹配 score 应下降）
-3. 用 **"2D Goal Pose"** 设置导航目标 → Hybrid A* 规划全局路径 → NeuPAN 执行
+导航启动后：
 
----
+1. 使用 **2D Pose Estimate** 给 hdl_localization 提供初始位姿；
+2. 等待 NDT 匹配收敛；
+3. 使用 **2D Goal Pose** 设置目标；
+4. Hybrid A* 生成全局路径；
+5. NeuPAN 根据路径与激光数据执行局部避障。
 
-## 架构
+如果初始位姿偏差太大，NDT 可能无法可靠收敛。
 
-### 导航数据流
+## 坐标系与参考点
 
-```
-PGM map → hybrid_astar_planner → /plan (Path) → NeuPAN
-                               → /map (OccupancyGrid) → RViz
+导航状态参考点统一使用：
 
-GlobalMap.pcd → hdl_localization → map→odom TF
-                                  → /odom (Odometry)
-
-/odom_wheel + /imu/data → EKF → odom→base_link TF
-                               → /odometry/filtered
-
-/points_raw → pointcloud_to_laserscan → /scan → NeuPAN → /neupan_cmd_vel (Twist)
-                                                          ↓
-                                                  cmd_vel_mux → TwistStamped
-                                                          ↓
-                                          /ackermann_steering_controller/reference
+```text
+rear_axle_link
 ```
 
-### TF 树
+这比以车体几何中心作为阿克曼规划参考更符合车辆运动学。
 
+TF 关系：
+
+```text
+map
+ └─ odom               ← hdl_localization / NDT
+     └─ base_link      ← EKF
+         ├─ rear_axle_link
+         └─ laser_link
 ```
-map ←(hdl NDT)← odom ←(EKF)← base_link ←(URDF)← rear_axle_link
-                                      └──────→ laser_link
+
+| TF | 发布者 | 数据来源 |
+|---|---|---|
+| `map → odom` | hdl_localization | 3D NDT 匹配 |
+| `odom → base_link` | robot_localization EKF | `/odom_wheel` + `/imu/data` |
+| `base_link → rear_axle_link` | robot_state_publisher | URDF |
+| `base_link → laser_link` | robot_state_publisher | URDF |
+
+## 点云数据链路
+
+Gazebo 原始 3D LiDAR：
+
+```text
+/points_raw
 ```
 
-| TF | 发布者 | 来源 |
-|----|--------|------|
-| `map→odom` | hdl_localization | NDT 3D 点云匹配 |
-| `odom→base_link` | EKF (`robot_localization`) | `/odom_wheel` + `/imu/data` 融合 |
-| `base_link→rear_axle_link` | `robot_state_publisher` | URDF 固定后轴参考点 |
-| `base_link→laser_link` | `robot_state_publisher` | URDF 静态变换 |
+LIO-SAM 需要 `ring` / `time` 等字段，因此项目加入适配器：
 
-### 关键参数
+```text
+/points_raw
+    │
+    ▼
+gazebo_lidar_adapter
+    │
+    ▼
+/points_lio
+    │
+    ▼
+LIO-SAM
+```
 
-| 参数 | 值 |
-|------|-----|
-| 车体尺寸 | 0.70m × 0.52m |
-| 轴距 | 0.593m |
-| 最小转弯半径 | 1.05m |
-| 最大转向角 | 0.52 rad (~30°) |
-| 最大线速度 | 1.5 m/s 前进, -0.5 m/s 后退 |
-| LiDAR | 16线, 360°水平, ±15°垂直, 20Hz |
-| 全局规划器 | Hybrid A* (Reeds-Shepp, 独立节点) |
-| 局部规划器 | NeuPAN (神经网络 MPC) |
-| 定位 | hdl_localization (3D NDT + UKF) |
-| ndt_resolution | 1.0m |
-| downsample_resolution | 0.4m |
+同时，为 NeuPAN 生成二维 LaserScan：
+
+```text
+/points_raw
+    │
+    ▼
+pointcloud_to_laserscan
+    │
+    ▼
+/scan
+    │
+    ▼
+NeuPAN
+```
+
+## 控制链路
+
+NeuPAN 对阿克曼模型输出：
+
+```text
+[v, steering_angle]
+```
+
+ROS 2 节点会根据轴距换算车体角速度：
+
+```text
+ω = v · tan(steering_angle) / wheelbase
+```
+
+然后由 `cmd_vel_mux` 转为底盘控制器需要的消息。
+
+## 常见问题
+
+### LIO-SAM 没有点云 / 报字段错误
+
+检查：
+
+```bash
+ros2 topic echo /points_raw --once
+ros2 topic echo /points_lio --once
+```
+
+如果 `/points_raw` 有数据而 `/points_lio` 无数据，优先检查 `gazebo_lidar_adapter`。
+
+### TF 抖动或出现 multiple authority
+
+建图时最常见原因是 EKF 与 LIO-SAM 同时发布重叠 TF。优先使用仓库提供的 `mapping.launch.py`，不要随意把多个定位 / SLAM launch 叠加启动。
+
+### hdl_localization 不收敛
+
+检查：
+
+- `GlobalMap.pcd` 是否与当前 world 对应；
+- 初始位姿是否接近真实位姿；
+- 点云 frame 是否一致；
+- NDT resolution / downsample 参数是否合理；
+- 是否有足够结构特征用于匹配。
+
+### Hybrid A* 没有路径
+
+检查：
+
+- `map.pgm` / `map.yaml` 与 PCD 是否来自同一场景；
+- 起终点是否在可行驶区域；
+- 地图 origin / resolution；
+- 车辆最小转弯半径；
+- 目标姿态是否可达。
+
+### NeuPAN 不运动
+
+确认：
+
+- `/plan` 有路径；
+- `/scan` 有数据；
+- odometry 有效；
+- NeuPAN conda 环境依赖完整；
+- 控制 topic 与 mux 配置一致。
+
+## 调参与深入文档
+
+NeuPAN 的仿真 / 实车参数与故障判断见：
+
+```text
+docs/neupan_tuning.md
+```
+
+调试 3D 导航时建议按层排查：
+
+```text
+1. Gazebo / Controller
+2. LiDAR / IMU
+3. EKF / TF
+4. LIO-SAM or hdl_localization
+5. 2D map conversion
+6. Hybrid A*
+7. NeuPAN
+8. Ackermann control output
+```
+
+不要一开始就把所有模块一起怀疑。
+
+## 与 2D 版本的区别
+
+同账户下的 `AckermannRobot-2D-ROS2` 使用：
+
+```text
+2D LiDAR + Cartographer
+```
+
+本仓库使用：
+
+```text
+3D LiDAR + LIO-SAM + hdl_localization
+```
+
+如果只是验证阿克曼路径规划、2D SLAM 和 NeuPAN，2D 版本更轻；如果重点是三维感知、LiDAR-Inertial SLAM 与 NDT 定位，使用本仓库。
+
+## License
+
+请以仓库中的第三方子模块 / 组件许可证为准。若根目录后续对整体项目增加统一 License，应同时保留各第三方组件的原始许可证与版权声明。
