@@ -12,16 +12,22 @@
  * 车辆: 小型阿克曼, 0.70m×0.52m, wheelbase=0.593m, min turning radius=1.05m
  */
 
-#include <memory>
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/srv/get_plan.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "std_msgs/msg/float64.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2_ros/buffer.h"
@@ -75,6 +81,11 @@ public:
     // 路径发布话题 — /plan (NeuPAN 订阅) + /plan_path (RViz)
     plan_pub_ = this->create_publisher<nav_msgs::msg::Path>("/plan", 10);
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/plan_path", 10);
+    remaining_distance_pub_ = this->create_publisher<std_msgs::msg::Float64>(
+      _remaining_distance_topic, 10);
+    remaining_distance_timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(100),
+      std::bind(&HybridAStarPlannerNode::publishRemainingDistance, this));
 
     // 地图发布 (latched + 定时重发, 确保 RViz2 后启动也能收到)
     map_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
@@ -142,6 +153,8 @@ private:
       "robot_state_frame", std::string("base_link"));
     _goal_pose_is_base_link = this->declare_parameter("goal_pose_is_base_link", true);
     _rear_axle_offset_x = this->declare_parameter("rear_axle_offset_x", -0.25);
+    _remaining_distance_topic = this->declare_parameter(
+      "remaining_distance_topic", std::string("/global_path_remaining_distance"));
 
     // ---- 分析扩展 ----
     _search_info.analytic_expansion_max_length =
@@ -274,6 +287,10 @@ private:
 
     auto path = doPlan(start, planning_goal, start.header);
     if (!path.poses.empty()) {
+      {
+        std::lock_guard<std::mutex> lock(active_path_mutex_);
+        active_path_ = path;
+      }
       // 发布到 /plan (NeuPAN) 和 /plan_path (RViz)
       plan_pub_->publish(path);
       path_pub_->publish(path);
@@ -378,6 +395,89 @@ private:
     return path;
   }
 
+  // 计算当前位置投影到全局路径后，沿路径到终点的剩余距离。
+  // 这不是当前位置到目标点的直线距离，而是路径曲线上的距离。
+  double calculateRemainingDistance(
+    const nav_msgs::msg::Path & path, double current_x, double current_y) const
+  {
+    if (path.poses.empty()) {
+      return 0.0;
+    }
+
+    if (path.poses.size() == 1) {
+      const auto & goal = path.poses.front().pose.position;
+      return std::hypot(goal.x - current_x, goal.y - current_y);
+    }
+
+    const size_t segment_count = path.poses.size() - 1;
+    std::vector<double> segment_lengths(segment_count, 0.0);
+    std::vector<double> suffix_lengths(path.poses.size(), 0.0);
+
+    for (size_t i = 0; i < segment_count; ++i) {
+      const auto & p0 = path.poses[i].pose.position;
+      const auto & p1 = path.poses[i + 1].pose.position;
+      segment_lengths[i] = std::hypot(p1.x - p0.x, p1.y - p0.y);
+    }
+    for (size_t i = segment_count; i > 0; --i) {
+      suffix_lengths[i - 1] = segment_lengths[i - 1] + suffix_lengths[i];
+    }
+
+    constexpr double epsilon = 1e-9;
+    double best_distance_squared = std::numeric_limits<double>::max();
+    double best_remaining_distance = suffix_lengths.front();
+
+    for (size_t i = 0; i < segment_count; ++i) {
+      const auto & p0 = path.poses[i].pose.position;
+      const auto & p1 = path.poses[i + 1].pose.position;
+      const double dx = p1.x - p0.x;
+      const double dy = p1.y - p0.y;
+      const double length = segment_lengths[i];
+
+      double t = 0.0;
+      if (length > epsilon) {
+        t = ((current_x - p0.x) * dx + (current_y - p0.y) * dy) /
+          (length * length);
+        t = std::max(0.0, std::min(1.0, t));
+      }
+
+      const double projected_x = p0.x + t * dx;
+      const double projected_y = p0.y + t * dy;
+      const double distance_x = current_x - projected_x;
+      const double distance_y = current_y - projected_y;
+      const double distance_squared = distance_x * distance_x + distance_y * distance_y;
+
+      if (distance_squared < best_distance_squared) {
+        best_distance_squared = distance_squared;
+        best_remaining_distance = (1.0 - t) * length + suffix_lengths[i + 1];
+      }
+    }
+
+    return std::max(0.0, best_remaining_distance);
+  }
+
+  void publishRemainingDistance()
+  {
+    nav_msgs::msg::Path path;
+    {
+      std::lock_guard<std::mutex> lock(active_path_mutex_);
+      path = active_path_;
+    }
+
+    if (path.poses.empty()) {
+      return;
+    }
+
+    geometry_msgs::msg::PoseStamped current;
+    if (!lookupMapToRobotState(current)) {
+      return;
+    }
+
+    std_msgs::msg::Float64 remaining;
+    remaining.data = calculateRemainingDistance(
+      path, current.pose.position.x, current.pose.position.y);
+    remaining_distance_pub_->publish(remaining);
+  }
+
   void publishMap()
   {
     auto grid = nav_msgs::msg::OccupancyGrid();
@@ -455,9 +555,13 @@ private:
   rclcpp::Service<nav_msgs::srv::GetPlan>::SharedPtr        plan_srv_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr          plan_pub_;   // /plan (NeuPAN)
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr          path_pub_;   // /plan_path (RViz)
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr       remaining_distance_pub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
   rclcpp::TimerBase::SharedPtr map_timer_;
+  rclcpp::TimerBase::SharedPtr remaining_distance_timer_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
+  nav_msgs::msg::Path active_path_;
+  std::mutex active_path_mutex_;
 
   // 配置参数
   std::string  map_path_;
@@ -476,6 +580,7 @@ private:
   double       _vehicle_length       = 0.70;
   double       _vehicle_width        = 0.52;
   double       _rear_axle_offset_x   = -0.25;
+  std::string  _remaining_distance_topic = "/global_path_remaining_distance";
   float        _min_turning_radius_cells = 21.0f;
 
   MotionModel    _motion_model = MotionModel::REEDS_SHEPP;

@@ -17,6 +17,7 @@
     rear_axle_offset_x: -0.30449        # URDF rear axle x relative to base_link
     vehicle_length: 0.70                # 总长 (m)
     vehicle_width: 0.52                 # 总宽 (m)
+    remaining_distance_topic: "/global_path_remaining_distance"  # 剩余路径距离 (m)
 
     # ---- 搜索参数 ----
     max_iterations: 50000

@@ -1,66 +1,70 @@
 #!/usr/bin/env python3
 """
-cmd_vel_mux.py — Switchable cmd_vel source multiplexer
+cmd_vel_mux.py — NeuPAN command gate with a stop override
 
-Subscribes to DWB (/cmd_vel) and NeuPAN (/neupan_cmd_vel), forwards the
-selected source to the ackermann_steering_controller as TwistStamped.
+Forwards NeuPAN (/neupan_cmd_vel) to the ackermann_steering_controller as
+TwistStamped, unless the /stop override is active.
 
-Switch at runtime:
-    ros2 param set /cmd_vel_mux active_planner neupan
-    ros2 param set /cmd_vel_mux active_planner dwb
+The /stop topic is a centralized stop override.  Publishing
+std_msgs/msg/Bool with data=true forces zero velocity regardless of the
+currently selected planner; publishing data=false releases the override.
+
 """
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, TwistStamped
+from std_msgs.msg import Bool
 
 
 class CmdVelMux(Node):
     def __init__(self):
         super().__init__('cmd_vel_mux')
 
-        self.declare_parameter('active_planner', 'dwb')
-
         self.pub = self.create_publisher(
             TwistStamped, '/ackermann_steering_controller/reference', 10
         )
 
-        self.dwb_sub = self.create_subscription(
-            Twist, '/cmd_vel', self.dwb_callback, 10
-        )
         self.neupan_sub = self.create_subscription(
             Twist, '/neupan_cmd_vel', self.neupan_callback, 10
         )
+        self.stop_sub = self.create_subscription(
+            Bool, '/stop', self.stop_callback, 10
+        )
 
-        self.dwb_msg: Twist | None = None
         self.neupan_msg: Twist | None = None
+        self.stop_requested = False
 
         self.timer = self.create_timer(0.05, self.timer_callback)
 
         self.get_logger().info(
-            'cmd_vel_mux started: DWB(/cmd_vel) + NeuPAN(/neupan_cmd_vel) '
+            'cmd_vel_mux started: NeuPAN(/neupan_cmd_vel) + /stop '
             '→ /ackermann_steering_controller/reference'
         )
-        self.get_logger().info(
-            'Switch: ros2 param set /cmd_vel_mux active_planner <dwb|neupan>'
-        )
-
-    def dwb_callback(self, msg: Twist):
-        self.dwb_msg = msg
 
     def neupan_callback(self, msg: Twist):
         self.neupan_msg = msg
 
-    def timer_callback(self):
-        active = self.get_parameter('active_planner').get_parameter_value().string_value
+    def stop_callback(self, msg: Bool):
+        requested = bool(msg.data)
+        if requested != self.stop_requested:
+            state = 'ACTIVE' if requested else 'RELEASED'
+            self.get_logger().warn(
+                f'/stop override {state}' if requested
+                else '/stop override released'
+            )
+        self.stop_requested = requested
 
-        if active == 'neupan' and self.neupan_msg is not None:
+    def timer_callback(self):
+        if self.stop_requested:
+            # Publish at the mux timer rate so the controller receives a
+            # continuous zero command and cannot resume from a stale command.
+            twist = Twist()
+            source = 'stop'
+        else:
+            if self.neupan_msg is None:
+                return
             twist = self.neupan_msg
             source = 'neupan'
-        elif self.dwb_msg is not None:
-            twist = self.dwb_msg
-            source = 'dwb'
-        else:
-            return
 
         ts = TwistStamped()
         ts.header.stamp = self.get_clock().now().to_msg()

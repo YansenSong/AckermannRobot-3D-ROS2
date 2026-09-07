@@ -34,7 +34,7 @@ def generate_launch_description():
                 parameters=[os.path.join(share, 'config', 'pcl_to_scan.yaml')],
                 remappings=[('cloud_in', '/points_raw'), ('scan', '/scan')])
     mux = Node(package='ackermann_control', executable='cmd_vel_mux.py', name='cmd_vel_mux',
-               output='screen', parameters=[{'use_sim_time': True, 'active_planner': 'neupan'}])
+               output='screen', parameters=[{'use_sim_time': True}])
     rviz = Node(package='rviz2', executable='rviz2', name='rviz2', output='screen',
                 arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')])
     return LaunchDescription(arguments + [localization, planning, scan, mux, rviz])

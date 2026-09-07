@@ -27,7 +27,7 @@ echo "Use sim time: $NEUPAN_USE_SIM_TIME"
 # 启动 NeuPAN (直接调用 main()，绕开入口脚本的 importlib.metadata 问题)
 python3 -c "
 from neupan_ros2.neupan_node import main
-  main()
+main()
 " --ros-args \
   --params-file "$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot/robot.yaml" \
   -p robot_config_dir:="$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot" \

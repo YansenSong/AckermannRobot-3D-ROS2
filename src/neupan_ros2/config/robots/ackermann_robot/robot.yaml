@@ -29,7 +29,7 @@ neupan_node:
     scan_data_timeout: 0.50
 
     # ---- Topic Configuration ----------------------------------------
-    cmd_vel_topic: '/neupan_cmd_vel'      # NeuPAN output (separate from DWB /cmd_vel)
+    cmd_vel_topic: '/neupan_cmd_vel'      # NeuPAN output
     scan_topic: '/scan'                    # 360° 2D LaserScan
     plan_input_topic: '/plan'             # From Nav2 planner_server (global path)
     goal_topic: '/neupan_goal_pose'       # Disabled here; Hybrid A* owns /goal_pose
