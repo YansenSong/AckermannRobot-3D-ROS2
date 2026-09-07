@@ -7,7 +7,7 @@
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <exec_depend>ackermann_control</exec_depend>
-  <exec_depend>ackermann_gazebo</exec_depend>
+  <exec_depend>ackermann_simulation</exec_depend>
   <exec_depend>lio_sam</exec_depend>
   <exec_depend>hdl_localization</exec_depend>
   <exec_depend>hybrid_astar_planner</exec_depend>

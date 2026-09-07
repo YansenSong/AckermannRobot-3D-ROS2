@@ -47,6 +47,8 @@ GlobalMap.pcd ──► hdl_localization ──► map→odom
                                   Ackermann Steering Controller
 ```
 
+NeuPAN 算法源码不参与 ROS 工作空间构建，位于 `third_party/NeuPAN/`；`src/neupan_ros2` 是其 ROS 2 集成层。
+
 ## 主要能力
 
 - 3D LiDAR + IMU 仿真；
@@ -84,17 +86,13 @@ GlobalMap.pcd ──► hdl_localization ──► map→odom
 AckermannRobot-3D-ROS2/
 ├── scripts/                      # 一键启动脚本
 └── src/
-    ├── ackermann_description/    # URDF/Xacro、meshes 与模型预览
+    ├── ackermann_simulation/     # URDF/Xacro、Gazebo、worlds、meshes、传感器仿真
     ├── ackermann_control/        # ros2_control、cmd_vel 与键盘控制
-    ├── ackermann_gazebo/         # Gazebo 仿真与 LiDAR 适配
     ├── ackermann_bringup/        # 建图、定位、规划与导航组合 launch
     ├── LIO-SAM/                  # LiDAR-Inertial SLAM
     ├── hdl_localization/         # NDT 点云定位
     ├── hybrid_astar_planner/     # 独立 Hybrid A* 全局规划器
     ├── neupan_ros2/              # NeuPAN ROS 2 封装
-    ├── NeuPAN/                   # NeuPAN 算法源码 / 子模块
-    ├── pcd2pgm/                  # PCD → 2D 地图工具
-    ├── gazebo_worlds/            # Gazebo worlds / models / maps
     └── maps/                     # 地图资源
 ```
 
@@ -179,13 +177,13 @@ source ~/AckermannRobot-3D-ROS2/install/setup.bash
 ### RViz 模型预览
 
 ```bash
-ros2 launch ackermann_description display.launch.py
+ros2 launch ackermann_simulation display.launch.py
 ```
 
 ### Gazebo 仿真
 
 ```bash
-ros2 launch ackermann_gazebo gazebo.launch.py
+ros2 launch ackermann_simulation gazebo.launch.py
 ```
 
 ### 键盘控制
@@ -235,14 +233,14 @@ ros2 launch ackermann_control keyboard_control.launch.py
 先准备输出目录，例如：
 
 ```bash
-mkdir -p "$PWD/src/gazebo_worlds/worlds/mini/maps"
+mkdir -p "$PWD/src/ackermann_simulation/worlds/mini/maps"
 ```
 
 再调用 LIO-SAM 保存服务，并把 `destination` 换成你机器上的**绝对路径**：
 
 ```bash
 ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap \
-  "{resolution: 0.2, destination: /absolute/path/to/AckermannRobot-3D-ROS2/src/gazebo_worlds/worlds/mini/maps/}"
+  "{resolution: 0.2, destination: /absolute/path/to/AckermannRobot-3D-ROS2/src/ackermann_simulation/worlds/mini/maps/}"
 ```
 
 输出通常包括：
@@ -257,12 +255,19 @@ GlobalMap.pcd
 
 Hybrid A* 使用 2D Occupancy Map，因此需要把三维 PCD 转为 PGM / YAML。
 
-项目中提供 PCD 转换工具。编译后可按实际生成的可执行文件调用，例如：
+项目中提供独立 PCL 工具，不参与 `colcon build`。先单独编译：
 
 ```bash
-./build/pcd2gridmap/pcd2gridmap \
-  src/gazebo_worlds/worlds/mini/maps/GlobalMap.pcd \
-  -o src/gazebo_worlds/worlds/mini/maps/map
+cmake -S tools/pcd2pgm -B tools/pcd2pgm/build
+cmake --build tools/pcd2pgm/build -j
+```
+
+随后调用：
+
+```bash
+./tools/pcd2pgm/build/pcd2gridmap \
+  src/ackermann_simulation/worlds/mini/maps/GlobalMap.pcd \
+  -o src/ackermann_simulation/worlds/mini/maps/map
 ```
 
 输出：

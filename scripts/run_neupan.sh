@@ -15,13 +15,13 @@ conda activate neupan
 # 设置 Python 路径：优先使用当前主仓库中的 NeuPAN 子模块。
 # Conda 中预装的 neupan 可能是旧版本；如果它排在子模块前面，运行时
 # 会绕过源码中的 Ackermann 修复（例如 min_speed 上下界）。
-export PYTHONPATH="$PROJECT_DIR/src/NeuPAN:$CONDA_PREFIX/lib/python3.10/site-packages:${PYTHONPATH:-}"
+export PYTHONPATH="$PROJECT_DIR/third_party/NeuPAN:$CONDA_PREFIX/lib/python3.10/site-packages:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 echo "=== NeuPAN ==="
 echo "Python: $(which python3)"
 echo "Conda env: $CONDA_DEFAULT_ENV"
-echo "NeuPAN source: $PROJECT_DIR/src/NeuPAN"
+echo "NeuPAN source: $PROJECT_DIR/third_party/NeuPAN"
 echo "Use sim time: $NEUPAN_USE_SIM_TIME"
 
 # 启动 NeuPAN (直接调用 main()，绕开入口脚本的 importlib.metadata 问题)

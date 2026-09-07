@@ -9,7 +9,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def generate_launch_description():
-    ackermann_share = get_package_share_directory('ackermann_gazebo')
+    ackermann_share = get_package_share_directory('ackermann_simulation')
     lio_share = get_package_share_directory('lio_sam')
 
     gazebo = IncludeLaunchDescription(

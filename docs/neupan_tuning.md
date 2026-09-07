@@ -339,11 +339,11 @@ d_max → eta → d_min → avoidance_seed_steer → q_s → p_u
 | `src/neupan_ros2/config/robots/ackermann_robot/planner.yaml` | NeuPAN MPC、机器人几何、PAN 和避障参数 |
 | `src/neupan_ros2/config/robots/ackermann_robot/robot.yaml` | ROS 参数、TF、LaserScan、控制频率和安全超时 |
 | `src/neupan_ros2/neupan_ros2/neupan_node.py` | ROS 输入输出、TF、扫描处理、命令限幅和安全停车 |
-| `src/NeuPAN/neupan/neupan.py` | NeuPAN 主流程和临时障碍绕行初值 |
-| `src/NeuPAN/neupan/blocks/pan.py` | PAN 交替优化、DUNE/NRMP 调用 |
-| `src/NeuPAN/neupan/blocks/nrmp.py` | CVXPY/凸优化代价与约束 |
-| `src/NeuPAN/neupan/robot/robot.py` | Ackermann 几何、速度边界和线性化模型 |
-| `src/NeuPAN/example/dune_train/model/ackermann_robot_sim_070x052/model_5000.pth` | 当前仿真车训练权重 |
+| `third_party/NeuPAN/neupan/neupan.py` | NeuPAN 主流程和临时障碍绕行初值 |
+| `third_party/NeuPAN/neupan/blocks/pan.py` | PAN 交替优化、DUNE/NRMP 调用 |
+| `third_party/NeuPAN/neupan/blocks/nrmp.py` | CVXPY/凸优化代价与约束 |
+| `third_party/NeuPAN/neupan/robot/robot.py` | Ackermann 几何、速度边界和线性化模型 |
+| `third_party/NeuPAN/example/dune_train/model/ackermann_robot_sim_070x052/model_5000.pth` | 当前仿真车训练权重 |
 | `src/neupan_ros2/config/robots/ackermann_robot/models/dune_model_5000.pth` | ROS 运行时加载的 DUNE 权重 |
 | `scripts/run_neupan.sh` | Conda 环境和 NeuPAN 节点启动脚本 |
 
