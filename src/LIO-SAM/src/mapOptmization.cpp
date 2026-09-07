@@ -17,7 +17,11 @@
 #include <gtsam/nonlinear/ISAM2.h>
 
 #include <cstdlib>
+#include <chrono>
+#include <ctime>
 #include <filesystem>
+#include <iomanip>
+#include <sstream>
 #include <system_error>
 
 using namespace gtsam;
@@ -26,6 +30,22 @@ using symbol_shorthand::X; // Pose3 (x,y,z,r,p,y)
 using symbol_shorthand::V; // Vel   (xdot,ydot,zdot)
 using symbol_shorthand::B; // Bias  (ax,ay,az,gx,gy,gz)
 using symbol_shorthand::G; // GPS pose
+
+namespace {
+
+std::filesystem::path timestampedMapDirectory(const std::filesystem::path& mapRoot)
+{
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t currentTime = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime {};
+    localtime_r(&currentTime, &localTime);
+
+    std::ostringstream timestamp;
+    timestamp << std::put_time(&localTime, "%Y%m%d_%H%M%S");
+    return mapRoot / timestamp.str();
+}
+
+}  // namespace
 
 /*
     * A point cloud type that has 6D pose info ([x,y,z,roll,pitch,yaw] intensity is time stamp)
@@ -187,28 +207,19 @@ public:
             cout << "****************************************************" << endl;
             cout << "Saving map to pcd files ..." << endl;
 
-            const char *homeEnvironment = std::getenv("HOME");
-            if (homeEnvironment == nullptr) {
-                RCLCPP_ERROR(this->get_logger(), "Cannot save map: HOME environment variable is not set");
-                res->success = false;
-                return;
-            }
-
-            const fs::path homeDirectory(homeEnvironment);
             if (req->destination.empty()) {
-                // savePCDDirectory historically stores a path relative to HOME,
-                // even though it starts with '/'.
-                fs::path configuredDirectory(savePCDDirectory);
-                if (configuredDirectory.is_absolute()) {
-                    configuredDirectory = configuredDirectory.relative_path();
-                }
-                saveMapDirectory = (homeDirectory / configuredDirectory).lexically_normal().string();
+                const fs::path configuredDirectory(savePCDDirectory);
+                saveMapDirectory = (configuredDirectory.is_absolute()
+                    ? configuredDirectory
+                    : fs::current_path() / configuredDirectory).lexically_normal().string();
             } else {
                 const fs::path requestedDirectory(req->destination);
                 saveMapDirectory = (requestedDirectory.is_absolute()
                     ? requestedDirectory
-                    : homeDirectory / requestedDirectory).lexically_normal().string();
+                    : fs::current_path() / requestedDirectory).lexically_normal().string();
             }
+
+            saveMapDirectory = timestampedMapDirectory(saveMapDirectory).string();
 
             cout << "Save destination: " << saveMapDirectory << endl;
 
@@ -454,9 +465,22 @@ public:
             return;
         cout << "****************************************************" << endl;
         cout << "Saving map to pcd files ..." << endl;
-        savePCDDirectory = std::getenv("HOME") + savePCDDirectory;
-        int unused = system((std::string("exec rm -r ") + savePCDDirectory).c_str());
-        unused = system((std::string("mkdir ") + savePCDDirectory).c_str());
+        namespace fs = std::filesystem;
+        const fs::path configuredDirectory(savePCDDirectory);
+        savePCDDirectory = (configuredDirectory.is_absolute()
+            ? configuredDirectory
+            : fs::current_path() / configuredDirectory).lexically_normal().string();
+        savePCDDirectory = timestampedMapDirectory(savePCDDirectory).string();
+        if (!savePCDDirectory.empty() && savePCDDirectory.back() != '/') {
+            savePCDDirectory += '/';
+        }
+        std::error_code directoryError;
+        fs::create_directories(savePCDDirectory, directoryError);
+        if (directoryError) {
+            RCLCPP_ERROR(this->get_logger(), "Cannot create map directory '%s': %s",
+                savePCDDirectory.c_str(), directoryError.message().c_str());
+            return;
+        }
         pcl::io::savePCDFileASCII(savePCDDirectory + "trajectory.pcd", *cloudKeyPoses3D);
         pcl::io::savePCDFileASCII(savePCDDirectory + "transformations.pcd", *cloudKeyPoses6D);
         pcl::PointCloud<PointType>::Ptr globalCornerCloud(new pcl::PointCloud<PointType>());

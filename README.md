@@ -2,8 +2,6 @@
 
 一个基于 **ROS 2 Humble + Gazebo Classic 11** 的小型阿克曼机器人 3D 建图、定位与自主导航项目。
 
-与 2D 版本不同，这个仓库以 **3D LiDAR + LIO-SAM + NDT 定位** 为主：建图阶段由 LIO-SAM 生成 PCD 地图；导航阶段使用 hdl_localization 在三维点云地图中定位，同时将 PCD 投影 / 转换为 2D OccupancyGrid，供 Hybrid A* 规划全局路径，再由 NeuPAN 执行局部避障与车辆控制。
-
 ## 系统架构
 
 ```text
@@ -64,7 +62,7 @@ NeuPAN 算法源码不参与 ROS 工作空间构建，位于 `third_party/NeuPAN
 - RViz 初始位姿与目标点交互；
 - 一键建图 / 导航脚本。
 
-## 车辆参数
+## 仿真车辆参数
 
 | 参数 | 值 |
 |---|---:|
@@ -206,7 +204,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard \
 推荐入口：
 
 ```bash
-ros2 launch ackermann_bringup mapping.launch.py
+bash scripts/mapping_mini.sh
 ```
 
 建图模式会处理 TF 发布关系，避免 EKF 与 LIO-SAM 同时争抢同一条变换。
@@ -233,14 +231,14 @@ ros2 launch ackermann_control keyboard_control.launch.py
 先准备输出目录，例如：
 
 ```bash
-mkdir -p "$PWD/src/ackermann_simulation/gazebo/worlds/mini/maps"
+mkdir -p "$PWD/maps"
 ```
 
-再调用 LIO-SAM 保存服务，并把 `destination` 换成你机器上的**绝对路径**：
+再调用 LIO-SAM 保存服务。它会在地图根目录下新建以保存时间命名的目录，例如 `maps/20260907_143025/`：
 
 ```bash
 ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap \
-  "{resolution: 0.2, destination: /absolute/path/to/AckermannRobot-3D-ROS2/src/ackermann_simulation/gazebo/worlds/mini/maps/}"
+  "{resolution: 0.2, destination: $PWD/maps/}"
 ```
 
 输出通常包括：
@@ -249,7 +247,7 @@ ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap \
 GlobalMap.pcd
 ```
 
-> 不要直接复制 README 中其他机器的 `/home/...` 路径；ROS service 参数应使用你当前机器的真实绝对路径。
+> 在项目根目录执行该命令时，`$PWD/maps/` 就是项目根的 `maps/` 目录。
 
 ## 生成 2D 地图
 
@@ -258,16 +256,17 @@ Hybrid A* 使用 2D Occupancy Map，因此需要把三维 PCD 转为 PGM / YAML�
 项目中提供独立 PCL 工具，不参与 `colcon build`。先单独编译：
 
 ```bash
-cmake -S tools/pcd2pgm -B tools/pcd2pgm/build
-cmake --build tools/pcd2pgm/build -j
+cmake -S third_party/pcd2pgm -B third_party/pcd2pgm/build
+cmake --build third_party/pcd2pgm/build -j
 ```
 
 随后调用：
 
 ```bash
-./tools/pcd2pgm/build/pcd2gridmap \
-  src/ackermann_simulation/gazebo/worlds/mini/maps/GlobalMap.pcd \
-  -o src/ackermann_simulation/gazebo/worlds/mini/maps/map
+MAP_TIMESTAMP=20260907_143025  # 替换为 save_map 输出的实际时间目录
+./third_party/pcd2pgm/build/pcd2gridmap \
+  "maps/$MAP_TIMESTAMP/GlobalMap.pcd" \
+  -o "maps/$MAP_TIMESTAMP/map"
 ```
 
 输出：

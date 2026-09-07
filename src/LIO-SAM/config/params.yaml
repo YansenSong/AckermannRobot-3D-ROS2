@@ -21,7 +21,8 @@
 
     # Export settings
     savePCD: false                               # https://github.com/TixiaoShan/LIO-SAM/issues/3
-    savePCDDirectory: "/AckermannRobot-3D/src/ackermann_simulation/gazebo/worlds/mini/maps/"   # in your home folder
+    # Relative paths resolve from the directory where LIO-SAM is launched.
+    savePCDDirectory: "maps/"
 
     # Sensor Settings
     sensor: velodyne                             # lidar sensor type, either 'velodyne', 'ouster' or 'livox'

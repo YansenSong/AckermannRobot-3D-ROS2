@@ -4,12 +4,17 @@
 # 前置: 需先用 LIO-SAM 建好 GlobalMap.pcd + 转为 map.pgm/map.yaml
 #
 # 用法:
-#   终端 1: bash scripts/nav_hdl_neupan.sh
+#   终端 1: bash scripts/nav_hdl_neupan.sh <YYYYMMDD_HHMMSS>
 #   终端 2: bash scripts/run_neupan.sh
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+MAP_TIMESTAMP="${1:?Usage: bash scripts/nav_hdl_neupan.sh <YYYYMMDD_HHMMSS>}"
+MAP_DIR="$PROJECT_DIR/maps/$MAP_TIMESTAMP"
+test -f "$MAP_DIR/GlobalMap.pcd"
+test -f "$MAP_DIR/map.pgm"
+test -f "$MAP_DIR/map.yaml"
 source "$PROJECT_DIR/install/setup.bash"
 
 echo "=== Gazebo + 机器人 ==="
@@ -18,9 +23,9 @@ sleep 5
 
 echo "=== hdl_localization + Hybrid A* + NeuPAN ==="
 ros2 launch ackermann_bringup navigation.launch.py \
-    map:="$PROJECT_DIR/src/ackermann_simulation/gazebo/worlds/mini/maps/map.yaml" \
-    map_pgm:="$PROJECT_DIR/src/ackermann_simulation/gazebo/worlds/mini/maps/map.pgm" \
-    globalmap_pcd:="$PROJECT_DIR/src/ackermann_simulation/gazebo/worlds/mini/maps/GlobalMap.pcd"
+    map:="$MAP_DIR/map.yaml" \
+    map_pgm:="$MAP_DIR/map.pgm" \
+    globalmap_pcd:="$MAP_DIR/GlobalMap.pcd"
 
 echo ""
 echo "=============================================="
