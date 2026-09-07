@@ -13,11 +13,11 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$PROJECT_DIR/install/setup.bash"
 
 echo "=== Gazebo + 机器人 ==="
-ros2 launch ackermann_robot gazebo.launch.py publish_ekf_tf:=true &
+ros2 launch ackermann_gazebo gazebo.launch.py publish_ekf_tf:=true &
 sleep 5
 
 echo "=== hdl_localization + Hybrid A* + NeuPAN ==="
-ros2 launch robot_slam navigation_hdl.launch.py \
+ros2 launch ackermann_bringup navigation.launch.py \
     map:="$PROJECT_DIR/src/gazebo_worlds/worlds/mini/maps/map.yaml" \
     map_pgm:="$PROJECT_DIR/src/gazebo_worlds/worlds/mini/maps/map.pgm" \
     globalmap_pcd:="$PROJECT_DIR/src/gazebo_worlds/worlds/mini/maps/GlobalMap.pcd"

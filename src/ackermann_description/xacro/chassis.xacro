@@ -19,7 +19,7 @@
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0" />
             <geometry>
-                <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/base_link.STL" />
+                <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/base_link.STL" />
             </geometry>
             <material name="blue"/>
         </visual>
@@ -65,7 +65,7 @@
             <visual>
                 <origin xyz="0 0 0" rpy="0 0 0" />
                 <geometry>
-                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_rear_wheel_link.STL" />
+                    <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/${prefix}_rear_wheel_link.STL" />
                 </geometry>
                 <material name="white"/>
             </visual>
@@ -108,13 +108,13 @@
             </inertial>
             <visual>
                 <geometry>
-                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_steering_link.STL" />
+                    <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/${prefix}_steering_link.STL" />
                 </geometry>
                 <material name="blue"/>
             </visual>
             <collision>
                 <geometry>
-                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_steering_link.STL" />
+                    <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/${prefix}_steering_link.STL" />
                 </geometry>
             </collision>
         </link>
@@ -135,7 +135,7 @@
             </inertial>
             <visual>
                 <geometry>
-                    <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/${prefix}_front_wheel_link.STL" />
+                    <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/${prefix}_front_wheel_link.STL" />
                 </geometry>
                 <material name="white"/>
             </visual>

@@ -55,7 +55,7 @@
 
     <gazebo>
         <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
-            <parameters>$(find ackermann_robot)/config/ackermann_controllers.yaml</parameters>
+            <parameters>$(find ackermann_control)/config/ackermann_controllers.yaml</parameters>
             <ros>
                 <remapping>/ackermann_steering_controller/odometry:=/odom_wheel</remapping>
             </ros>

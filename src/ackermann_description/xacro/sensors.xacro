@@ -8,7 +8,7 @@
             <inertia ixx="0.00395" ixy="0.0" ixz="0.0" iyy="0.00395" iyz="0.0" izz="0.00227" />
         </inertial>
         <visual>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/laser_link.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/laser_link.STL" /> </geometry>
             <material name="white"/>
         </visual>
         <collision>
@@ -79,11 +79,11 @@
             <inertia ixx="3.38e-05" ixy="-2.19e-09" ixz="1.07e-06" iyy="3.94e-05" iyz="6.83e-10" izz="5.60e-05" />
         </inertial>
         <visual>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/flaser.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/flaser.STL" /> </geometry>
             <material name="grey"/>
         </visual>
         <collision>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/flaser.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/flaser.STL" /> </geometry>
         </collision>
     </link>
     <joint name="flaser_joint" type="fixed">
@@ -122,11 +122,11 @@
             <inertia ixx="0.00013" ixy="1.2e-07" ixz="1.62e-06" iyy="1.91e-05" iyz="-2.8e-08" izz="0.00013" />
         </inertial>
         <visual>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/camera_link.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/camera_link.STL" /> </geometry>
             <material name="white"/>
         </visual>
         <collision>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/camera_link.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/camera_link.STL" /> </geometry>
         </collision>
     </link>
     <joint name="camera_joint" type="fixed">
@@ -186,11 +186,11 @@
             <inertia ixx="5.41e-06" ixy="-2.2e-14" ixz="-1.81e-09" iyy="4.38e-06" iyz="4.78e-14" izz="9.32e-06" />
         </inertial>
         <visual>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/gyro_link.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/gyro_link.STL" /> </geometry>
             <material name="blue"/>
         </visual>
         <collision>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/gyro_link.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/gyro_link.STL" /> </geometry>
         </collision>
     </link>
     <joint name="gyro_joint" type="fixed">
@@ -230,11 +230,11 @@
             <inertia ixx="0.00081" ixy="-9.5e-11" ixz="1.19e-06" iyy="0.00081" iyz="-8.5e-11" izz="0.00139" />
         </inertial>
         <visual>
-            <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/rtk_link.STL" /> </geometry>
+            <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/rtk_link.STL" /> </geometry>
             <material name="white"/>
         </visual>
         <collision>
-             <geometry> <mesh filename="package://ackermann_robot/meshes/top_akm_bs_robot_meshes/rtk_link.STL" /> </geometry>
+             <geometry> <mesh filename="package://ackermann_description/meshes/top_akm_bs_robot_meshes/rtk_link.STL" /> </geometry>
         </collision>
     </link>
     <joint name="rtk_joint" type="fixed">

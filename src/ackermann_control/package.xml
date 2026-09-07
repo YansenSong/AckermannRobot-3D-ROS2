@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ackermann_control</name>
+  <version>0.1.0</version>
+  <description>Command processing, teleoperation, and controller configuration for the Ackermann robot.</description>
+  <maintainer email="zoe@todo.todo">zoe</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>ros2_control</exec_depend>
+  <exec_depend>ros2_controllers</exec_depend>
+  <exec_depend>ackermann_steering_controller</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

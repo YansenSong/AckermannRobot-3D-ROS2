@@ -9,12 +9,12 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # 1. 获取包路径
-    pkg_name = 'ackermann_robot'
+    pkg_name = 'ackermann_description'
     pkg_share = get_package_share_directory(pkg_name)
 
     # 2. 路径定义
     xacro_file = os.path.join(pkg_share, 'xacro', 'robot.xacro')
-    rviz_config_file = os.path.join(pkg_share, 'config', 'view_robot.rviz')
+    rviz_config_file = os.path.join(pkg_share, 'rviz', 'view_robot.rviz')
 
     # 3. 解析 URDF/Xacro
     robot_description = Command(['xacro ', xacro_file])
@@ -45,20 +45,8 @@ def generate_launch_description():
         arguments=['-d', rviz_config_file]
     )
 
-    # 键盘控制 (↑↓←→)
-    keyboard_control = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            PathJoinSubstitution([
-                FindPackageShare('ackermann_robot'),
-                'launch',
-                'keyboard_control.launch.py'
-            ])
-        ])
-    )
-
     return LaunchDescription([
         node_robot_state_publisher,
         node_joint_state_publisher_gui,
         node_rviz,
-        keyboard_control
     ])

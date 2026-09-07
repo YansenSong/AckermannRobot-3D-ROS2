@@ -1,26 +1,34 @@
+# gazebo.launch.py
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
+from launch.conditions import IfCondition
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    package_name = 'ackermann_robot'
-    pkg_share = get_package_share_directory(package_name)
+    description_share = get_package_share_directory('ackermann_description')
+    control_share = get_package_share_directory('ackermann_control')
+    gazebo_share = get_package_share_directory('ackermann_gazebo')
 
     publish_ekf_tf_arg = DeclareLaunchArgument(
         'publish_ekf_tf',
         default_value='true',
         description='Publish odom -> base_link from EKF (disable when LIO-SAM owns this TF)',
     )
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
+        description='Start the robot RViz instance',
+    )
 
     # 1. 解析 URDF (XACRO)
-    xacro_file = os.path.join(pkg_share, 'xacro', 'robot.xacro')
+    xacro_file = os.path.join(description_share, 'xacro', 'robot.xacro')
     robot_description_content = ParameterValue(
         Command(['xacro ', xacro_file]),
         value_type=str
@@ -29,7 +37,8 @@ def generate_launch_description():
     world_file_path = os.path.join(get_package_share_directory('gazebo_worlds'), 'worlds', 'mini', 'mini.world')
 
     # 设置 GAZEBO_MODEL_PATH 环境变量
-    pkg_share_env = os.pathsep + os.path.dirname(pkg_share)
+    # Gazebo resolves model://ackermann_gazebo/... from this package's parent.
+    pkg_share_env = os.pathsep + os.path.dirname(gazebo_share)
     if 'GAZEBO_MODEL_PATH' in os.environ:
         os.environ['GAZEBO_MODEL_PATH'] += pkg_share_env
     else:
@@ -78,8 +87,10 @@ def generate_launch_description():
         output='screen'
     )
 
+    # Gazebo's ray sensor does not publish Velodyne ring/time fields.  This
+    # adapter adds them for LIO-SAM while preserving the original /points_raw.
     lidar_adapter_node = Node(
-        package='ackermann_robot',
+        package='ackermann_gazebo',
         executable='gazebo_lidar_adapter.py',
         name='gazebo_lidar_adapter',
         output='screen',
@@ -104,9 +115,8 @@ def generate_launch_description():
         output="screen"
     )
 
-    # ================= EKF 节点 =================
-    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf_config.yaml')
-    
+    # ================= EKF 融合 (轮式里程计 + IMU → odom→base_link TF) =================
+    ekf_config_path = os.path.join(control_share, 'config', 'ekf_config.yaml')
     ekf_node = Node(
         package='robot_localization',
         executable='ekf_node',
@@ -120,30 +130,28 @@ def generate_launch_description():
                     LaunchConfiguration('publish_ekf_tf'), value_type=bool),
             },
         ],
-        remappings=[('/odometry/filtered', '/odometry/filtered')] 
+        remappings=[('/odometry/filtered', '/odometry/filtered')],
     )
 
-    # ================= 启动 cmd_vel_stamper 节点 =================
-    cmd_vel_stamper_node = Node(
-        package='ackermann_robot',
-        executable='cmd_vel_stamper.py', # 如果报错找不到，请检查 CMakeLists.txt 是否安装了此脚本
-        name='cmd_vel_stamper',
+    # ================= RViz =================
+    rviz_config_file = os.path.join(description_share, 'rviz', 'view_robot.rviz')
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
         output='screen',
-        parameters=[{'use_sim_time': True}] # 关键：让节点使用仿真时间，保证时间戳与 Gazebo 同步
+        arguments=['-d', rviz_config_file],
+        condition=IfCondition(LaunchConfiguration('use_rviz')),
     )
-    # ===================================================================
-    
+
     # ================= 返回 Launch Description =================
     return LaunchDescription([
         publish_ekf_tf_arg,
+        use_rviz_arg,
         robot_state_publisher,
         gazebo_launch,
         spawn_entity,
         lidar_adapter_node,
-        ekf_node,
-
-        # 立即启动转换节点，不需要等待其他事件
-        cmd_vel_stamper_node,
 
         # 使用事件处理器确保控制器在模型生成后启动
         RegisterEventHandler(
@@ -152,11 +160,20 @@ def generate_launch_description():
                 on_exit=[load_joint_state_broadcaster],
             )
         ),
-        
+
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=load_joint_state_broadcaster,
                 on_exit=[load_ackermann_controller],
             )
         ),
+
+        RegisterEventHandler(
+            event_handler=OnProcessExit(
+                target_action=load_ackermann_controller,
+                on_exit=[ekf_node],
+            )
+        ),
+
+        rviz_node,
     ])

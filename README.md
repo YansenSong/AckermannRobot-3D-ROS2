@@ -84,8 +84,10 @@ GlobalMap.pcd ──► hdl_localization ──► map→odom
 AckermannRobot-3D-ROS2/
 ├── scripts/                      # 一键启动脚本
 └── src/
-    ├── ackermann_robot/          # URDF/Xacro、Gazebo、ros2_control、cmd_vel_mux
-    ├── robot_slam/               # 3D 定位与导航 launch
+    ├── ackermann_description/    # URDF/Xacro、meshes 与模型预览
+    ├── ackermann_control/        # ros2_control、cmd_vel 与键盘控制
+    ├── ackermann_gazebo/         # Gazebo 仿真与 LiDAR 适配
+    ├── ackermann_bringup/        # 建图、定位、规划与导航组合 launch
     ├── LIO-SAM/                  # LiDAR-Inertial SLAM
     ├── hdl_localization/         # NDT 点云定位
     ├── hybrid_astar_planner/     # 独立 Hybrid A* 全局规划器
@@ -177,19 +179,19 @@ source ~/AckermannRobot-3D-ROS2/install/setup.bash
 ### RViz 模型预览
 
 ```bash
-ros2 launch ackermann_robot review.launch.py
+ros2 launch ackermann_description display.launch.py
 ```
 
 ### Gazebo 仿真
 
 ```bash
-ros2 launch ackermann_robot gazebo.launch.py
+ros2 launch ackermann_gazebo gazebo.launch.py
 ```
 
 ### 键盘控制
 
 ```bash
-ros2 launch ackermann_robot keyboard_control.launch.py
+ros2 launch ackermann_control keyboard_control.launch.py
 ```
 
 也可以直接发送到 NeuPAN 控制入口：
@@ -206,7 +208,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard \
 推荐入口：
 
 ```bash
-ros2 launch ackermann_robot mapping.launch.py
+ros2 launch ackermann_bringup mapping.launch.py
 ```
 
 建图模式会处理 TF 发布关系，避免 EKF 与 LIO-SAM 同时争抢同一条变换。
@@ -218,7 +220,7 @@ ros2 launch ackermann_robot mapping.launch.py
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/AckermannRobot-3D-ROS2/install/setup.bash
-ros2 launch ackermann_robot keyboard_control.launch.py
+ros2 launch ackermann_control keyboard_control.launch.py
 ```
 
 建图时建议：
