@@ -86,7 +86,7 @@ NeuPAN 算法源码不参与 ROS 工作空间构建，位于 `third_party/NeuPAN
 AckermannRobot-3D-ROS2/
 ├── scripts/                      # 一键启动脚本
 └── src/
-    ├── ackermann_simulation/     # URDF/Xacro、Gazebo、worlds、meshes、传感器仿真
+    ├── ackermann_simulation/     # gazebo/{launch,worlds,scripts} 与 robot/{xacro,meshes,rviz}
     ├── ackermann_control/        # ros2_control、cmd_vel 与键盘控制
     ├── ackermann_bringup/        # 建图、定位、规划与导航组合 launch
     ├── LIO-SAM/                  # LiDAR-Inertial SLAM
@@ -233,14 +233,14 @@ ros2 launch ackermann_control keyboard_control.launch.py
 先准备输出目录，例如：
 
 ```bash
-mkdir -p "$PWD/src/ackermann_simulation/worlds/mini/maps"
+mkdir -p "$PWD/src/ackermann_simulation/gazebo/worlds/mini/maps"
 ```
 
 再调用 LIO-SAM 保存服务，并把 `destination` 换成你机器上的**绝对路径**：
 
 ```bash
 ros2 service call /lio_sam/save_map lio_sam/srv/SaveMap \
-  "{resolution: 0.2, destination: /absolute/path/to/AckermannRobot-3D-ROS2/src/ackermann_simulation/worlds/mini/maps/}"
+  "{resolution: 0.2, destination: /absolute/path/to/AckermannRobot-3D-ROS2/src/ackermann_simulation/gazebo/worlds/mini/maps/}"
 ```
 
 输出通常包括：
@@ -266,8 +266,8 @@ cmake --build tools/pcd2pgm/build -j
 
 ```bash
 ./tools/pcd2pgm/build/pcd2gridmap \
-  src/ackermann_simulation/worlds/mini/maps/GlobalMap.pcd \
-  -o src/ackermann_simulation/worlds/mini/maps/map
+  src/ackermann_simulation/gazebo/worlds/mini/maps/GlobalMap.pcd \
+  -o src/ackermann_simulation/gazebo/worlds/mini/maps/map
 ```
 
 输出：

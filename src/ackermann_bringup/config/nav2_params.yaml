@@ -1,3 +1,0 @@
-# Nav2 params removed — replaced by standalone Hybrid A* planner (hybrid_astar_planner)
-# NeuPAN handles local planning without costmaps.
-# See: navigation_hdl.launch.py and src/hybrid_astar_planner/

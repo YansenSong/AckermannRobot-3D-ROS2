@@ -18,9 +18,9 @@ sleep 5
 
 echo "=== hdl_localization + Hybrid A* + NeuPAN ==="
 ros2 launch ackermann_bringup navigation.launch.py \
-    map:="$PROJECT_DIR/src/ackermann_simulation/worlds/mini/maps/map.yaml" \
-    map_pgm:="$PROJECT_DIR/src/ackermann_simulation/worlds/mini/maps/map.pgm" \
-    globalmap_pcd:="$PROJECT_DIR/src/ackermann_simulation/worlds/mini/maps/GlobalMap.pcd"
+    map:="$PROJECT_DIR/src/ackermann_simulation/gazebo/worlds/mini/maps/map.yaml" \
+    map_pgm:="$PROJECT_DIR/src/ackermann_simulation/gazebo/worlds/mini/maps/map.pgm" \
+    globalmap_pcd:="$PROJECT_DIR/src/ackermann_simulation/gazebo/worlds/mini/maps/GlobalMap.pcd"
 
 echo ""
 echo "=============================================="
