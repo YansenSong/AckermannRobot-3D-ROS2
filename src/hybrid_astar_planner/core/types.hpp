@@ -32,6 +32,7 @@ struct SearchInfo
   float non_straight_penalty;
   float change_penalty;
   float reverse_penalty;
+  float gear_change_penalty{1.0f};
   float cost_penalty;
   float analytic_expansion_ratio;
   float analytic_expansion_max_length{60.0};

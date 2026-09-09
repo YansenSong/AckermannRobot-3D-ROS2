@@ -9,6 +9,7 @@ msg_gen/
 srv_gen/
 build_isolated/
 devel_isolated/
+.pytest_cache/
 .vscode/
 .superpowers
 .worktrees/

@@ -120,15 +120,20 @@ public:
   /** 整数栅格坐标 → 世界坐标 (取格点中心) */
   void mapToWorld(unsigned int mx, unsigned int my, double & wx, double & wy) const
   {
+    mapToWorld(static_cast<double>(mx), static_cast<double>(my), wx, wy);
+  }
+
+  /** 连续栅格坐标 → 世界坐标 (连续坐标以栅格中心为整数位置) */
+  void mapToWorld(double mx, double my, double & wx, double & wy) const
+  {
     wx = origin_x_ + (mx + 0.5) * resolution_;
     wy = origin_y_ + (my + 0.5) * resolution_;
   }
 
-  /** 连续栅格坐标 → 世界坐标 (保持精度) */
+  /** 连续栅格坐标 → 世界坐标 (保持精度，且与碰撞检查使用同一坐标约定) */
   void mapToWorldContinuous(float mx, float my, double & wx, double & wy) const
   {
-    wx = origin_x_ + static_cast<double>(mx) * resolution_;
-    wy = origin_y_ + static_cast<double>(my) * resolution_;
+    mapToWorld(static_cast<double>(mx), static_cast<double>(my), wx, wy);
   }
 
   /** 获取指定栅格 cost 值 (已映射到 Nav2 约定) */

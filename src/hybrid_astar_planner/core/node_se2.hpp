@@ -124,6 +124,7 @@ struct MotionTable
   float non_straight_penalty;
   float cost_penalty;
   float reverse_penalty;
+  float gear_change_penalty;
   ompl::base::StateSpacePtr state_space;
 };
 

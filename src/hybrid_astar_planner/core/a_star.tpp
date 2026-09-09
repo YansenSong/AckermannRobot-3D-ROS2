@@ -284,10 +284,23 @@ typename AStarAlgorithm<CostmapT, CollisionCheckerT>::NodePtr AStarAlgorithm<Cos
   to[2] = _goal_coordinates.theta * node->motion_table.bin_size;
 
   float d = node->motion_table.state_space->distance(from(), to());
+  if (_search_info.analytic_expansion_max_length > 0.0f &&
+    d > _search_info.analytic_expansion_max_length)
+  {
+    return NodePtr(nullptr);
+  }
+
   NodePtr prev(node);
   // A move of sqrt(2) is guaranteed to be in a new cell
   static const float sqrt_2 = std::sqrt(2.);
   unsigned int num_intervals = std::floor(d / sqrt_2);
+
+  // The goal is too close to the current node for a useful interpolated
+  // expansion. Let the normal grid expansion finish the approach instead of
+  // underflowing the reserve size below.
+  if (num_intervals < 2) {
+    return NodePtr(nullptr);
+  }
 
   using PossibleNode = std::pair<NodePtr, Coordinates>;
   std::vector<PossibleNode> possible_nodes;

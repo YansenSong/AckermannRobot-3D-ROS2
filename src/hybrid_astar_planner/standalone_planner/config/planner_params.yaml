@@ -21,17 +21,18 @@
 
     # ---- 搜索参数 ----
     max_iterations: 50000
-    max_on_approach_iterations: 500
-    tolerance: 0.5                      # 目标容差 (m)
-    allow_unknown: true
+    max_on_approach_iterations: 1000
+    tolerance: 0.10                     # 目标容差 (m)，约 2 个栅格
+    allow_unknown: false                # 静态地图中未知区域按不可通行处理
 
     # ---- 代价惩罚 ----
-    change_penalty: 1.0
+    change_penalty: 2.0                 # 左/右转向切换惩罚
     non_straight_penalty: 1.2
-    reverse_penalty: 2.1                # 倒车惩罚 (>1 减少倒车)
-    cost_penalty: 1.0
-    analytic_expansion_ratio: 3.0
-    analytic_expansion_max_length: 50.0
+    reverse_penalty: 5.0                # 倒车惩罚 (>1 减少不必要倒车)
+    gear_change_penalty: 4.0            # 前进/倒车换挡惩罚
+    cost_penalty: 2.0                   # 更偏向通道中部
+    analytic_expansion_ratio: 3.5
+    analytic_expansion_max_length: 5.0  # m；约为最小转弯半径的 4.8 倍
 
     # ---- 路径平滑 (默认关闭) ----
     use_smoother: false

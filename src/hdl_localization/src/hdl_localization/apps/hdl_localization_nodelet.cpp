@@ -229,7 +229,7 @@ private:
 
   void points_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr points_msg) {
     if (!globalmap) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5.0, "globalmap has not been received!!");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "globalmap has not been received!!");
       return;
     }
 
@@ -285,7 +285,7 @@ private:
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
-      5.0,
+      5000,
       "scan points: raw=%zu downsampled=%zu (leaf=%.2f m)",
       cloud->size(),
       filtered->size(),
@@ -306,7 +306,7 @@ private:
       std::lock_guard<std::mutex> estimator_lock(pose_estimator_mutex);
 
       if (!pose_estimator) {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5.0, "waiting for initial pose input!!");
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "waiting for initial pose input!!");
         return;
       }
 
@@ -399,13 +399,16 @@ private:
       reloc_msg.is_converged = converged;
       reloc_status_pub->publish(reloc_msg);
 
-      RCLCPP_INFO_STREAM(
+      RCLCPP_INFO_THROTTLE(
         get_logger(),
-        "Metrics -> Error: " << fitness_score
-        << " (RMSE ~" << linear_matching_error << " m)"
-        << " | Time: " << matching_time_ms << " ms"
-        << " | CovTrace: " << cov_trace
-        << " | Converged: " << (converged ? "True" : "False"));
+        *get_clock(),
+        5000,
+        "Metrics -> Error: %.6f (RMSE ~%.6f m) | Time: %.1f ms | CovTrace: %.6f | Converged: %s",
+        fitness_score,
+        linear_matching_error,
+        matching_time_ms,
+        cov_trace,
+        converged ? "True" : "False");
 
       if (aligned_pub->get_subscription_count()) {
         aligned->header.frame_id = "map";

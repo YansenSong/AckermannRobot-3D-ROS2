@@ -133,6 +133,7 @@ private:
     _search_info.change_penalty       = this->declare_parameter("change_penalty",        1.0f);
     _search_info.non_straight_penalty = this->declare_parameter("non_straight_penalty",  1.2f);
     _search_info.reverse_penalty      = this->declare_parameter("reverse_penalty",       2.1f);
+    _search_info.gear_change_penalty  = this->declare_parameter("gear_change_penalty",    1.0f);
     _search_info.cost_penalty         = this->declare_parameter("cost_penalty",          1.0f);
     _search_info.analytic_expansion_ratio =
       this->declare_parameter("analytic_expansion_ratio", 3.0f);
@@ -157,8 +158,11 @@ private:
       "remaining_distance_topic", std::string("/global_path_remaining_distance"));
 
     // ---- 分析扩展 ----
+    const double analytic_expansion_max_length_m = this->declare_parameter(
+      "analytic_expansion_max_length", 5.0);
     _search_info.analytic_expansion_max_length =
-      static_cast<float>(this->declare_parameter("analytic_expansion_max_length", 50.0));
+      analytic_expansion_max_length_m > 0.0 ?
+      static_cast<float>(analytic_expansion_max_length_m / resolution_) : 0.0f;
   }
 
   // ================================================================

@@ -56,6 +56,7 @@ void MotionTable::initDubin(
   non_straight_penalty = search_info.non_straight_penalty;
   cost_penalty = search_info.cost_penalty;
   reverse_penalty = search_info.reverse_penalty;
+  gear_change_penalty = search_info.gear_change_penalty;
 
   // angle must meet 3 requirements:
   // 1) be increment of quantized bin size
@@ -117,6 +118,7 @@ void MotionTable::initReedsShepp(
   non_straight_penalty = search_info.non_straight_penalty;
   cost_penalty = search_info.cost_penalty;
   reverse_penalty = search_info.reverse_penalty;
+  gear_change_penalty = search_info.gear_change_penalty;
 
   float angle = 2.0 * asin(sqrt(2.0) / (2 * search_info.minimum_turning_radius));
   bin_size =
@@ -244,6 +246,17 @@ float NodeSE2::getTraversalCost(const NodePtr & child)
   if (getMotionPrimitiveIndex() > 2) {
     // reverse direction
     travel_cost *= motion_table.reverse_penalty;
+  }
+
+  // A reverse penalty alone does not prevent rapid forward/reverse toggling:
+  // after the first reverse segment, another reverse segment has the same
+  // cost as any other reverse motion. Penalize the gear transition itself.
+  const unsigned int no_motion = std::numeric_limits<unsigned int>::max();
+  const bool has_parent_motion = getMotionPrimitiveIndex() != no_motion;
+  const bool parent_reverse = getMotionPrimitiveIndex() > 2;
+  const bool child_reverse = child->getMotionPrimitiveIndex() > 2;
+  if (has_parent_motion && parent_reverse != child_reverse) {
+    travel_cost *= motion_table.gear_change_penalty;
   }
 
   return travel_cost;
