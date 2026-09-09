@@ -37,6 +37,7 @@ Hybrid A*
 | `/plan` | `nav_msgs/msg/Path` | Hybrid A* 发布、NeuPAN 接收的全局路径 |
 | `/plan_path` | `nav_msgs/msg/Path` | 全局路径的 RViz 显示话题 |
 | `/global_path_remaining_distance` | `std_msgs/msg/Float64` | 当前沿全局路径到目标点的剩余距离，单位为米，约 10 Hz 更新 |
+| `/navigation/state` | `nav_status/msg/NavigationStatus` | 当前导航状态：等待目标、规划、移动、到达；`FAILED` 仅预留 |
 | `/scan` | `sensor_msgs/msg/LaserScan` | 点云转换后的二维激光，供 NeuPAN 进行障碍物检测 |
 | `/neupan_cmd_vel` | `geometry_msgs/msg/Twist` | NeuPAN 输出的速度指令 |
 | `/stop` | `std_msgs/msg/Bool` | `data: true` 强制停车，`data: false` 解除停车覆盖 |
@@ -56,6 +57,22 @@ Hybrid A*
 
 ```bash
 ros2 topic echo /global_path_remaining_distance
+```
+
+## 2.1 导航状态
+
+`nav_status_node` 是一个只读观察者，订阅目标、全局路径、剩余路径距离和轮速里程计，发布统一状态：
+
+```text
+WAITING_FOR_GOAL -> PLANNING -> MOVING -> ARRIVED
+```
+
+到达判定同时要求剩余路径距离、实际车速满足阈值，并持续一段时间；`FAILED` 在当前版本只定义消息常量，不通过超时猜测规划失败。
+
+查看当前状态：
+
+```bash
+ros2 topic echo /navigation/state
 ```
 
 ## 3. 传感器与定位支持话题

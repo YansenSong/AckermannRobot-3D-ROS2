@@ -12,6 +12,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     share = get_package_share_directory('ackermann_bringup')
+    nav_status_share = get_package_share_directory('nav_status')
     localization_arguments = ['globalmap_pcd', 'specify_init_pose', 'init_pos_x', 'init_pos_y',
                               'init_pos_z', 'init_ori_w', 'init_ori_x', 'init_ori_y', 'init_ori_z']
     arguments = [
@@ -35,6 +36,13 @@ def generate_launch_description():
                 remappings=[('cloud_in', '/points_raw'), ('scan', '/scan')])
     mux = Node(package='ackermann_control', executable='cmd_vel_mux.py', name='cmd_vel_mux',
                output='screen', parameters=[{'use_sim_time': True}])
+    nav_status = Node(
+        package='nav_status', executable='nav_status_node', name='nav_status_node',
+        output='screen',
+        parameters=[
+            os.path.join(nav_status_share, 'config', 'nav_status.yaml'),
+            {'use_sim_time': True},
+        ])
     rviz = Node(package='rviz2', executable='rviz2', name='rviz2', output='screen',
                 arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')])
-    return LaunchDescription(arguments + [localization, planning, scan, mux, rviz])
+    return LaunchDescription(arguments + [localization, planning, scan, mux, nav_status, rviz])

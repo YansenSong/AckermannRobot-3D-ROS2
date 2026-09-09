@@ -1,3 +1,4 @@
-导航状态机：waitting for goal / goal received / moving / arrived
+多点导航实现
 
-多点导航：
+长程任务，长程观测（Agent侧实现）
+
