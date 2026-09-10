@@ -1,5 +1,5 @@
 #!/bin/bash
-# hdl_localization 3D NDT 定位 + Hybrid A* 全局规划 + NeuPAN 导航
+# hdl_localization 3D NDT 定位 + Nav2 Smac 全局规划 + NeuPAN 导航
 #
 # 前置: 需先用 LIO-SAM 建好 GlobalMap.pcd + 转为 map.pgm/map.yaml
 #
@@ -36,7 +36,7 @@ source "$PROJECT_DIR/install/setup.bash"
 
 echo ""
 echo "=============================================="
-echo "  hdl_localization + Hybrid A* 已启动"
+echo "  hdl_localization + Nav2 Smac 全局规划已启动"
 echo "  NeuPAN 在另一个终端启动:"
 echo "    cd $PROJECT_DIR"
 echo "    bash scripts/run_neupan.sh"
