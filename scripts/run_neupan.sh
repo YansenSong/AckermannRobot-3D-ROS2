@@ -4,6 +4,7 @@
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NEUPAN_USE_SIM_TIME="${NEUPAN_USE_SIM_TIME:-true}"
+ROBOT_CONFIG_DIR="$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot"
 
 # source ROS 2 workspace (先干这个，保证 ros2 命令可用)
 source "$PROJECT_DIR/install/setup.bash"
@@ -12,9 +13,8 @@ source "$PROJECT_DIR/install/setup.bash"
 eval "$(conda shell.bash hook)"
 conda activate neupan
 
-# 设置 Python 路径：优先使用当前主仓库中的 NeuPAN 子模块。
-# Conda 中预装的 neupan 可能是旧版本；如果它排在子模块前面，运行时
-# 会绕过源码中的 Ackermann 修复（例如 min_speed 上下界）。
+# NeuPAN ROS2 wrapper comes from this workspace; keep the project-local
+# NeuPAN core first so this task does not silently switch to another install.
 export PYTHONPATH="$PROJECT_DIR/third_party/NeuPAN:$CONDA_PREFIX/lib/python3.10/site-packages:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
@@ -24,11 +24,19 @@ echo "Conda env: $CONDA_DEFAULT_ENV"
 echo "NeuPAN source: $PROJECT_DIR/third_party/NeuPAN"
 echo "Use sim time: $NEUPAN_USE_SIM_TIME"
 
-# 启动 NeuPAN (直接调用 main()，绕开入口脚本的 importlib.metadata 问题)
+python3 - <<'PY'
+import neupan
+import neupan_ros2
+
+print("NeuPAN core:", neupan.__file__)
+print("NeuPAN ROS2:", neupan_ros2.__file__)
+PY
+
+# 启动官方基线 wrapper (直接调用 main()，绕开入口脚本的 metadata 问题)
 python3 -c "
 from neupan_ros2.neupan_node import main
 main()
 " --ros-args \
-  --params-file "$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot/robot.yaml" \
-  -p robot_config_dir:="$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot" \
+  --params-file "$ROBOT_CONFIG_DIR/robot.yaml" \
+  -p robot_config_dir:="$ROBOT_CONFIG_DIR" \
   -p use_sim_time:="$NEUPAN_USE_SIM_TIME"

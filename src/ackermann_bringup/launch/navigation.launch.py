@@ -37,6 +37,17 @@ def generate_launch_description():
                 name='pointcloud_to_laserscan', output='screen',
                 parameters=[os.path.join(share, 'config', 'pcl_to_scan.yaml')],
                 remappings=[('cloud_in', '/points_raw'), ('scan', '/scan')])
+    adapter = Node(
+        package='ackermann_control',
+        executable='neupan_ackermann_adapter.py',
+        name='neupan_ackermann_adapter',
+        output='screen',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'wheelbase': 0.593,
+            'input_topic': '/neupan_cmd_vel_raw',
+            'output_topic': '/neupan_cmd_vel',
+        }])
     mux = Node(package='ackermann_control', executable='cmd_vel_mux.py', name='cmd_vel_mux',
                output='screen', parameters=[{'use_sim_time': True}])
     nav_status = Node(
@@ -48,4 +59,5 @@ def generate_launch_description():
         ])
     rviz = Node(package='rviz2', executable='rviz2', name='rviz2', output='screen',
                 arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')])
-    return LaunchDescription(arguments + [localization, planning, scan, mux, nav_status, rviz])
+    return LaunchDescription(
+        arguments + [localization, planning, scan, adapter, mux, nav_status, rviz])

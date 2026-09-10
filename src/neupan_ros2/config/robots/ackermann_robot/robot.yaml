@@ -1,7 +1,6 @@
-# NeuPAN ROS2 Configuration — Ackermann Robot (AckermannRobot-2D)
-#
-# Vehicle: 0.70m × 0.52m, wheelbase 0.593m, 360° 2D LiDAR
-# TF: map → odom → base_link → rear_axle_link; base_link → laser_link
+# NeuPAN ROS2 baseline configuration for the AckermannRobot simulation.
+# This profile keeps the official Ranger field set and only changes the
+# integration-facing frames, topics, and hardware limits.
 
 neupan_node:
   ros__parameters:
@@ -9,58 +8,47 @@ neupan_node:
 
     # Robot identification
     robot_type: 'ackermann_robot'
-    robot_description: 'Ackermann vehicle (0.70m, 0.593m wheelbase) in Gazebo'
+    robot_description: 'AckermannRobot Gazebo simulation'
 
     # Configuration file paths (relative to robot directory)
     planner_config_file: 'planner.yaml'
     dune_checkpoint_file: 'models/dune_model_5000.pth'
 
-    # ---- TF Frame Configuration -------------------------------------
-    map_frame: 'map'
-    odom_frame: 'odom'
-    # NeuPAN's Ackermann state and footprint are rear-axle referenced.
-    base_frame: 'rear_axle_link'
-    lidar_frame: 'laser_link'
-    # Reject stale odom-to-lidar transforms instead of moving scan points
-    # into the wrong place while the robot is moving.
-    scan_tf_max_age: 0.25
-    # Tolerate isolated scan/TF misses.  The previous valid obstacle set is
-    # already in map coordinates and remains usable during this interval.
-    scan_data_timeout: 0.50
+    # TF Frame configuration
+    map_frame: 'map'           # Global map coordinate frame
+    base_frame: 'rear_axle_link'  # NeuPAN/Smac bicycle-model reference frame
+    lidar_frame: 'laser_link'     # LiDAR frame
 
-    # ---- Topic Configuration ----------------------------------------
-    cmd_vel_topic: '/neupan_cmd_vel'      # NeuPAN output
-    scan_topic: '/scan'                    # 360° 2D LaserScan
-    plan_input_topic: '/plan'             # From Nav2 planner_server (global path)
-    goal_topic: '/neupan_goal_pose'       # Disabled here; Hybrid A* owns /goal_pose
-    plan_output_topic: '/neupan_plan'     # Optimized trajectory (visualization)
-    ref_state_topic: '/neupan_ref_state'  # Reference state (visualization)
+    # ========== Visualization Configuration ==========
+    enable_visualization: true   # Master switch for all visualization
+    enable_dune_markers: true    # Enable DUNE point cloud markers
+    enable_nrmp_markers: true    # Enable NRMP point cloud markers
+    enable_robot_marker: true    # Enable robot footprint marker
+    marker_size: 0.05            # DUNE/NRMP point marker size
+    marker_z: 1.0                # Robot marker height
+
+    # ========== Laser Scan Processing Configuration ==========
+    scan_angle_max: 3.14       # Maximum scan angle (180 degrees)
+    scan_angle_min: -3.14      # Minimum scan angle (-180 degrees)
+    scan_downsample: 1         # Scan downsampling rate (1=use all points)
+    scan_range_max: 5.0        # Keep the official Ranger baseline range
+    scan_range_min: 0.15       # Physical minimum range of the simulated LiDAR
+
+    # ========== Path Planning Configuration ==========
+    flip_angle: false                       # Whether to flip scan angles
+    refresh_initial_path: true              # Refresh path when receiving new path
+    include_initial_path_direction: true    # Preserve Smac pose heading/gear
+    control_frequency: 50.0                 # Control loop frequency (Hz)
+
+    # ========== Topic Configuration ==========
+    # NeuPAN receives the global path from Smac and does not own /goal_pose.
+    cmd_vel_topic: '/neupan_cmd_vel_raw'
+    scan_topic: '/scan'
+    plan_input_topic: '/plan'
+    goal_topic: '/neupan_unused_goal'
+    plan_output_topic: '/neupan_plan'
+    ref_state_topic: '/neupan_ref_state'
     initial_path_topic: '/neupan_initial_path'
     dune_markers_topic: '/dune_point_markers'
     robot_marker_topic: '/robot_marker'
     nrmp_markers_topic: '/nrmp_point_markers'
-
-    # ---- Visualization ----------------------------------------------
-    enable_visualization: false    # Disabled by default for performance
-    enable_dune_markers: false
-    enable_nrmp_markers: false
-    enable_robot_marker: false
-    marker_size: 0.05
-    marker_z: 0.5
-
-    # ---- Laser Scan Processing --------------------------------------
-    # 360° LiDAR @ 10Hz, 360 samples, range 0.15-25m
-    scan_angle_max: 3.14           # 180° (half-circle — we reverse the other half)
-    scan_angle_min: -3.14          # -180°
-    scan_downsample: 1             # Use all 360 points
-    scan_range_max: 25.0           # Full LiDAR range
-    scan_range_min: 0.15           # Min range
-
-    # ---- Path Planning ----------------------------------------------
-    flip_angle: false
-    refresh_initial_path: true     # Re-plan when new global path arrives
-    include_initial_path_direction: true   # Detect gear from path pose orientations
-    direct_goal_planning: false    # Use Hybrid A* /plan, avoid replacing it with a local RS path
-    control_frequency: 20.0        # 20 Hz (matching controller frequency)
-    command_rate_limit: true       # Limit [v, steering angle] changes to max_acce per second
-    executor_threads: 4            # Control, scan and TF callbacks must remain concurrent

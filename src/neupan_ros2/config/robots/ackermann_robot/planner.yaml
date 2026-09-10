@@ -1,65 +1,45 @@
-# NeuPAN 规划器配置 — 阿克曼机器人（AckermannRobot）
-#
-# 车辆尺寸：0.70 m × 0.52 m，轴距 0.593 m，最大转角 0.52 rad（约 29.8°）
-# 最小转弯半径：1.05 m = 轴距 / tan(最大转角)
-# 支持倒车：min_vel_x = -0.5 m/s
-#
-# 这是运行时配置。DUNE 模型检查点路径由 neupan_node 在运行时设置
-# （通过覆盖 pan.dune_checkpoint 参数）。
-#
-# 所有车辆几何参数必须与训练配置一致——
-# DUNE 权重与车辆几何尺寸相关。
-
-# ---- MPC 参数 -------------------------------------------------------
-receding: 15                     # 预测步数（15 × 0.2 s = 向前预测 3 s）
-step_time: 0.2                   # 每步时间（s）
-ref_speed: 0.8                   # 为约 1 Hz 的 CPU PAN 求解留出反应时间
+# Official Ranger baseline MPC values, with current Ackermann speed limits.
+receding: 15
+step_time: 0.2
+ref_speed: 0.5
 device: 'cpu'
-time_print: false
-collision_threshold: 0.05        # 紧急停止距离（m）
+time_print: False
+collision_threshold: 0.01
 
-# 临时障碍物正好位于全局路径上时，生成平滑的左右绕行初始轨迹。
-# 随后由 PAN 优化这条满足车辆运动学约束的 S 形绕行轨迹。
-avoidance_seed_enabled: true
-avoidance_seed_distance: 1.2     # 开始生成绕行初始轨迹的距离（m）
-avoidance_seed_clearance: 0.15   # 绕行初始轨迹的安全间距（m）
-avoidance_seed_steer: 0.25       # 绕行初始轨迹的转角（rad）
-
-# ---- 车辆几何参数 ---------------------------------------------------
+# The second max_speed entry is the bicycle-model steering angle (rad), not
+# the physical inner-wheel joint angle.  atan(wheelbase / Smac_Rmin) gives the
+# steering limit compatible with the global planner.
 robot:
   kinematics: 'acker'
-  max_speed: [2, 0.52]         # [线速度 m/s，转角 rad]
-  min_speed: [-0.5, -0.52]       # 允许倒车
-  max_acce: [1.0, 0.5]           # [线加速度 m/s²，转角速度 rad/s²]
-  length: 0.70                   # 车体总长（m）——底盘碰撞盒长度
-  width: 0.52                    # 车体总宽（m）——后轮距近似值
-  wheelbase: 0.593               # 前后轮轴距离（m）
+  max_speed: [0.7, 0.422]
+  max_acce: [1.0, 0.328]
+  length: 0.720
+  width: 0.500
+  wheelbase: 0.593
 
-# ---- 初始路径 -------------------------------------------------------
+# initial path
 ipath:
-  interval: 0.1                  # 路径点间距（m）
-  curve_style: 'reeds'           # Reeds-Shepp：支持前进、倒车并考虑阿克曼约束
-  min_radius: 1.05               # 最小转弯半径（m）= 轴距 / tan(0.52)
-  ind_range: 0                    # 搜索剩余全部路径，避免路径索引落后于机器人
-  loop: false
-  arrive_threshold: 0.5          # 判定到达的距离（m）
-  close_threshold: 0.1           # 路径闭合距离阈值（m）
-  arrive_index_threshold: 3       # 到达判定的路径索引阈值
+  interval: 0.03
+  # waypoints: [[0, 0, 0], [1, 0, 0]]
+  curve_style: 'dubins'   # 'dubins' or reeds or line
+  min_radius: 1.320
+  loop: False
+  arrive_threshold: 0.5
+  close_threshold: 0.05
+  arrive_index_threshold: 3
 
-# ---- PAN 算法 -------------------------------------------------------
+# proximal alternating minimization network
 pan:
   iter_num: 2
   dune_max_num: 200
   nrmp_max_num: 10
-  dune_checkpoint: null           # 由 neupan_node 在运行时设置
+  dune_checkpoint: None
+  iter_threshold: 0.1
 
-# ---- 控制调参 -------------------------------------------------------
-# 以下权重针对 0.7 m × 0.52 m 车辆调节（L₀=0.7 m，v₀=0.8 m/s）。
-# Δx/L₀≈0.3  →  q_s² 可产生有效的路径跟踪代价
-# d_max/L₀≈0.7 → η 在避障和路径跟踪之间取得平衡
+# adjust parameters
 adjust:
-  q_s: 0.8                       # 绕行后回到全局路径的权重
-  p_u: 1.0                       # 优先前进绕行，减少停车或倒车
-  eta: 0.5                       # 与 1.2 m 较长影响范围相匹配
-  d_max: 1.2                     # 在最小转弯半径被占满前开始避障
-  d_min: 0.15                    # 绕行时保持车体的实际安全间距
+  q_s: 0.1
+  p_u: 0.5
+  eta: 15.0
+  d_max: 0.1
+  d_min: 0.01
