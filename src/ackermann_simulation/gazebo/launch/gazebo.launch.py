@@ -18,7 +18,7 @@ def generate_launch_description():
     publish_ekf_tf_arg = DeclareLaunchArgument(
         'publish_ekf_tf',
         default_value='true',
-        description='Publish odom -> base_link from EKF (disable when LIO-SAM owns this TF)',
+        description='Publish odom -> base_link from EKF (disable when localization owns this TF)',
     )
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz',

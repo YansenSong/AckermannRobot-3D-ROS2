@@ -67,10 +67,10 @@ map.pgm
 map.yaml
 ```
 
-终端 1 启动 Gazebo、NDT 定位和 Hybrid A*：
+终端 1 启动 Gazebo、liorf 先验地图定位和 Smac Hybrid A*：
 
 ```bash
-bash scripts/nav_hdl_neupan.sh maps/mini
+bash scripts/nav_liorf_neupan.sh maps/mini
 ```
 
 终端 2 启动 NeuPAN：
@@ -79,7 +79,7 @@ bash scripts/nav_hdl_neupan.sh maps/mini
 bash scripts/run_neupan.sh
 ```
 
-在 RViz 中依次使用 **2D Pose Estimate** 设置初始位姿，等待定位稳定后使用 **2D Goal Pose** 设置目标点。
+在 RViz 中依次使用 **2D Pose Estimate** 设置 liorf 初始位姿，等待定位稳定后使用 **2D Goal Pose** 设置目标点。
 
 ## 单独启动仿真
 

@@ -17,6 +17,11 @@ def generate_launch_description():
         DeclareLaunchArgument('map'),
         DeclareLaunchArgument('map_pgm'),
         DeclareLaunchArgument('globalmap_pcd'),
+        DeclareLaunchArgument(
+            'params_file',
+            default_value=os.path.join(
+                get_package_share_directory('ackermann_bringup'),
+                'config', 'liorf_localization.yaml')),
     ]
 
     gazebo = IncludeLaunchDescription(
@@ -24,7 +29,7 @@ def generate_launch_description():
             os.path.join(simulation_share, 'launch', 'gazebo.launch.py')
         ),
         launch_arguments={
-            'publish_ekf_tf': 'true',
+            'publish_ekf_tf': 'false',
             'use_rviz': 'false',
         }.items(),
     )
@@ -37,6 +42,7 @@ def generate_launch_description():
             'map': LaunchConfiguration('map'),
             'map_pgm': LaunchConfiguration('map_pgm'),
             'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
+            'params_file': LaunchConfiguration('params_file'),
         }.items(),
     )
 

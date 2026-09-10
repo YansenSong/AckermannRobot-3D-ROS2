@@ -427,7 +427,7 @@ class NeupanCore(Node):
     def _lookup_current_robot_pose(self) -> npt.NDArray:
         """Return the current robot pose in ``map`` using the odom chain.
 
-        hdl_localization may publish a slowly updated/delayed map-to-odom
+        Localization may publish a slowly updated/delayed map-to-odom
         alignment.  Looking up a directly composed map-to-base transform at
         time zero can therefore return an old robot pose.  Compose the latest
         map alignment with the high-rate odom-to-state-frame transform so the
@@ -566,7 +566,7 @@ class NeupanCore(Node):
     ) -> npt.NDArray:
         """Find the planar map pose of a scan frame without using stale map TF.
 
-        hdl_localization can publish a delayed ``map -> odom`` transform.  A
+        The localization node can publish a delayed ``map -> odom`` transform.  A
         direct ``map -> laser`` lookup at the scan timestamp then fails, and
         falling back to the latest composed transform mixes an old map pose
         with a new scan.  The odometry transform is high-rate and buffered, so

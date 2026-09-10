@@ -13,20 +13,23 @@ from launch_ros.actions import Node
 def generate_launch_description():
     share = get_package_share_directory('ackermann_bringup')
     nav_status_share = get_package_share_directory('nav_status')
-    localization_arguments = ['globalmap_pcd', 'specify_init_pose', 'init_pos_x', 'init_pos_y',
-                              'init_pos_z', 'init_ori_w', 'init_ori_x', 'init_ori_y', 'init_ori_z']
     arguments = [
         DeclareLaunchArgument('map', default_value=''),
         DeclareLaunchArgument('map_pgm', default_value=''),
         DeclareLaunchArgument('globalmap_pcd', default_value=''),
-        DeclareLaunchArgument('specify_init_pose', default_value='false'),
+        DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument(
+            'params_file',
+            default_value=os.path.join(
+                share, 'config', 'liorf_localization.yaml')),
     ]
-    arguments += [DeclareLaunchArgument(name, default_value=value) for name, value in (
-        ('init_pos_x', '0.0'), ('init_pos_y', '0.0'), ('init_pos_z', '0.0'),
-        ('init_ori_w', '1.0'), ('init_ori_x', '0.0'), ('init_ori_y', '0.0'), ('init_ori_z', '0.0'))]
     localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'localization.launch.py')),
-        launch_arguments={name: LaunchConfiguration(name) for name in localization_arguments}.items())
+        launch_arguments={
+            'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'params_file': LaunchConfiguration('params_file'),
+        }.items())
     planning = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'planning.launch.py')),
         launch_arguments={'map': LaunchConfiguration('map'), 'map_pgm': LaunchConfiguration('map_pgm')}.items())

@@ -9,7 +9,7 @@
 ```text
 /initialpose
     ↓
-HDL Localization
+liorf prior-map localization
 
 /goal_pose
     ↓
@@ -31,7 +31,7 @@ Hybrid A*
 
 | 话题 | 类型 | 作用 |
 |---|---|---|
-| `/initialpose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | RViz 设置 HDL Localization 的初始位姿 |
+| `/initialpose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | RViz 设置 liorf 先验地图定位的初始位姿 |
 | `/goal_pose` | `geometry_msgs/msg/PoseStamped` | RViz 发布导航目标，Hybrid A* 接收 |
 | `/map` | `nav_msgs/msg/OccupancyGrid` | Hybrid A* 发布的栅格地图，供 RViz 显示 |
 | `/plan` | `nav_msgs/msg/Path` | Hybrid A* 发布、NeuPAN 接收的全局路径 |
@@ -80,10 +80,10 @@ ros2 topic echo /navigation/state
 | 话题 | 类型 | 作用 |
 |---|---|---|
 | `/points_raw` | `sensor_msgs/msg/PointCloud2` | Gazebo 3D 激光雷达原始点云 |
-| `/points_lio` | `sensor_msgs/msg/PointCloud2` | 添加 LIO-SAM 所需字段后的点云 |
+| `/points_lio` | `sensor_msgs/msg/PointCloud2` | 添加 LIO-SAM/liorf 所需 `ring/time` 字段后的点云 |
 | `/imu/data` | `sensor_msgs/msg/Imu` | Gazebo IMU 数据 |
-| `/globalmap` | `sensor_msgs/msg/PointCloud2` | HDL Localization 使用的全局点云地图 |
-| `/odom` | `nav_msgs/msg/Odometry` | HDL Localization 输出的定位里程计 |
+| `/liorf_localization/localization/global_map` | `sensor_msgs/msg/PointCloud2` | liorf 发布的先验全局点云地图（Transient Local） |
+| `/odom` | `nav_msgs/msg/Odometry` | liorf TransformFusion 输出的 `odom -> base_link` 融合里程计 |
 | `/odom_wheel` | `nav_msgs/msg/Odometry` | 阿克曼控制器输出的轮速里程计 |
 | `/odometry/filtered` | `nav_msgs/msg/Odometry` | robot_localization EKF 融合后的里程计 |
 | `/joint_states` | `sensor_msgs/msg/JointState` | 仿真关节状态 |
@@ -95,8 +95,9 @@ ros2 topic echo /navigation/state
 
 ```text
 /points_raw → pointcloud_to_laserscan → /scan → NeuPAN
-/points_raw → gazebo_lidar_adapter → /points_lio → LIO-SAM
-/imu/data → HDL Localization / EKF / LIO-SAM
+/points_raw → gazebo_lidar_adapter → /points_lio → liorf ImageProjection
+/points_lio → liorf ImageProjection → liorf mapOptimization
+/imu/data → liorf ImageProjection + IMUPreintegration / EKF / LIO-SAM
 /odom_wheel + /imu/data → EKF → /odometry/filtered
 ```
 
@@ -119,7 +120,7 @@ ros2 topic echo /navigation/state
 ## 5. 未启用或已移除的话题
 
 - `/cmd_vel`：DWB 相关代码已删除，当前导航不使用该话题。
-- `/neupan_goal_pose`：当前 `direct_goal_planning: false`，目标由 Hybrid A* 通过 `/goal_pose` 接收。
+- `/neupan_goal_pose`：当前 `direct_goal_planning: false`，目标由 Smac Hybrid A* 通过 `/goal_pose` 接收。
 
 ## 6. 注意事项
 

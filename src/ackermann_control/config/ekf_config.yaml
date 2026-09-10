@@ -4,7 +4,7 @@ ekf_filter_node:
     frequency: 30.0              # EKF 更新频率 (Hz)
     sensor_timeout: 0.1          # 传感器超时 (秒)
     two_d_mode: true             # 2D 模式 (只追踪 x, y, yaw)
-    publish_tf: true             # 发布 odom→base_link TF（hdl_localization 据此计算 map→odom）
+    publish_tf: true             # 独立运行 EKF 时可发布 odom→base_link TF；导航链路由 liorf 提供
 
     # ====== 坐标系 ======
     map_frame: map

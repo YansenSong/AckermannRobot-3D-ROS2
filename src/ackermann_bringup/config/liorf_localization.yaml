@@ -1,0 +1,85 @@
+/**:
+  ros__parameters:
+    history_policy: "history_keep_last"
+    reliability_policy: "reliability_reliable"
+
+    # Inputs and public output
+    pointCloudTopic: "/points_lio"
+    imuTopic: "/imu/data"
+    odomTopic: "/odom"
+    gpsTopic: "/odometry/gpsz"
+
+    # Frames
+    lidarFrame: "laser_link"
+    baselinkFrame: "base_link"
+    odometryFrame: "odom"
+    mapFrame: "map"
+
+    # The launch file overrides this with an absolute map path.
+    globalmap_pcd: ""
+
+    # No GPS is used in the current simulation localization path.
+    useImuHeadingInitialization: false
+    useGpsElevation: false
+    gpsCovThreshold: 2.0
+    poseCovThreshold: 25.0
+
+    # Keep sensor settings aligned with the already validated LIO-SAM input.
+    sensor: "velodyne"
+    N_SCAN: 16
+    Horizon_SCAN: 1800
+    downsampleRate: 1
+    point_filter_num: 3
+    lidarMinRange: 1.0
+    lidarMaxRange: 1000.0
+
+    # IMU settings copied from src/lio-sam/config/params.yaml.
+    imuType: 1
+    imuRate: 100.0
+    imuAccNoise: 3.9939570888238808e-03
+    imuGyrNoise: 1.5636343949698187e-03
+    imuAccBiasN: 6.4356659353532566e-05
+    imuGyrBiasN: 3.5640318696367613e-05
+    imuGravity: 9.80511
+    imuRPYWeight: 0.01
+
+    # T_lidar_imu / orientation conventions used by the current simulation.
+    extrinsicTrans: [-0.078, 0.0, 0.384]
+    extrinsicRot: [1.0, 0.0, 0.0,
+                   0.0, 1.0, 0.0,
+                   0.0, 0.0, 1.0]
+    extrinsicRPY: [1.0, 0.0, 0.0,
+                   0.0, 1.0, 0.0,
+                   0.0, 0.0, 1.0]
+
+    # Localization scan-to-map parameters. Tune one variable at a time only
+    # after the complete input/TF path is known to work.
+    mappingSurfLeafSize: 0.2
+    surroundingKeyframeMapLeafSize: 0.2
+    mappingProcessInterval: 0.05
+    numberOfCores: 4
+    surroundingkeyframeAddingDistThreshold: 0.5
+    surroundingkeyframeAddingAngleThreshold: 0.2
+    surroundingKeyframeDensity: 2.0
+    surroundingKeyframeSearchRadius: 15.0
+
+    # Localization uses the fixed prior map; do not run loop closure.
+    loopClosureEnableFlag: false
+
+    z_tollerance: 1000.0
+    rotation_tollerance: 1000.0
+
+    # Retain upstream defaults for unused loop-closure and visualization
+    # parameters so every liorf node receives a complete parameter set.
+    loopClosureFrequency: 1.0
+    surroundingKeyframeSize: 50
+    historyKeyframeSearchRadius: 15.0
+    historyKeyframeSearchTimeDiff: 30.0
+    historyKeyframeSearchNum: 25
+    historyKeyframeFitnessScore: 0.3
+    loopClosureICPSurfLeafSize: 0.3
+    globalMapVisualizationSearchRadius: 50.0
+    globalMapVisualizationPoseDensity: 10.0
+    globalMapVisualizationLeafSize: 1.0
+    savePCD: false
+    savePCDDirectory: "/Downloads/LOAM/"
