@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+    target_frame: laser_link
+    # Nav2-specific slice: reject ground-edge and near-body returns that can
+    # otherwise create a one-frame obstacle followed by a large inflation blob.
+    min_height: -0.30
+    max_height: 1.50
+    angle_min: -3.14159
+    angle_max: 3.14159
+    angle_increment: 0.0087
+    scan_time: 0.05
+    range_min: 0.25
+    range_max: 50.0
+    concurrency_level: 1
