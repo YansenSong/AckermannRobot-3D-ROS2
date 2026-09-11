@@ -59,6 +59,10 @@ bash scripts/pcd_to_map.sh maps/mini
 
 ## 4. 自主导航
 
+本项目同时保留两套导航系统，分别用于不同的测试和对比场景，不删除任何一套。
+
+### 4.1 NeuPAN 导航栈：LIORF + Smac + NeuPAN
+
 确认 `maps/mini/` 内已有：
 
 ```text
@@ -80,6 +84,57 @@ bash scripts/run_neupan.sh
 ```
 
 在 RViz 中依次使用 **2D Pose Estimate** 设置 liorf 初始位姿，等待定位稳定后使用 **2D Goal Pose** 设置目标点。
+
+NeuPAN 导航栈的主要链路为：
+
+```text
+/goal_pose
+    -> ackermann_smac_bridge
+    -> Nav2 planner_server + SmacPlannerHybrid
+    -> /plan_path
+    -> NeuPAN
+    -> 阿克曼底盘控制器
+```
+
+其中 `src/ackermann_smac_bridge` 负责接收目标点、调用
+`/compute_path_to_pose`、发布 `/plan_path` 和全局路径剩余距离；它不是
+Smac 规划器本身，也不负责局部控制。
+
+### 4.2 Nav2 导航栈：Ackermann Nav2
+
+Nav2 导航栈位于 `src/ackermann_nav`，不启动 NeuPAN，使用 Nav2 自带的
+Smac Hybrid-A*、MPPI 和速度平滑器：
+
+```bash
+bash scripts/run_ackermann_nav.sh maps/mini
+```
+
+主要链路为：
+
+```text
+BT Navigator
+    -> Smac Hybrid-A*（DUBIN，前进约束）
+    -> MPPI Ackermann Controller
+    -> Velocity Smoother
+    -> cmd_bridge.py
+    -> 阿克曼底盘控制器
+```
+
+两套系统的定位链和仿真环境可以复用，但导航控制链不同：
+
+| 导航系统 | 全局规划 | 局部控制 | 主要入口 |
+|---|---|---|---|
+| NeuPAN 导航栈 | Smac Hybrid-A*（由 `ackermann_smac_bridge` 调用） | NeuPAN | `scripts/nav_liorf_neupan.sh` + `scripts/run_neupan.sh` |
+| Nav2 导航栈 | Smac Hybrid-A*（Nav2 BT Navigator 直接调用） | MPPI Ackermann | `scripts/run_ackermann_nav.sh` |
+
+默认不要同时运行两套导航。两套系统可能同时使用 `/map`、`/tf`、
+`/goal_pose` 以及同一个 ros2_control 控制命令接口，容易造成重复规划或
+多个节点同时向底盘发送命令。需要进行对比时，建议先完整停止当前导航栈，
+再启动另一套；如果确实需要同时运行，应使用不同的 ROS Domain、命名空间
+和控制话题进行隔离。
+
+NeuPAN 导航栈相关包和入口（包括 `ackermann_smac_bridge`）会继续保留，不作为
+Nav2 导航栈 `ackermann_nav` 的替代品删除。
 
 ## 单独启动仿真
 

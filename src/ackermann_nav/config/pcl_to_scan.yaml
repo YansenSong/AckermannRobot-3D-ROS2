@@ -1,0 +1,13 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+    target_frame: laser_link
+    min_height: -0.40
+    max_height: 2.0
+    angle_min: -3.14159
+    angle_max: 3.14159
+    angle_increment: 0.0087
+    scan_time: 0.1
+    range_min: 0.15
+    range_max: 12.0
+    concurrency_level: 1

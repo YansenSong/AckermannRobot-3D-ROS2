@@ -13,7 +13,7 @@ It also introduces the following basic building blocks:
 
 We have users reporting using this on:
 - Delivery robots
-- Industrial robots
+- Service robots
 - Vertical farming
 - Solar farms
 
@@ -166,7 +166,7 @@ A very reasonable and logical assumption would be to set the `minimum_turning_ra
 
 I assert that you should also consider the environment you operate within when setting this. While you should **absolutely not** set this to be any smaller than the actual limits of your vehicle, there are some useful side effects of increasing this value in practical use. If you work in an area wider than the turning circle of your robot, you have some options that will ultimately improve the performance of the planner (in terms of CPU and compute time) as well as generate paths that are more "smooth" directly out of the planner -- not requiring any explicit path smoothing. 
 
-By default, `0.4m` is the setting which I think is "reasonable" for the smaller scale industrial grade robots (think Simbe, the small Fetch, or Locus robots) resulting in faster plans and less "wobbly" motions that do not require post-smoothing -- further improving CPU performance. I selected `0.4m` as a trade off between practical robots mentioned above and hobbyist users with a tiny-little-turtlebot-3 which might still need to navigate around some smaller cavities.
+By default, `0.4m` is the setting which I think is "reasonable" for smaller service robots (think Simbe, the small Fetch, or Locus robots) resulting in faster plans and less "wobbly" motions that do not require post-smoothing -- further improving CPU performance. I selected `0.4m` as a trade off between practical robots mentioned above and hobbyist users with a tiny-little-turtlebot-3 which might still need to navigate around some smaller cavities.
 
 ### Costmap Resolutions
 
