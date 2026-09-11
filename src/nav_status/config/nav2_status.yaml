@@ -1,0 +1,9 @@
+nav2_status_node:
+  ros__parameters:
+    navigate_to_pose_status_topic: "/navigate_to_pose/_action/status"
+    navigate_to_pose_feedback_topic: "/navigate_to_pose/_action/feedback"
+    navigate_through_poses_status_topic: "/navigate_through_poses/_action/status"
+    navigate_through_poses_feedback_topic: "/navigate_through_poses/_action/feedback"
+    remaining_distance_topic: "/global_path_remaining_distance"
+    status_topic: "/navigation/state"
+    status_heartbeat_rate: 1.0

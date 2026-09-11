@@ -51,6 +51,7 @@ def _build_navigation(context):
 
     bringup_share = get_package_share_directory("ackermann_bringup")
     nav_share = get_package_share_directory("ackermann_nav")
+    nav_status_share = get_package_share_directory("nav_status")
 
     localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -172,6 +173,16 @@ def _build_navigation(context):
             }
         ],
     )
+    nav2_status = Node(
+        package="nav_status",
+        executable="nav2_status_node",
+        name="nav2_status_node",
+        output="screen",
+        parameters=[
+            os.path.join(nav_status_share, "config", "nav2_status.yaml"),
+            {"use_sim_time": use_sim_time},
+        ],
+    )
     lifecycle_nodes = [
         "controller_server",
         "planner_server",
@@ -254,6 +265,7 @@ def _build_navigation(context):
         waypoint_follower,
         velocity_smoother,
         command_bridge,
+        nav2_status,
         map_lifecycle_manager,
         lifecycle_manager,
         startup_gate,

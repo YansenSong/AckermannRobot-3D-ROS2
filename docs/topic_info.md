@@ -73,6 +73,10 @@ FAILED           = 4
 /goal_pose -> bt_navigator -> planner_server + Smac Hybrid-A*
                            └── /plan
 
+Nav2 Action feedback -> nav2_status_node
+                     ├── /global_path_remaining_distance
+                     └── /navigation/state
+
 /scan -> local_costmap / global_costmap -> MPPI obstacle critic
 
 /plan + /odom -> controller_server + MPPI Ackermann
@@ -91,6 +95,12 @@ FAILED           = 4
 | `/goal_pose` | `geometry_msgs/msg/PoseStamped` | 输入 | `header.frame_id=map`；Nav2 BT Navigator 的目标位姿 |
 | `/map` | `nav_msgs/msg/OccupancyGrid` | 输入 | `map_server` 发布的静态 2D 栅格地图 |
 | `/plan` | `nav_msgs/msg/Path` | 输出 | Smac Hybrid-A* 全局路径；`poses[]` 为带朝向的路径点 |
+| `/navigate_to_pose/_action/status` | `action_msgs/msg/GoalStatusArray` | 输入 | Nav2 目标状态；监视节点使用 Goal UUID 和 `status` 判断任务阶段 |
+| `/navigate_to_pose/_action/feedback` | `nav2_msgs/action/NavigateToPose_FeedbackMessage` | 输入 | Nav2 feedback；使用 `feedback.distance_remaining`，单位为 m |
+| `/navigate_through_poses/_action/status` | `action_msgs/msg/GoalStatusArray` | 输入 | 多目标导航状态；格式与单目标 Action 状态相同 |
+| `/navigate_through_poses/_action/feedback` | `nav2_msgs/action/NavigateThroughPoses_FeedbackMessage` | 输入 | 多目标导航 feedback；使用 `feedback.distance_remaining`，单位为 m |
+| `/global_path_remaining_distance` | `std_msgs/msg/Float64` | 输出 | `nav2_status_node` 转发 Nav2 Action feedback 的 `distance_remaining`，单位为 m |
+| `/navigation/state` | `nav_status/msg/NavigationStatus` | 输出 | `nav2_status_node` 根据 Nav2 Action 状态发布；格式与 NeuPAN 导航栈相同 |
 | `/scan` | `sensor_msgs/msg/LaserScan` | 输入 | local/global costmap 的障碍物 marking 和 clearing |
 | `/global_costmap/costmap` | `nav_msgs/msg/OccupancyGrid` | 输出 | 全局代价地图可视化数据 |
 | `/global_costmap/costmap_raw` | `nav2_msgs/msg/Costmap` | 输出 | 全局代价地图原始数据 |
@@ -111,8 +121,6 @@ Nav2 导航栈不发布 NeuPAN 专用话题：
 /neupan_cmd_vel_raw
 /neupan_cmd_vel
 /plan_path
-/global_path_remaining_distance
-/navigation/state
 ```
 
 ## 3. 两套导航栈共用的话题
@@ -144,4 +152,3 @@ Nav2 导航栈不发布 NeuPAN 专用话题：
 
 因此不能把 NeuPAN 的 `/neupan_cmd_vel_raw.angular.z` 直接当作 Nav2 的
 `angular.z`，也不能把任一 `angular.z` 直接当成前轮转角。
-

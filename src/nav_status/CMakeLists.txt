@@ -6,10 +6,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ament_cmake REQUIRED)
+find_package(action_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(nav2_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 
@@ -22,6 +24,10 @@ add_executable(nav_status_node
   src/nav_status_node.cpp
 )
 
+add_executable(nav2_status_node
+  src/nav2_status_node.cpp
+)
+
 ament_target_dependencies(nav_status_node
   rclcpp
   geometry_msgs
@@ -30,11 +36,21 @@ ament_target_dependencies(nav_status_node
   builtin_interfaces
 )
 
+ament_target_dependencies(nav2_status_node
+  action_msgs
+  rclcpp
+  nav2_msgs
+  std_msgs
+  builtin_interfaces
+)
+
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 target_link_libraries(nav_status_node "${cpp_typesupport_target}")
 add_dependencies(nav_status_node ${PROJECT_NAME}__rosidl_generator_cpp)
+target_link_libraries(nav2_status_node "${cpp_typesupport_target}")
+add_dependencies(nav2_status_node ${PROJECT_NAME}__rosidl_generator_cpp)
 
-install(TARGETS nav_status_node
+install(TARGETS nav_status_node nav2_status_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
