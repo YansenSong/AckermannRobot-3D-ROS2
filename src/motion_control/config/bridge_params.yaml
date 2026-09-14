@@ -6,15 +6,14 @@
     command_topic: "/ackermann_cmd"
 
     # --- UDP communication ---
+    # Deployment/device settings stay local to motion_control.
     udp_host: "192.168.1.50"
     udp_port: 5000
     bind_device: "enp5s0"
     bind_interface: "192.168.1.11"
 
-    # Vehicle geometry and motion limits are intentionally not centralized in
-    # this branch yet. Values not specified here fall back to bridge_node
-    # defaults and may be overridden later once the real-vehicle parameter
-    # strategy is finalized.
+    # Vehicle hard limits are supplied by ackermann_bringup from the project
+    # root config/vehicle.yaml. They are intentionally not duplicated here.
 
     # --- Actuator enable mask ---
     # bit0: RT49 (drive), bit1: EPS (steering), bit2: SEB (brake)

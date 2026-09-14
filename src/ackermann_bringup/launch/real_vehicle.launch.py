@@ -1,25 +1,97 @@
 """Compose real-vehicle hardware and optional navigation.
 
-This bringup intentionally keeps hardware parameters local to each driver for
-now. It does not depend on a shared vehicle_config package.
-
-All hardware/navigation components are opt-in because the final real-vehicle
-parameter strategy is intentionally deferred. Enable only the components whose
-local driver parameters have been configured and verified.
-
-In particular, enable actuation explicitly with ``enable_control:=true``.
+Project-level vehicle geometry and limits come from a root config/vehicle.yaml
+file supplied through the ``vehicle_config`` launch argument. Device/network
+settings remain local to their owning drivers.
 """
 
 import os
+import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+
+def _enabled(context, name):
+    return LaunchConfiguration(name).perform(context).strip().lower() in {
+        '1', 'true', 'yes', 'on'
+    }
+
+
+def _load_vehicle_config(path):
+    if not path:
+        raise RuntimeError(
+            "vehicle_config is required when control or navigation is enabled"
+        )
+    if not os.path.isfile(path):
+        raise RuntimeError(f"Vehicle config does not exist: {path}")
+    with open(path, encoding='utf-8') as stream:
+        data = yaml.safe_load(stream) or {}
+    vehicle = data.get('vehicle', {})
+    limits = vehicle.get('control_limits', {})
+    required = {
+        'max_forward_speed': limits.get('max_forward_speed'),
+        'max_reverse_speed': limits.get('max_reverse_speed'),
+        'max_steering_angle_deg': limits.get('max_steering_angle_deg'),
+    }
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        raise RuntimeError(
+            f"Vehicle config is missing control limits: {', '.join(missing)}"
+        )
+    return required
+
+
+def _configured_components(context, bringup_share, motion_share):
+    enable_control = _enabled(context, 'enable_control')
+    enable_navigation = _enabled(context, 'enable_navigation')
+    if not enable_control and not enable_navigation:
+        return []
+
+    vehicle_config = LaunchConfiguration('vehicle_config').perform(context)
+    limits = _load_vehicle_config(vehicle_config)
+    actions = []
+
+    if enable_control:
+        actions.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(motion_share, 'launch', 'bridge.launch.py')
+                ),
+                launch_arguments={
+                    'max_speed': str(limits['max_forward_speed']),
+                    'max_reverse_speed': str(limits['max_reverse_speed']),
+                    'max_steer_deg': str(limits['max_steering_angle_deg']),
+                }.items(),
+            )
+        )
+
+    if enable_navigation:
+        actions.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(bringup_share, 'launch', 'navigation.launch.py')
+                ),
+                launch_arguments={
+                    'map': LaunchConfiguration('map'),
+                    'map_pgm': LaunchConfiguration('map_pgm'),
+                    'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
+                    'vehicle_config': vehicle_config,
+                    'params_file': LaunchConfiguration('localization_params_file'),
+                    'points_topic': LaunchConfiguration('points_topic'),
+                    'use_sim_time': 'false',
+                    'use_rviz': LaunchConfiguration('navigation_rviz'),
+                }.items(),
+            )
+        )
+
+    return actions
 
 
 def generate_launch_description():
@@ -33,6 +105,11 @@ def generate_launch_description():
     )
 
     arguments = [
+        DeclareLaunchArgument(
+            'vehicle_config',
+            default_value='',
+            description='Absolute path to project-level config/vehicle.yaml.',
+        ),
         DeclareLaunchArgument(
             'enable_lidar',
             default_value='false',
@@ -67,8 +144,8 @@ def generate_launch_description():
             'enable_navigation',
             default_value='false',
             description=(
-                'Start the backend-neutral navigation stack. Keep disabled '
-                'until real-vehicle localization topics/parameters are ready.'
+                'Start real-vehicle localization/planning/navigation. Keep disabled '
+                'until localization and sensor calibration are verified.'
             ),
         ),
         DeclareLaunchArgument(
@@ -97,9 +174,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    # Launch the sensor node directly rather than the legacy lpms launch file:
-    # that file adds an ``imu`` namespace even though the node already publishes
-    # relative ``imu/...`` topics, producing /imu/imu/... names.
     imu = Node(
         package='lpms_ig1',
         executable='lpms_ig1_rs485_node',
@@ -124,27 +198,9 @@ def generate_launch_description():
         }],
     )
 
-    control = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(motion_share, 'launch', 'bridge.launch.py')
-        ),
-        condition=IfCondition(LaunchConfiguration('enable_control')),
+    configured = OpaqueFunction(
+        function=_configured_components,
+        args=[bringup_share, motion_share],
     )
 
-    navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(bringup_share, 'launch', 'navigation.launch.py')
-        ),
-        condition=IfCondition(LaunchConfiguration('enable_navigation')),
-        launch_arguments={
-            'map': LaunchConfiguration('map'),
-            'map_pgm': LaunchConfiguration('map_pgm'),
-            'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
-            'params_file': LaunchConfiguration('localization_params_file'),
-            'points_topic': LaunchConfiguration('points_topic'),
-            'use_sim_time': 'false',
-            'use_rviz': LaunchConfiguration('navigation_rviz'),
-        }.items(),
-    )
-
-    return LaunchDescription(arguments + [lidar, imu, control, navigation])
+    return LaunchDescription(arguments + [lidar, imu, configured])

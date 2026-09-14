@@ -8,15 +8,13 @@
 #   all     启动 LiDAR + RViz2 + 运动控制桥（不自动启动 IMU）
 #   nav     启动 LiDAR + 运动控制桥 + 定位/规划/导航基础设施
 #           NeuPAN 需在另一个终端运行 scripts/run_neupan.sh
-#
-# 本脚本迁移自 real-vehicle-deployment/scripts/start_vehicle.sh，
-# 已适配当前纯实车分支的 ackermann_bringup/real_vehicle.launch.py。
 #==========================================
 
 set -eo pipefail
 
 ROS2_DISTRO="${ROS2_DISTRO:-humble}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VEHICLE_CONFIG="${VEHICLE_CONFIG:-${PROJECT_DIR}/config/vehicle.yaml}"
 LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/lidar/config/config.yaml}"
 IMU_PORT="${IMU_PORT:-/dev/ttyUSB0}"
 BRIDGE_CONFIG="${PROJECT_DIR}/src/motion_control/config/bridge_params.yaml"
@@ -44,9 +42,10 @@ usage() {
           NeuPAN 需另开终端执行: bash scripts/run_neupan.sh
 
 环境变量:
-  LIDAR_CONFIG  Hesai 配置文件，默认: src/lidar/config/config.yaml
-  IMU_PORT      LPMS 串口，默认: /dev/ttyUSB0
-  ROS2_DISTRO   ROS 发行版，默认: humble
+  VEHICLE_CONFIG 项目级车辆参数，默认: config/vehicle.yaml
+  LIDAR_CONFIG   Hesai 配置文件，默认: src/lidar/config/config.yaml
+  IMU_PORT       LPMS 串口，默认: /dev/ttyUSB0
+  ROS2_DISTRO    ROS 发行版，默认: humble
 
 示例:
   $0 lidar
@@ -54,6 +53,7 @@ usage() {
   $0 bridge
   $0 all
   $0 nav maps/my_map
+  VEHICLE_CONFIG=/path/to/vehicle.yaml $0 bridge
   LIDAR_CONFIG=/path/to/hesai.yaml $0 lidar
   IMU_PORT=/dev/ttyUSB1 $0 imu
 EOF
@@ -113,9 +113,16 @@ if [[ ! -f "$WORKSPACE_SETUP" ]]; then
     exit 1
 fi
 
-# ROS 2 Humble 的 setup 脚本可能读取未设置的环境变量，因此不启用 nounset。
 source "$ROS_SETUP"
 source "$WORKSPACE_SETUP"
+
+if $ENABLE_CONTROL || $ENABLE_NAVIGATION; then
+    if [[ ! -f "$VEHICLE_CONFIG" ]]; then
+        log_error "车辆参数文件不存在: ${VEHICLE_CONFIG}"
+        exit 1
+    fi
+    log_info "车辆参数: ${VEHICLE_CONFIG}"
+fi
 
 if $ENABLE_LIDAR; then
     if [[ ! -f "$LIDAR_CONFIG" ]]; then
@@ -186,6 +193,7 @@ log_info "=============================="
 
 LAUNCH_CMD=(
     ros2 launch ackermann_bringup real_vehicle.launch.py
+    "vehicle_config:=${VEHICLE_CONFIG}"
     "enable_lidar:=${ENABLE_LIDAR}"
     "lidar_config:=${LIDAR_CONFIG}"
     "lidar_rviz:=${LIDAR_RVIZ}"

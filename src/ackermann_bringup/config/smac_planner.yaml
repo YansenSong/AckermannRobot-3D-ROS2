@@ -1,14 +1,12 @@
 planner_server:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: false
 
     planner_plugins: ["GridBased"]
 
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
 
-      # Humble nav2_smac_planner defaults, with only the Ackermann-specific
-      # geometry / motion-model adaptations documented in the planner guides.
       downsample_costmap: false
       downsampling_factor: 1
       angle_quantization_bins: 72
@@ -17,9 +15,12 @@ planner_server:
       max_iterations: 1000000
       max_on_approach_iterations: 1000
       smooth_path: true
-      # 1.29203 m is the geometric lower bound. The 1.320 m planning value
-      # leaves margin for the official smoother's discrete curvature.
-      minimum_turning_radius: 1.320
+
+      # REQUIRED runtime override from project-level config/vehicle.yaml.
+      # Keep an invalid placeholder here so stale vehicle geometry cannot be
+      # used silently if the bringup wiring is bypassed.
+      minimum_turning_radius: 0.0
+
       cache_obstacle_heuristic: false
       reverse_penalty: 2.0
       change_penalty: 0.0
@@ -42,14 +43,17 @@ planner_server:
 global_costmap:
   global_costmap:
     ros__parameters:
-      use_sim_time: true
+      use_sim_time: false
       global_frame: map
-      robot_base_frame: rear_axle_link
+
+      # REQUIRED runtime overrides from config/vehicle.yaml.
+      robot_base_frame: "NOT_CONFIGURED"
+      footprint: "[]"
+      footprint_padding: 0.0
+
       rolling_window: false
       resolution: 0.05
       track_unknown_space: true
-      footprint: "[[-0.10, -0.36], [0.74, -0.36], [0.74, 0.36], [-0.10, 0.36]]"
-      footprint_padding: 0.01
       plugins: ["static_layer", "inflation_layer"]
 
       static_layer:
@@ -63,5 +67,5 @@ global_costmap:
 
 map_server:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: false
     yaml_filename: ""

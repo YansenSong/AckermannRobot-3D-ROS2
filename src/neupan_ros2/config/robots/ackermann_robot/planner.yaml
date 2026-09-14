@@ -1,28 +1,30 @@
-# Official Ranger baseline MPC values, with current Ackermann speed limits.
+# NeuPAN algorithm template for the real Ackermann vehicle.
+#
+# Vehicle geometry, speed limits, steering limits, and minimum turning radius
+# are intentionally NOT stored here. scripts/run_neupan.sh renders a temporary
+# planner YAML from the project-level config/vehicle.yaml before starting the
+# node. This file only keeps NeuPAN algorithm/tuning parameters.
+
 receding: 15
 step_time: 0.2
-ref_speed: 0.5
 device: 'cpu'
 time_print: False
 collision_threshold: 0.01
 
-# The second max_speed entry is the bicycle-model steering angle (rad), not
-# the physical inner-wheel joint angle.  atan(wheelbase / Smac_Rmin) gives the
-# steering limit compatible with the global planner.
 robot:
   kinematics: 'acker'
-  max_speed: [0.7, 0.422]
-  max_acce: [1.0, 0.328]
-  length: 0.720
-  width: 0.500
-  wheelbase: 0.593
+  # Injected at runtime from config/vehicle.yaml:
+  #   max_speed
+  #   max_acce
+  #   length
+  #   width
+  #   wheelbase
 
-# initial path
 ipath:
   interval: 0.03
   # waypoints: [[0, 0, 0], [1, 0, 0]]
   curve_style: 'dubins'   # 'dubins' or reeds or line
-  min_radius: 1.320
+  # min_radius is injected at runtime from config/vehicle.yaml.
   loop: False
   arrive_threshold: 0.5
   close_threshold: 0.05

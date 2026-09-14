@@ -18,6 +18,7 @@ def generate_launch_description():
         DeclareLaunchArgument('map', default_value=''),
         DeclareLaunchArgument('map_pgm', default_value=''),
         DeclareLaunchArgument('globalmap_pcd', default_value=''),
+        DeclareLaunchArgument('vehicle_config', default_value=''),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument(
             'points_topic',
@@ -51,6 +52,8 @@ def generate_launch_description():
         launch_arguments={
             'map': LaunchConfiguration('map'),
             'map_pgm': LaunchConfiguration('map_pgm'),
+            'vehicle_config': LaunchConfiguration('vehicle_config'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
     )
     scan = Node(

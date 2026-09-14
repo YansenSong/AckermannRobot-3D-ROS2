@@ -4,6 +4,7 @@
 
 ## 1. 主要组件
 
+- `config/vehicle.yaml`：项目级车辆几何、硬限制、规划限制的唯一配置源（不是 ROS package）
 - `src/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
 - `src/imu`：LPMS-IG1 IMU 驱动（ROS package 名仍为 `lpms_ig1`）
 - `src/motion_control`：`/ackermann_cmd` 到 STM32 UDP 控制协议的实车后端
@@ -22,12 +23,40 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-## 3. 实车硬件入口
+## 3. 项目级车辆参数
 
-所有硬件默认关闭，需要显式启用：
+车辆物理/运动相关参数统一放在仓库根目录：
+
+```text
+config/vehicle.yaml
+```
+
+它不是 ROS package，也不会通过 `get_package_share_directory()` 查找。当前由实车启动脚本将绝对路径传给 `ackermann_bringup`，再分别映射到 motion_control、Smac 和 NeuPAN。
+
+配置分为两类限制：
+
+- `control_limits`：底盘执行侧硬限制，例如最大前进/倒车速度和最大前轮转角
+- `planning`：Smac/NeuPAN 使用的保守规划限制，例如规划速度、最小转弯半径和碰撞 footprint
+
+当前几何和规划包络仍标记为 `NOT VERIFIED`，在正式实车导航前需要按实测值更新。LiDAR IP、STM32 IP、串口等设备/部署参数不放入 `vehicle.yaml`，继续留在各自驱动配置中。
+
+## 4. 实车硬件入口
+
+推荐使用：
+
+```bash
+./scripts/start_vehicle.sh lidar
+./scripts/start_vehicle.sh imu
+./scripts/start_vehicle.sh bridge
+./scripts/start_vehicle.sh all
+./scripts/start_vehicle.sh nav maps/<map_name>
+```
+
+也可以直接调用 launch，但启用控制或导航时需要显式提供根配置：
 
 ```bash
 ros2 launch ackermann_bringup real_vehicle.launch.py \
+  vehicle_config:=$(pwd)/config/vehicle.yaml \
   enable_lidar:=true \
   lidar_config:=/path/to/hesai.yaml \
   enable_imu:=true \
@@ -37,7 +66,7 @@ ros2 launch ackermann_bringup real_vehicle.launch.py \
 
 只测试某一个硬件模块时，只打开对应开关即可。底盘控制不会默认启动。
 
-## 4. 控制接口
+## 5. 控制接口
 
 统一实车控制话题：
 
@@ -60,18 +89,20 @@ ros2 launch ackermann_bringup real_vehicle.launch.py \
 
 `/stop` 为集中停车覆盖话题，`std_msgs/msg/Bool(data=true)` 会强制输出零指令。
 
-## 5. 导航
+## 6. 导航
 
-实车导航入口通过 `real_vehicle.launch.py enable_navigation:=true` 挂接 `navigation.launch.py`。当前定位、车辆几何、传感器外参等实车参数仍需要按实际车辆继续整理和标定；本分支不再保留仿真参数作为运行入口。
+实车导航入口通过 `real_vehicle.launch.py enable_navigation:=true` 挂接 `navigation.launch.py`。Smac 的最小转弯半径、footprint 和 base frame 在启动时从 `config/vehicle.yaml` 注入。
 
-NeuPAN 可单独启动：
+NeuPAN 单独启动：
 
 ```bash
 bash scripts/run_neupan.sh
 ```
 
-默认使用系统时间（`use_sim_time=false`）。
+`run_neupan.sh` 会从 `config/vehicle.yaml` 生成临时 NeuPAN planner 配置，因此 `src/neupan_ros2/config/robots/ackermann_robot/planner.yaml` 只保留算法调参，不再保存车辆几何/速度参数。默认使用系统时间（`use_sim_time=false`）。
 
-## 6. 地图
+定位、LiDAR/IMU 外参等实车标定仍需要继续整理；当前不会把旧仿真外参自动写进根车辆配置。
+
+## 7. 地图
 
 `maps/` 只用于存放实车采集/生成的地图。仿真 `mini.world` 对应地图不在本分支维护。

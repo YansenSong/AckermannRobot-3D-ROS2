@@ -4,7 +4,7 @@ lidar:
       source_type: 1                                  # The type of data source, 1: real-time lidar connection, 2: pcap, 3: packet rosbag, 4: serial    
       # Depending on the type of source_type, fill in the corresponding configuration block (lidar_udp_type, pcap_type, serial_type)
       lidar_udp_type:
-        # Real-device values are injected by vehicle_config at launch time.
+        # Real-device network values stay local to this LiDAR configuration.
         device_ip_address: ""
         udp_port: 0
         ptc_port: 0
@@ -76,11 +76,11 @@ lidar:
       device_udp_src_port: 0                # Filter point clouds for specified source ports in case of multiple lidar, setting >=1024
       device_fault_port: 0                  # Filter fault message for specified source ports in case of multiple lidar, setting >=1024
       frame_frequency: 0                    # The frequency that point cloud sends.
-      default_frame_frequency: 0.0          # Injected by vehicle_config.
+      default_frame_frequency: 0.0          # Fill with the real-device value when needed.
       echo_mode_filter: 0                   # return mode filter
 
     ros:
-      # Frame, topics, and IMU enable state are injected by vehicle_config.
+      # ROS frame/topic names are device-facing settings and stay local here.
       ros_frame_id: ""
       ros_recv_packet_topic: ""
       ros_send_packet_topic: ""
