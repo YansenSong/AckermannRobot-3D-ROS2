@@ -4,7 +4,7 @@ log/
 build/
 install/
 bin/
-lib/
+/lib/
 msg_gen/
 srv_gen/
 build_isolated/
