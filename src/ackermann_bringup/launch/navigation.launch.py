@@ -2,8 +2,8 @@
 
 This launch file is backend-neutral: it publishes the canonical Ackermann
 command on /ackermann_cmd but does not start a simulation or real-vehicle
-actuation backend. Use navigation_sim.launch.py for Gazebo; the real-vehicle
-bringup will attach motion_control to the same command topic.
+actuation backend. Use navigation_sim.launch.py for Gazebo or
+real_vehicle.launch.py for hardware.
 """
 
 import os
@@ -11,6 +11,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -24,6 +25,16 @@ def generate_launch_description():
         DeclareLaunchArgument('map_pgm', default_value=''),
         DeclareLaunchArgument('globalmap_pcd', default_value=''),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument(
+            'points_topic',
+            default_value='/points_raw',
+            description='Point cloud input for pointcloud_to_laserscan.',
+        ),
+        DeclareLaunchArgument(
+            'use_rviz',
+            default_value='true',
+            description='Start the navigation RViz window.',
+        ),
         DeclareLaunchArgument(
             'params_file',
             default_value=os.path.join(
@@ -48,7 +59,10 @@ def generate_launch_description():
         name='pointcloud_to_laserscan',
         output='screen',
         parameters=[os.path.join(share, 'config', 'pcl_to_scan.yaml')],
-        remappings=[('cloud_in', '/points_raw'), ('scan', '/scan')])
+        remappings=[
+            ('cloud_in', LaunchConfiguration('points_topic')),
+            ('scan', '/scan'),
+        ])
     command_gate = Node(
         package='ackermann_control',
         executable='cmd_vel_mux.py',
@@ -73,6 +87,7 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         output='screen',
+        condition=IfCondition(LaunchConfiguration('use_rviz')),
         arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')],
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])
     return LaunchDescription(
