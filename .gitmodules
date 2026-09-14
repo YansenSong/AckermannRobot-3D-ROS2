@@ -2,6 +2,6 @@
 	path = src/NeuPAN
 	url = git@github.com:YansenSong/NeuPAN.git
 
-[submodule "src/lidar_driver/src/driver/HesaiLidar_SDK_2.0"]
-	path = src/lidar_driver/src/driver/HesaiLidar_SDK_2.0
+[submodule "src/lidar/src/driver/HesaiLidar_SDK_2.0"]
+	path = src/lidar/src/driver/HesaiLidar_SDK_2.0
 	url = https://github.com/HesaiTechnology/HesaiLidar_SDK_2.0.git

@@ -4,8 +4,8 @@
 
 ## 1. 主要组件
 
-- `src/lidar_driver`：Hesai LiDAR 驱动
-- `src/lpms_ig1`：LPMS-IG1 IMU 驱动
+- `src/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
+- `src/imu`：LPMS-IG1 IMU 驱动（ROS package 名仍为 `lpms_ig1`）
 - `src/motion_control`：`/ackermann_cmd` 到 STM32 UDP 控制协议的实车后端
 - `src/ackermann_control`：NeuPAN 控制命令安全门，统一输出 `/ackermann_cmd`
 - `src/ackermann_bringup`：实车定位、规划、导航和硬件 bringup
