@@ -3,13 +3,11 @@
 This bringup intentionally keeps hardware parameters local to each driver for
 now. It does not depend on a shared vehicle_config package.
 
-Defaults are conservative:
-  * LiDAR enabled
-  * IMU disabled
-  * motion-control backend disabled
-  * navigation disabled
+All hardware/navigation components are opt-in because the final real-vehicle
+parameter strategy is intentionally deferred. Enable only the components whose
+local driver parameters have been configured and verified.
 
-Enable actuation explicitly with ``enable_control:=true``.
+In particular, enable actuation explicitly with ``enable_control:=true``.
 """
 
 import os
@@ -37,7 +35,7 @@ def generate_launch_description():
     arguments = [
         DeclareLaunchArgument(
             'enable_lidar',
-            default_value='true',
+            default_value='false',
             description='Start the Hesai LiDAR driver.',
         ),
         DeclareLaunchArgument(
