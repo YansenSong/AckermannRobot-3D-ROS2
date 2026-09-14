@@ -1,9 +1,9 @@
 # Project-level real-vehicle configuration.
 #
 # This file is intentionally NOT a ROS package. It is the single project-level
-# source for vehicle geometry, hard actuation limits, and planning limits.
-# Device/network settings (LiDAR IP, STM32 IP, serial ports, etc.) stay with
-# their owning drivers.
+# source for vehicle geometry, hard actuation limits, planning limits, and
+# calibrated sensor extrinsics. Device/network settings (LiDAR IP, STM32 IP,
+# serial ports, etc.) stay with their owning drivers.
 #
 # Geometry values marked VERIFIED below are measured real-vehicle values.
 # Parameters that still need measurement/calibration remain explicitly marked
@@ -64,9 +64,26 @@ vehicle:
       padding: 0.01
 
   sensor_extrinsics:
-    # Fill these after physical measurement/calibration. Localization keeps its
-    # existing local parameters until these become VERIFIED.
+    # Single source for the LiDAR/IMU calibration consumed by both LIORF and
+    # LIO-SAM. Do not copy these values into package-local parameter files.
+    #
+    # The fields intentionally map directly to the LIO-SAM/LIORF parameter
+    # conventions instead of converting through Euler angles at launch time:
+    #   translation_xyz -> extrinsicTrans
+    #   rotation_matrix -> extrinsicRot
+    #   orientation_matrix -> extrinsicRPY
     lidar_to_imu:
       status: "NOT VERIFIED"
+
+      # LiDAR origin -> IMU origin translation [x, y, z], expressed in the
+      # LiDAR frame, in metres.
       translation_xyz: null
-      rotation_rpy: null
+
+      # Row-major 3x3 matrix used to rotate IMU acceleration/gyro vectors into
+      # the LiDAR convention (LIO-SAM/LIORF extrinsicRot).
+      rotation_matrix: null
+
+      # Row-major 3x3 IMU orientation correction matrix
+      # (LIO-SAM/LIORF extrinsicRPY). Keep separate from rotation_matrix because
+      # some IMUs use different attitude and vector axis conventions.
+      orientation_matrix: null

@@ -41,6 +41,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
+            'vehicle_config': LaunchConfiguration('vehicle_config'),
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'params_file': LaunchConfiguration('params_file'),
         }.items(),

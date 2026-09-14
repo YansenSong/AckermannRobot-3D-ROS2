@@ -18,13 +18,13 @@
     # The launch file overrides this with an absolute map path.
     globalmap_pcd: ""
 
-    # No GPS is used in the current simulation localization path.
+    # No GPS is used in the current real-vehicle localization path.
     useImuHeadingInitialization: false
     useGpsElevation: false
     gpsCovThreshold: 2.0
     poseCovThreshold: 25.0
 
-    # Keep sensor settings aligned with the already validated LIO-SAM input.
+    # Sensor model settings; verify against the real LiDAR before tuning.
     sensor: "velodyne"
     N_SCAN: 16
     Horizon_SCAN: 1800
@@ -33,7 +33,9 @@
     lidarMinRange: 1.0
     lidarMaxRange: 1000.0
 
-    # IMU settings copied from src/lio-sam/config/params.yaml.
+    # IMU noise settings; these remain calibration/tuning parameters local to
+    # LIORF. Physical LiDAR/IMU mounting extrinsics come only from
+    # root config/vehicle.yaml at launch time.
     imuType: 1
     imuRate: 100.0
     imuAccNoise: 3.9939570888238808e-03
@@ -43,14 +45,11 @@
     imuGravity: 9.80511
     imuRPYWeight: 0.01
 
-    # T_lidar_imu / orientation conventions used by the current simulation.
-    extrinsicTrans: [-0.078, 0.0, 0.384]
-    extrinsicRot: [1.0, 0.0, 0.0,
-                   0.0, 1.0, 0.0,
-                   0.0, 0.0, 1.0]
-    extrinsicRPY: [1.0, 0.0, 0.0,
-                   0.0, 1.0, 0.0,
-                   0.0, 0.0, 1.0]
+    # REQUIRED runtime overrides from config/vehicle.yaml:
+    #   extrinsicTrans
+    #   extrinsicRot
+    #   extrinsicRPY
+    # They are intentionally not duplicated here.
 
     # Localization scan-to-map parameters. Tune one variable at a time only
     # after the complete input/TF path is known to work.
