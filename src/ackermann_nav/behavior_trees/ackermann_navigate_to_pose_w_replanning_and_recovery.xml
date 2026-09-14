@@ -1,0 +1,44 @@
+<!--
+  Adapted from the MIT-licensed V550 Ackermann Nav2 tree:
+  https://github.com/Jacob-Tan666/V550-Ackermann-DRL-Nav2
+  Upstream commit: f9433483684a392c516aa2e96b2256338bbcd273
+
+  AckermannRobot adaptation: map/rear_axle_link frames, a 0.80 m approach
+  baseline, and forward-only recovery (no reverse recovery action).
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <ReactiveFallback name="StopAtGoalOrNavigate">
+        <GoalReached goal="{goal}" global_frame="map" robot_base_frame="rear_axle_link"/>
+        <PipelineSequence name="NavigateWithDynamicReplanning">
+          <RateController hz="1.0">
+            <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+              <Sequence name="BuildAckermannPath">
+                <ComputePathToPose goal="{goal}" path="{guide_path}" planner_id="GoalHeadingGuide"/>
+                <UsePathApproachOrientation goal="{goal}" path="{guide_path}" adjusted_goal="{approach_goal}" heading_baseline="0.80"/>
+                <ComputePathToPose goal="{approach_goal}" path="{path}" planner_id="GridBased"/>
+                <UseExactGoalPosition goal="{approach_goal}" input_path="{path}" output_path="{path}"/>
+              </Sequence>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+            </RecoveryNode>
+          </RateController>
+          <RecoveryNode number_of_retries="1" name="FollowPath">
+            <FollowPath path="{path}" controller_id="FollowPath"/>
+            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </RecoveryNode>
+        </PipelineSequence>
+      </ReactiveFallback>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="AckermannRecoveryActions">
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+          <Wait wait_duration="2"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

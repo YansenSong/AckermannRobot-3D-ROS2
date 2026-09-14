@@ -6,8 +6,9 @@
 #   imu     仅启动 LPMS-IG1 IMU
 #   bridge  仅启动 STM32 运动接口后端 (motion_interface)
 #   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
-#   nav     启动 LiDAR + motion_interface + 定位/规划/导航基础设施
+#   nav     启动 Smac Hybrid-A* + NeuPAN 实车导航基础设施
 #           NeuPAN 需在另一个终端运行 scripts/run_neupan.sh
+#   nav2    启动独立 ackermann_nav：Smac Hybrid-A* + MPPI + Nav2 BT
 #==========================================
 
 set -eo pipefail
@@ -30,16 +31,20 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 usage() {
     cat <<EOF
-用法: $0 <lidar|imu|bridge|all|nav> [map]
+用法: $0 <lidar|imu|bridge|all|nav|nav2> [map]
 
   lidar   启动 Hesai LiDAR + RViz2
   imu     仅启动 LPMS-IG1 IMU
   bridge  仅启动 motion_interface 的 STM32 后端
   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
-  nav     启动 LiDAR + motion_interface + 定位/规划/导航基础设施
+  nav     启动 Smac Hybrid-A* + NeuPAN 导航基础设施
           map 可传地图目录、map.yaml 或 map.pgm
-          地图目录需包含 map.yaml、map.pgm、GlobalMap.pcd
           NeuPAN 需另开终端执行: bash scripts/run_neupan.sh
+  nav2    启动 ackermann_nav 完整 Nav2 栈（Smac Hybrid-A* + MPPI + BT）
+          map 可传地图目录、map.yaml 或 map.pgm
+
+  nav/nav2 地图目录均需包含 map.yaml、map.pgm、GlobalMap.pcd
+  两套导航栈不要同时启动。
 
 环境变量:
   VEHICLE_CONFIG 项目级车辆参数，默认: config/vehicle.yaml
@@ -53,6 +58,7 @@ usage() {
   $0 bridge
   $0 all
   $0 nav maps/my_map
+  $0 nav2 maps/my_map
   VEHICLE_CONFIG=/path/to/vehicle.yaml $0 bridge
   LIDAR_CONFIG=/path/to/hesai.yaml $0 lidar
   IMU_PORT=/dev/ttyUSB1 $0 imu
@@ -66,6 +72,7 @@ ENABLE_IMU=false
 ENABLE_CONTROL=false
 ENABLE_NAVIGATION=false
 NAVIGATION_RVIZ=false
+NAV_STACK=""
 
 case "$MODE" in
     lidar)
@@ -88,6 +95,14 @@ case "$MODE" in
         ENABLE_CONTROL=true
         ENABLE_NAVIGATION=true
         NAVIGATION_RVIZ=true
+        NAV_STACK="neupan"
+        ;;
+    nav2)
+        ENABLE_LIDAR=true
+        ENABLE_CONTROL=true
+        ENABLE_NAVIGATION=true
+        NAVIGATION_RVIZ=true
+        NAV_STACK="nav2"
         ;;
     help|-h|--help)
         usage
@@ -154,7 +169,7 @@ GLOBALMAP_PCD=""
 if $ENABLE_NAVIGATION; then
     MAP_ARG="${2:-}"
     if [[ -z "$MAP_ARG" ]]; then
-        log_error "nav 模式需要地图目录、map.yaml 或 map.pgm"
+        log_error "${MODE} 模式需要地图目录、map.yaml 或 map.pgm"
         usage
         exit 1
     fi
@@ -184,6 +199,7 @@ if $ENABLE_NAVIGATION; then
     done
 
     log_info "导航地图目录: ${MAP_DIR}"
+    log_info "导航栈: ${NAV_STACK}"
 fi
 
 echo ""
@@ -191,26 +207,44 @@ log_info "=============================="
 log_info "  实车启动模式: ${MODE}"
 log_info "=============================="
 
-LAUNCH_CMD=(
-    ros2 launch ackermann_bringup real_vehicle.launch.py
-    "vehicle_config:=${VEHICLE_CONFIG}"
-    "enable_lidar:=${ENABLE_LIDAR}"
-    "lidar_config:=${LIDAR_CONFIG}"
-    "lidar_rviz:=${LIDAR_RVIZ}"
-    "enable_imu:=${ENABLE_IMU}"
-    "imu_port:=${IMU_PORT}"
-    "enable_control:=${ENABLE_CONTROL}"
-    "enable_navigation:=${ENABLE_NAVIGATION}"
-    "navigation_rviz:=${NAVIGATION_RVIZ}"
-)
-
-if $ENABLE_NAVIGATION; then
-    LAUNCH_CMD+=(
+if [[ "$MODE" == "nav2" ]]; then
+    LAUNCH_CMD=(
+        ros2 launch ackermann_nav navigation.launch.py
+        "vehicle_config:=${VEHICLE_CONFIG}"
         "map:=${MAP_YAML}"
-        "map_pgm:=${MAP_PGM}"
         "globalmap_pcd:=${GLOBALMAP_PCD}"
+        "points_topic:=/lidar_points"
+        "start_hardware:=true"
+        "lidar_config:=${LIDAR_CONFIG}"
+        "enable_imu:=${ENABLE_IMU}"
+        "imu_port:=${IMU_PORT}"
+        "use_sim_time:=false"
+        "rviz:=${NAVIGATION_RVIZ}"
+    )
+else
+    LAUNCH_CMD=(
+        ros2 launch ackermann_bringup real_vehicle.launch.py
+        "vehicle_config:=${VEHICLE_CONFIG}"
+        "enable_lidar:=${ENABLE_LIDAR}"
+        "lidar_config:=${LIDAR_CONFIG}"
+        "lidar_rviz:=${LIDAR_RVIZ}"
+        "enable_imu:=${ENABLE_IMU}"
+        "imu_port:=${IMU_PORT}"
+        "enable_control:=${ENABLE_CONTROL}"
+        "enable_navigation:=${ENABLE_NAVIGATION}"
+        "navigation_rviz:=${NAVIGATION_RVIZ}"
     )
 
+    if $ENABLE_NAVIGATION; then
+        LAUNCH_CMD+=(
+            "map:=${MAP_YAML}"
+            "map_pgm:=${MAP_PGM}"
+            "globalmap_pcd:=${GLOBALMAP_PCD}"
+        )
+    fi
+fi
+
+if [[ "$MODE" == "nav" ]]; then
     echo ""
     log_info "NeuPAN 不由本脚本自动启动。另开终端执行:"
     log_info "  cd ${PROJECT_DIR}"
@@ -218,5 +252,5 @@ if $ENABLE_NAVIGATION; then
 fi
 
 echo ""
-log_info "启动 ROS 2 实车 bringup；按 Ctrl+C 停止。"
+log_info "启动 ROS 2 实车栈；按 Ctrl+C 停止。"
 exec "${LAUNCH_CMD[@]}"
