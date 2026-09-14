@@ -9,14 +9,18 @@
   <joint name="laser_joint" type="fixed">
     <parent link="base_link" />
     <child link="laser_link" />
-    <origin xyz="-0.078 0.0 0.384" rpy="0 0 0" />
+    <origin xyz="0.99 0.0 0.66" rpy="0 0 0" />
   </joint>
 
+  <!-- 注意：gyro_joint 的值是 vehicle_config 的手工同步拷贝，仅供本 xacro 可视化。
+       当前未被任何 launch 的 robot_state_publisher 消费；唯一数据源为
+       src/vehicle_config/config/real_vehicle.yaml 的 sensors.imu.mount。
+       LIO-SAM 实际使用的外参由 run.launch.py 注入，与本 xacro 无关。 -->
   <link name="gyro_link"> </link>
   <joint name="gyro_joint" type="fixed">
     <parent link="base_link" />
     <child link="gyro_link" />
-    <origin xyz="0 0 0" rpy="0 0 0" />
+    <origin xyz="0.13 0.0 0.26" rpy="-0.006945 -0.006617 0.0" />
   </joint>
 
 </robot>

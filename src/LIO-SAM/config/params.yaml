@@ -34,21 +34,22 @@
     lidarMaxRange: 1000.0                        # default: 1000.0, maximum lidar range to be used
 
     # IMU Settings
+    # 注：以下 4 个噪声参数目前仍是仓库示例默认值，待 ≥40min 静止录包后用
+    # scripts/imu_calibration/allan_variance.py 更新（5min 初步估计：
+    # imuAccNoise≈6.6e-4, imuGyrNoise≈1.1e-5；BiasN 需长时数据）。
     imuAccNoise: 3.9939570888238808e-03
     imuGyrNoise: 1.5636343949698187e-03
     imuAccBiasN: 6.4356659353532566e-05
     imuGyrBiasN: 3.5640318696367613e-05
 
-    imuGravity: 9.80511
+    # 实测静止加速度模长 9.7278（与传感器自身刻度一致，保证预积分自洽）
+    imuGravity: 9.72782
     imuRPYWeight: 0.01
 
-    extrinsicTrans:  [-0.078,  0.0,  0.384]
-    extrinsicRot:    [ 1.0,  0.0,  0.0,
-                       0.0,  1.0,  0.0,
-                       0.0,  0.0,  1.0 ]
-    extrinsicRPY: [ 1.0,  0.0,  0.0,
-                    0.0,  1.0,  0.0,
-                    0.0,  0.0,  1.0 ]
+    # extrinsic（extrinsicTrans/extrinsicRot/extrinsicRPY）由 run.launch.py 从
+    # vehicle_config 注入，唯一数据源为 src/vehicle_config/config/real_vehicle.yaml
+    # 的 sensors.imu.mount + sensors.lidar.mount。此处不要写死，避免与注入值冲突。
+    # LIO-SAM 代码对此三者有 identity/零平移默认值，缺省时仅失去外参补偿。
 
     # LOAM feature threshold
     edgeThreshold: 1.0

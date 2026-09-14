@@ -111,6 +111,7 @@ match your setup.
 | `ros2 launch lpms_ig1 lpms_curs3_launch.py`     | CU3 / CURS3 |
 | `ros2 launch lpms_ig1 lpms_si1_launch.py`       | SI1 |
 | `ros2 launch lpms_ig1 lpms_can_bridge_launch.py` | CAN-bus bridge (SocketCAN, no helper nodes) — also available as `lpms_can_bridge_launch.xml` |
+| `ros2 launch lpms_ig1 real_vehicle_imu_launch.py` | **实车专用**: IG1-RS485，参数从 `real_vehicle.yaml` 注入，无 `imu` namespace（话题即 `/imu/data`） |
 
 Example:
 

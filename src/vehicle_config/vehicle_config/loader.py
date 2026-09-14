@@ -25,6 +25,7 @@ REQUIRED_LIDAR_DRIVER_FIELDS = (
     'correction_file_path',
     'firetimes_path',
     'frame_frequency',
+    'use_timestamp_type',
 )
 REQUIRED_LIDAR_SCAN_FIELDS = (
     'angle_min',
@@ -149,6 +150,71 @@ def lidar_transform(config):
     return dict(config['sensors']['lidar']['mount'])
 
 
+def imu_transform(config):
+    """Return the base_link-to-IMU static transform fields."""
+    return dict(config['sensors']['imu']['mount'])
+
+
+def lio_sam_extrinsics(config):
+    """Map the LiDAR/IMU mounts to LIO-SAM extrinsic parameters.
+
+    LIO-SAM's imuConverter (include/lio_sam/utility.hpp) rotates IMU-frame
+    vectors into the body/lidar frame with a 3x3 row-major matrix, and folds
+    the same rotation into the IMU orientation via its quaternion:
+
+        acc = extRot * acc;  gyr = extRot * gyr;
+        q_body_world = q_imu_world * extQRPY   # extQRPY = quat(extrinsicRPY)
+
+    So both extrinsicRot and extrinsicRPY must equal the base_link-to-IMU
+    rotation R_base_imu = Rz(yaw) * Ry(pitch) * Rx(roll), which is the same
+    rpy convention as static_transform_publisher. extrinsicTrans is the lidar
+    origin expressed in the IMU frame, i.e. R_base_imu^T * (lidar - imu).
+    """
+    imu = config['sensors']['imu']['mount']
+    lidar = config['sensors']['lidar']['mount']
+
+    roll, pitch, yaw = imu['roll'], imu['pitch'], imu['yaw']
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+
+    # R_base_imu = Rz(yaw) @ Ry(pitch) @ Rx(roll), row-major
+    rot = [
+        cy * cp,                    cy * sp * sr - sy * cr, cy * sp * cr + sy * sr,
+        sy * cp,                    sy * sp * sr + cy * cr, sy * sp * cr - cy * sr,
+        -sp,                        cp * sr,                cp * cr,
+    ]
+
+    dx = lidar['x'] - imu['x']
+    dy = lidar['y'] - imu['y']
+    dz = lidar['z'] - imu['z']
+    # extrinsicTrans = R_base_imu^T @ [dx, dy, dz]  (lidar origin in IMU frame)
+    trans = [
+        rot[0] * dx + rot[3] * dy + rot[6] * dz,
+        rot[1] * dx + rot[4] * dy + rot[7] * dz,
+        rot[2] * dx + rot[5] * dy + rot[8] * dz,
+    ]
+
+    return {
+        'extrinsicTrans': trans,
+        'extrinsicRot': rot,
+        'extrinsicRPY': rot,
+    }
+
+
+def imu_parameters(config):
+    """Map shared IMU fields to the LPMS-IG1-RS485 driver ROS parameters."""
+    imu = config['sensors']['imu']
+    params = imu['parameters']
+    return {
+        'port': params['port'],
+        'baudrate': params['baudrate'],
+        'frame_id': imu['frame_id'],
+        'rate': params['rate'],
+        'rs485ControlPin': params['rs485_control_pin'],
+    }
+
+
 def neupan_scan_parameters(config):
     """Map shared LiDAR scan fields to NeuPAN parameters."""
     lidar = config['sensors']['lidar']
@@ -199,6 +265,7 @@ def materialize_lidar_driver_config(config, base_config_file):
     ):
         vendor_udp[key] = shared_driver[key]
     vendor_driver['default_frame_frequency'] = shared_driver['frame_frequency']
+    vendor_driver['use_timestamp_type'] = shared_driver['use_timestamp_type']
 
     topics = lidar['topics']
     vendor_ros.update({

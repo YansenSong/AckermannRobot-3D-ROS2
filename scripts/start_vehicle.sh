@@ -6,6 +6,8 @@
 #   bridge 仅启动运动控制桥 (motion_control)
 #   all    全部启动 (LiDAR + rviz2 + 运动控制桥)
 #
+# IMU 驱动 (LPMS-IG1-RS485) 在所有模式下无条件启动。
+#
 # 参考: Sensors/start_hesai.sh（已适配本工作区包名并精简）
 #==========================================
 
@@ -42,6 +44,8 @@ case "$MODE" in
         echo "  nav     完整导航链 (LiDAR + bridge + pcl→scan + Hybrid A*)"
         echo "          注意: NeuPAN 需在另一个终端手动启动: bash scripts/run_neupan.sh"
         echo "  all     全部启动 (LiDAR + rviz2 + 运动控制桥)"
+        echo ""
+        echo "IMU 驱动 (LPMS-IG1-RS485) 在所有模式下都会启动。"
         echo ""
         echo "示例:"
         echo "  $0 lidar                    # LiDAR + rviz2"
@@ -93,6 +97,17 @@ cleanup() {
     log_info "所有组件已停止"
 }
 trap cleanup EXIT INT TERM
+
+# --- IMU (LPMS-IG1-RS485, 所有模式无条件启动) ---
+if [ -f "${VEHICLE_CONFIG}" ]; then
+    log_info "实车与 IMU 统一配置: ${VEHICLE_CONFIG}"
+else
+    log_warn "实车统一配置不存在: ${VEHICLE_CONFIG}"
+fi
+
+log_info "启动 LPMS-IG1-RS485 IMU 驱动 ..."
+ros2 launch lpms_ig1 real_vehicle_imu.launch.py &
+PIDS+=($!)
 
 # --- LiDAR (lidar_driver + rviz2) ---
 if $WITH_LIDAR; then

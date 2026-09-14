@@ -52,6 +52,9 @@
   <exec_depend>gtsam</exec_depend>
   <exec_depend>eigen</exec_depend>
   <exec_depend>xacro</exec_depend>
+  <exec_depend>vehicle_config</exec_depend>  <!-- run.launch.py 注入 IMU/LiDAR 外参 -->
+  <exec_depend>lidar_driver</exec_depend>   <!-- mapping.launch.py 跨包 include start.py -->
+  <exec_depend>lpms_ig1</exec_depend>       <!-- mapping.launch.py 跨包 include real_vehicle_imu.launch.py -->
   
   <member_of_group>rosidl_interface_packages</member_of_group>
 

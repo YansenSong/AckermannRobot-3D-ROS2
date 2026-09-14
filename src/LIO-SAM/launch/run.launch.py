@@ -4,6 +4,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from vehicle_config import lio_sam_extrinsics, load_real_vehicle_config
 
 
 def generate_launch_description():
@@ -20,6 +21,11 @@ def generate_launch_description():
 
     real_time_param = {'use_sim_time': False}
 
+    # IMU/LiDAR 外参唯一数据源是 real_vehicle.yaml（vehicle_config），
+    # 这里计算 extrinsicRot/RPY/Trans 并覆盖 params.yaml 中的硬编码值。
+    # 注意：params.yaml 中不得再写 extrinsic*（否则与注入值可能冲突）。
+    extrinsic_overlay = lio_sam_extrinsics(load_real_vehicle_config())
+
     return LaunchDescription([
         params_declare,
         Node(
@@ -35,28 +41,28 @@ def generate_launch_description():
             package='lio_sam',
             executable='lio_sam_imuPreintegration',
             name='lio_sam_imuPreintegration',
-            parameters=[parameter_file, real_time_param],
+            parameters=[parameter_file, real_time_param, extrinsic_overlay],
             output='screen'
         ),
         Node(
             package='lio_sam',
             executable='lio_sam_imageProjection',
             name='lio_sam_imageProjection',
-            parameters=[parameter_file, real_time_param],
+            parameters=[parameter_file, real_time_param, extrinsic_overlay],
             output='screen'
         ),
         Node(
             package='lio_sam',
             executable='lio_sam_featureExtraction',
             name='lio_sam_featureExtraction',
-            parameters=[parameter_file, real_time_param],
+            parameters=[parameter_file, real_time_param, extrinsic_overlay],
             output='screen'
         ),
         Node(
             package='lio_sam',
             executable='lio_sam_mapOptimization',
             name='lio_sam_mapOptimization',
-            parameters=[parameter_file, real_time_param],
+            parameters=[parameter_file, real_time_param, extrinsic_overlay],
             output='screen'
         ),
         Node(

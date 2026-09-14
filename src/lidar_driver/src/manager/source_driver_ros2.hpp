@@ -276,7 +276,9 @@ inline sensor_msgs::msg::PointCloud2 SourceDriver::ToRosMsg(const LidarDecodedFr
   offset = addPointField(ros_msg, "z", 1, sensor_msgs::msg::PointField::FLOAT32, offset);
   offset = addPointField(ros_msg, "intensity", 1, sensor_msgs::msg::PointField::FLOAT32, offset);
   offset = addPointField(ros_msg, "ring", 1, sensor_msgs::msg::PointField::UINT16, offset);
-  offset = addPointField(ros_msg, "timestamp", 1, sensor_msgs::msg::PointField::FLOAT64, offset);
+  // LIO-SAM 期望字段名 "time"（相对扫描起始的偏移秒，FLOAT32），而非绝对时间戳 "timestamp"。
+  // 名称与语义都必须匹配，否则 moveFromROSMsg 按字段名精确匹配会留下 0，去畸变退化为空操作。
+  offset = addPointField(ros_msg, "time", 1, sensor_msgs::msg::PointField::FLOAT32, offset);
 
   ros_msg.point_step = offset;
   ros_msg.row_step = ros_msg.width * ros_msg.point_step;
@@ -288,7 +290,7 @@ inline sensor_msgs::msg::PointCloud2 SourceDriver::ToRosMsg(const LidarDecodedFr
   sensor_msgs::PointCloud2Iterator<float> iter_z_(ros_msg, "z");
   sensor_msgs::PointCloud2Iterator<float> iter_intensity_(ros_msg, "intensity");
   sensor_msgs::PointCloud2Iterator<uint16_t> iter_ring_(ros_msg, "ring");
-  sensor_msgs::PointCloud2Iterator<double> iter_timestamp_(ros_msg, "timestamp");
+  sensor_msgs::PointCloud2Iterator<float> iter_time_(ros_msg, "time");
   for (size_t i = 0; i < points_number; i++)
   {
     LidarPointXYZIRT point = pPoints[i];
@@ -297,13 +299,15 @@ inline sensor_msgs::msg::PointCloud2 SourceDriver::ToRosMsg(const LidarDecodedFr
     *iter_z_ = point.z;
     *iter_intensity_ = point.intensity;
     *iter_ring_ = point.ring;
-    *iter_timestamp_ = point.timestamp;
+    // 相对扫描起始的偏移（秒）：header.stamp 取自 frame_start_timestamp，
+    // 因此 point.timestamp - frame_start_timestamp 与 LIO-SAM 的 timeScanCur 基准一致。
+    *iter_time_ = point.timestamp - frame_start_timestamp;
     ++iter_x_;
     ++iter_y_;
     ++iter_z_;
     ++iter_intensity_;
     ++iter_ring_;
-    ++iter_timestamp_;   
+    ++iter_time_;
   }
   // printf("HesaiLidar Runing Status [standby mode:%u]  |  [speed:%u]\n", frame.work_mode, frame.spin_speed);
   printf("%s frame:%d points:%u packet:%d start time:%lf end time:%lf\n", prefix, frame_index, points_number, packet_number, frame_start_timestamp, frame_end_timestamp) ;

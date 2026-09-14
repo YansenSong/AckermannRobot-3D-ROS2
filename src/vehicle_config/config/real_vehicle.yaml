@@ -7,7 +7,7 @@
 vehicle:
   length: 1.34                 # 车辆总长，从前端到后端（m）
   width: 0.91                  # 车辆总宽（m）
-  wheelbase: 0.97              # 前后轴中心距离（m）
+  wheelbase: 0.93              # 前后轴中心距离（m），2026-08-08 实测
   wheel_radius: 0.205          # 轮子实际半径（m）
   rear_axle_offset_x: 0.0      # 后轴中心相对 base_link 的 X 向偏移（m）；两者重合
 
@@ -27,6 +27,10 @@ sensors:
       correction_file_path: "src/driver/HesaiLidar_SDK_2.0/correction/angle_correction/PandarXT-16_Angle Correction File.csv"
       firetimes_path: "src/driver/HesaiLidar_SDK_2.0/correction/firetime_correction/PandarXT-16_Firetime Correction File.csv"
       frame_frequency: 10.0                   # 点云帧率（Hz）
+      # 时间戳来源：0=雷达内部 UTC（本车 PTP 未同步，停留在 2019，与 IMU 主机时间域不一致，
+      # 导致 LIO-SAM 一直 Waiting for IMU data）；1=主机接收时间（与 IMU 的 now() 同域）。
+      # 治本方案是给雷达做 PTP 时间同步后改回 0，见 docs/imu_lio_sam_integration.md §9。
+      use_timestamp_type: 1
 
     frames:
       sensor: "hesai_lidar"                  # 雷达原始点云坐标系
@@ -39,9 +43,9 @@ sensors:
       scan: "/scan"
 
     mount:
-      x: 0.0                                 # 雷达中心相对 base_link 的 X 向偏移（m），待实车测量
-      y: 0.0
-      z: 0.4
+      x: 0.99                                # 雷达中心相对 base_link 的 X 向偏移（m）：轴距 0.93 + 前轴前方 0.06，实测
+      y: 0.0                                 # 横向居中
+      z: 0.66                                # 雷达中心相对 base_link 的 Z 向偏移（m）：前轴上方 0.66，实测
       roll: 0.0                              # 雷达相对 base_link 的姿态角（rad）
       pitch: 0.0
       yaw: 0.0
@@ -63,13 +67,13 @@ sensors:
     model: LPMS-IG1-RS485                    # 型号
     frame_id: imu                            # 坐标系（驱动节点默认）
     topic: /imu/data                         # 驱动节点发布（已加 imu/ 前缀）
-    mount:                                   # 安装位姿待实车测量
-      x: null
-      y: null
-      z: null
-      roll: null
-      pitch: null
-      yaw: null
+    mount:                                   # 2026-08-08 卷尺测量 + 静止加速度标定
+      x: 0.13                                # IMU 中心相对 base_link 的 X 向偏移（m），实测
+      y: 0.0                                 # Y 向偏移（m），左右居中
+      z: 0.26                                # Z 向偏移（m），实测
+      roll: -0.006945                        # 安装横滚角（rad），5min 静止加速度标定 ≈ -0.398°
+      pitch: -0.006617                       # 安装俯仰角（rad），5min 静止加速度标定 ≈ -0.379°
+      yaw: 0.0                               # 安装偏航角（rad），IMU X 轴指向车头
     parameters:
       rate: 167                              # 实测 ~167 Hz
       baudrate: 115200                       # RS485 波特率
