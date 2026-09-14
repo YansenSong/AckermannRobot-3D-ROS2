@@ -1,0 +1,8 @@
+<launch>
+    <node pkg="lpms_ig1" exec="lpms_can_bridge_node" name="lpms_can_bridge" output="screen">
+        <param name="channel" value="can0" />
+        <param name="publish_rate" value="200.0" />
+        <param name="timestamp_scale" value="0.001" />
+        <!-- interface / bitrate omitted: node doesn't declare them -->
+    </node>
+</launch>

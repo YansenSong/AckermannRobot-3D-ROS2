@@ -1,0 +1,7 @@
+<launch>
+  <node pkg="lidar_driver" name="lidar_driver_node" type="lidar_driver_node" output="screen">
+    <param name="config_path" value="$(find lidar_driver)/config/config.yaml"/>
+  </node>
+  <!-- rviz -->
+  <node pkg="rviz" name="rviz" type="rviz" args="-d '$(find lidar_driver)/rviz/rviz.rviz'" required="true"/>
+</launch>

@@ -1,0 +1,27 @@
+/**:
+  ros__parameters:
+    # --- UDP communication ---
+    # Target motion control board IP address (on enp5s0 subnet)
+    udp_host: "192.168.1.50"
+    # Target UDP port (Ethernet-to-Serial bridge listening port)
+    udp_port: 5000
+    # Force socket to use this network device for egress (SO_BINDTODEVICE).
+    # Use this on multi-NIC hosts to ensure packets go through the correct
+    # interface regardless of the kernel routing table.
+    bind_device: "enp5s0"
+    # Optional: bind socket to this specific IP for source address selection
+    bind_interface: "192.168.1.11"
+
+    # Vehicle geometry and limits are injected at launch from the shared
+    # vehicle_config/config/real_vehicle.yaml file.
+
+    # --- Actuator enable mask ---
+    # bit0: RT49 (drive), bit1: EPS (steering), bit2: SEB (brake)
+    # 7 = all enabled, 3 = drive+steering only, etc.
+    enable_mask: 7
+
+    # --- Control timing ---
+    # Frame publish rate (Hz), matches STM32 20ms control period
+    publish_rate: 20.0
+    # Seconds without cmd_vel before sending zero-velocity safety frame
+    command_timeout: 0.5
