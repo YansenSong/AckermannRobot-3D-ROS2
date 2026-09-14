@@ -10,7 +10,6 @@
   <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
-  <exec_depend>vehicle_config</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 
