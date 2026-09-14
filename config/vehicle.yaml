@@ -15,9 +15,8 @@ status: "PARTIALLY VERIFIED"
 vehicle:
   geometry:
     status: "VERIFIED"
-    # Measured real-vehicle dimensions, using the corrected body length supplied
-    # for this vehicle.
-    length: 13.600
+    # Measured real-vehicle dimensions.
+    length: 1.360
     width: 0.900
     wheelbase: 0.960
     track_width: 0.750
@@ -27,7 +26,7 @@ vehicle:
     # Axle-to-body distances. rear_overhang is measured directly. front_overhang
     # is derived from length - wheelbase - rear_overhang.
     rear_overhang: 0.200
-    front_overhang: 12.440
+    front_overhang: 0.200
 
   frames:
     base: "rear_axle_link"
@@ -56,10 +55,10 @@ vehicle:
 
     # Collision envelope is relative to frames.base = rear_axle_link.
     # rear_extent is the measured rear-axle-to-tail distance. front_extent is
-    # derived from the corrected total body length: 13.600 - 0.200 = 13.400 m.
+    # derived from total body length: 1.360 - 0.200 = 1.160 m.
     footprint:
       status: "VERIFIED"
-      front_extent: 13.400
+      front_extent: 1.160
       rear_extent: 0.200
       half_width: 0.450
       padding: 0.01
