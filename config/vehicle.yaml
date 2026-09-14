@@ -5,19 +5,23 @@
 # Device/network settings (LiDAR IP, STM32 IP, serial ports, etc.) stay with
 # their owning drivers.
 #
-# IMPORTANT: geometry and planning-envelope values below preserve the values
-# currently used by this branch. They are NOT VERIFIED against the final real
-# vehicle yet. Replace them with measured values before real navigation tuning.
+# Geometry values marked VERIFIED below are measured real-vehicle values.
+# Parameters that still need measurement/calibration remain explicitly marked
+# NOT VERIFIED so the real-vehicle stack cannot silently fall back to old data.
 
 schema_version: 1
-status: "NOT VERIFIED"
+status: "PARTIALLY VERIFIED"
 
 vehicle:
   geometry:
-    # NOT VERIFIED: current NeuPAN baseline values.
-    length: 0.720
-    width: 0.500
-    wheelbase: 0.593
+    status: "VERIFIED"
+    # Measured real-vehicle dimensions.
+    length: 1.340
+    width: 0.900
+    wheelbase: 0.960
+    track_width: 0.750
+    wheel_diameter: 0.400
+    wheel_radius: 0.200
 
   frames:
     base: "rear_axle_link"
@@ -25,7 +29,9 @@ vehicle:
     imu: "imu_link"
 
   control_limits:
-    # Hard limits enforced by the STM32 motion-control bridge.
+    # Existing STM32 bridge limits. Steering/speed limits are not changed by
+    # this geometry update and should be verified independently on the vehicle.
+    status: "NOT VERIFIED"
     max_forward_speed: 2.0
     max_reverse_speed: -0.5
     max_steering_angle_deg: 30.0
@@ -36,13 +42,21 @@ vehicle:
     max_forward_speed: 0.7
     max_acceleration: 1.0
     max_steering_rate: 0.328
-    minimum_turning_radius: 1.320
 
-    # NOT VERIFIED: current Smac collision envelope relative to frames.base.
+    # Derived from the measured 0.960 m wheelbase and the currently configured
+    # 30 deg steering limit: R = L / tan(delta) ~= 1.663 m.
+    # Recompute this value if the verified steering limit changes.
+    minimum_turning_radius: 1.663
+
+    # Collision envelope is relative to frames.base = rear_axle_link.
+    # Body width is known, so half_width is verified. front_extent and
+    # rear_extent require front/rear overhang measurements and intentionally
+    # remain unset; real navigation should not use an invented axle offset.
     footprint:
-      front_extent: 0.74
-      rear_extent: 0.10
-      half_width: 0.36
+      status: "NOT VERIFIED"
+      front_extent: null
+      rear_extent: null
+      half_width: 0.450
       padding: 0.01
 
   sensor_extrinsics:
