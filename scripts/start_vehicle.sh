@@ -16,7 +16,7 @@ set -eo pipefail
 ROS2_DISTRO="${ROS2_DISTRO:-humble}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VEHICLE_CONFIG="${VEHICLE_CONFIG:-${PROJECT_DIR}/config/vehicle.yaml}"
-LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/lidar/config/config.yaml}"
+LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/sensors/lidar/config/config.yaml}"
 IMU_PORT="${IMU_PORT:-/dev/ttyUSB0}"
 INTERFACE_CONFIG="${PROJECT_DIR}/src/motion_interface/config/bridge_params.yaml"
 
@@ -48,7 +48,7 @@ usage() {
 
 环境变量:
   VEHICLE_CONFIG 项目级车辆参数，默认: config/vehicle.yaml
-  LIDAR_CONFIG   Hesai 配置文件，默认: src/lidar/config/config.yaml
+  LIDAR_CONFIG   Hesai 配置文件，默认: src/sensors/lidar/config/config.yaml
   IMU_PORT       LPMS 串口，默认: /dev/ttyUSB0
   ROS2_DISTRO    ROS 发行版，默认: humble
 

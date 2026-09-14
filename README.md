@@ -5,8 +5,9 @@
 ## 1. 主要组件
 
 - `config/vehicle.yaml`：项目级车辆几何、硬限制、规划限制、LiDAR/IMU 外参的唯一配置源（不是 ROS package）
-- `src/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
-- `src/imu`：LPMS-IG1 IMU 驱动（ROS package 名仍为 `lpms_ig1`）
+- `src/sensors`：传感器源码分类目录（不是 ROS package）
+- `src/sensors/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
+- `src/sensors/imu`：LPMS-IG1 IMU 驱动（ROS package 名仍为 `lpms_ig1`）
 - `src/motion_interface`：命令安全门 + `/ackermann_cmd` 到 STM32 UDP 协议的实车接口
 - `src/ackermann_bringup`：实车硬件、定位以及 Smac + NeuPAN 导航栈 bringup
 - `src/ackermann_nav`：第二套独立 Nav2 导航栈（Smac Hybrid-A* + MPPI + BT Navigator）
@@ -18,6 +19,7 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
+git submodule sync --recursive
 git submodule update --init --recursive
 colcon build --symlink-install
 source install/setup.bash
