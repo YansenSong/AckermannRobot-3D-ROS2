@@ -6,7 +6,6 @@ settings remain local to their owning drivers.
 """
 
 import os
-import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -24,53 +23,37 @@ def _enabled(context, name):
     }
 
 
-def _load_vehicle_config(path):
-    if not path:
-        raise RuntimeError(
-            "vehicle_config is required when control or navigation is enabled"
-        )
-    if not os.path.isfile(path):
-        raise RuntimeError(f"Vehicle config does not exist: {path}")
-    with open(path, encoding='utf-8') as stream:
-        data = yaml.safe_load(stream) or {}
-    vehicle = data.get('vehicle', {})
-    limits = vehicle.get('control_limits', {})
-    required = {
-        'max_forward_speed': limits.get('max_forward_speed'),
-        'max_reverse_speed': limits.get('max_reverse_speed'),
-        'max_steering_angle_deg': limits.get('max_steering_angle_deg'),
-    }
-    missing = [name for name, value in required.items() if value is None]
-    if missing:
-        raise RuntimeError(
-            f"Vehicle config is missing control limits: {', '.join(missing)}"
-        )
-    return required
-
-
-def _configured_components(context, bringup_share, motion_share):
+def _configured_components(context, bringup_share, motion_interface_share):
     enable_control = _enabled(context, 'enable_control')
     enable_navigation = _enabled(context, 'enable_navigation')
     if not enable_control and not enable_navigation:
         return []
 
     vehicle_config = LaunchConfiguration('vehicle_config').perform(context)
-    limits = _load_vehicle_config(vehicle_config)
-    actions = []
-
-    if enable_control:
-        actions.append(
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(motion_share, 'launch', 'bridge.launch.py')
-                ),
-                launch_arguments={
-                    'max_speed': str(limits['max_forward_speed']),
-                    'max_reverse_speed': str(limits['max_reverse_speed']),
-                    'max_steer_deg': str(limits['max_steering_angle_deg']),
-                }.items(),
-            )
+    if not vehicle_config:
+        raise RuntimeError(
+            "vehicle_config is required when control or navigation is enabled"
         )
+    if not os.path.isfile(vehicle_config):
+        raise RuntimeError(f"Vehicle config does not exist: {vehicle_config}")
+
+    actions = [
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    motion_interface_share,
+                    'launch',
+                    'motion_interface.launch.py',
+                )
+            ),
+            launch_arguments={
+                'vehicle_config': vehicle_config,
+                'enable_command_gate': str(enable_navigation).lower(),
+                'enable_stm32_bridge': str(enable_control).lower(),
+                'use_sim_time': 'false',
+            }.items(),
+        )
+    ]
 
     if enable_navigation:
         actions.append(
@@ -97,7 +80,7 @@ def _configured_components(context, bringup_share, motion_share):
 def generate_launch_description():
     bringup_share = get_package_share_directory('ackermann_bringup')
     lidar_share = get_package_share_directory('lidar_driver')
-    motion_share = get_package_share_directory('motion_control')
+    motion_interface_share = get_package_share_directory('motion_interface')
 
     default_lidar_config = os.path.join(lidar_share, 'config', 'config.yaml')
     default_localization_params = os.path.join(
@@ -138,7 +121,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'enable_control',
             default_value='false',
-            description='Start the real-vehicle UDP motion-control backend.',
+            description='Start the real-vehicle STM32 motion interface backend.',
         ),
         DeclareLaunchArgument(
             'enable_navigation',
@@ -200,7 +183,7 @@ def generate_launch_description():
 
     configured = OpaqueFunction(
         function=_configured_components,
-        args=[bringup_share, motion_share],
+        args=[bringup_share, motion_interface_share],
     )
 
     return LaunchDescription(arguments + [lidar, imu, configured])

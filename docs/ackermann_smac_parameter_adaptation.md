@@ -109,7 +109,7 @@ ComputePathToPose start/goal frame = map
 6. 构建并确认 planner server、map server、bridge 能正常启动。
 7. 在静态地图中验证直行、转弯、窄通道，以及允许倒车时的 Reeds-Shepp 路径。
 8. 检查 `/plan` 的曲率不超过实车物理限制。
-9. 最后再接 NeuPAN 和 `/ackermann_cmd -> motion_control -> STM32` 做整车集成验证。
+9. 最后再接 NeuPAN 和 `/ackermann_cmd -> motion_interface/stm32_bridge -> STM32` 做整车集成验证。
 
 ## 7. 最小验收清单
 

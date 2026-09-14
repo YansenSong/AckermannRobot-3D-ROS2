@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real-vehicle Ackermann command bridge.
+"""Bridge the canonical Ackermann ROS command to the STM32 UDP protocol.
 
 Subscribes to the canonical Ackermann command (geometry_msgs/Twist), converts
 it to the STM32 26-byte control protocol, and sends it as UDP datagrams to the
@@ -19,8 +19,8 @@ Protocol: Chapter 3 of 普通车运控项目通信协议说明_V1.0
   - Checksum: uint32 BE sum of bytes 0-21
 
 The bridge intentionally performs no bicycle-model conversion: angular.z is
-already the front-wheel steering angle. Simulation-specific conversion to yaw
-rate belongs in ackermann_control/ackermann_sim_adapter.py instead.
+already the front-wheel steering angle. Planning/control layers must preserve
+that canonical command contract before the command reaches this hardware edge.
 """
 
 import math
@@ -35,7 +35,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 
-class VehicleBridgeNode(Node):
+class Stm32VehicleBridgeNode(Node):
     """Bridge the canonical Ackermann command to the STM32 board over UDP."""
 
     HEADER = b"cmd__"
@@ -50,7 +50,7 @@ class VehicleBridgeNode(Node):
     SHUTDOWN_STOP_INTERVAL = 0.02
 
     def __init__(self):
-        super().__init__('vehicle_bridge_node')
+        super().__init__('stm32_vehicle_bridge')
 
         self.declare_parameter('command_topic', '/ackermann_cmd')
         self.declare_parameter('udp_host', '192.168.1.100')
@@ -108,7 +108,7 @@ class VehicleBridgeNode(Node):
             f'Publish timer started: {self._publish_rate:.1f} Hz '
             f'(every {timer_period*1000:.0f} ms)'
         )
-        self.get_logger().info('Vehicle bridge node initialized')
+        self.get_logger().info('STM32 vehicle bridge initialized')
 
     def _create_udp_socket(self) -> socket.socket:
         """Create and configure the UDP socket."""
@@ -271,7 +271,7 @@ class VehicleBridgeNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = VehicleBridgeNode()
+    node = Stm32VehicleBridgeNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish the real-vehicle Ackermann command with a centralized stop override.
+"""Gate planner commands and publish the canonical real-vehicle Ackermann command.
 
 Input contract (default: /neupan_cmd_vel_raw):
   - linear.x: longitudinal speed in m/s
@@ -9,9 +9,9 @@ Output contract (default: /ackermann_cmd):
   - linear.x: longitudinal speed in m/s
   - angular.z: front-wheel steering angle in radians
 
-The command stays in Ackermann steering-angle form all the way to the
-real-vehicle motion-control backend, which converts it to the STM32 EPS
-protocol.
+The gate provides the centralized /stop override and a ROS-layer command
+watchdog. Hardware limits and STM32 protocol encoding belong to the downstream
+STM32 bridge in this package.
 """
 
 import math
@@ -23,11 +23,11 @@ from rclpy.time import Time
 from std_msgs.msg import Bool
 
 
-class CmdVelMux(Node):
+class MotionCommandGate(Node):
     """Gate planner commands and publish the canonical real-vehicle command."""
 
     def __init__(self):
-        super().__init__('cmd_vel_mux')
+        super().__init__('motion_command_gate')
 
         self.declare_parameter('input_topic', '/neupan_cmd_vel_raw')
         self.declare_parameter('output_topic', '/ackermann_cmd')
@@ -60,7 +60,7 @@ class CmdVelMux(Node):
         self.timer = self.create_timer(1.0 / self.publish_rate, self.timer_callback)
 
         self.get_logger().info(
-            f'Ackermann command gate: {self.input_topic} + /stop -> '
+            f'Motion command gate: {self.input_topic} + /stop -> '
             f'{self.output_topic} (linear.x=speed, angular.z=steering angle)'
         )
 
@@ -121,7 +121,7 @@ class CmdVelMux(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CmdVelMux()
+    node = MotionCommandGate()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

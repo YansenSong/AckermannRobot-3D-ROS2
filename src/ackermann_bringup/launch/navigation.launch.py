@@ -1,4 +1,4 @@
-"""Compose the real-vehicle localization, planning, scan, command gate, and RViz stack."""
+"""Compose the real-vehicle localization, planning, scan, status, and RViz stack."""
 
 import os
 
@@ -68,17 +68,6 @@ def generate_launch_description():
             ('scan', '/scan'),
         ],
     )
-    command_gate = Node(
-        package='ackermann_control',
-        executable='cmd_vel_mux.py',
-        name='cmd_vel_mux',
-        output='screen',
-        parameters=[{
-            'use_sim_time': LaunchConfiguration('use_sim_time'),
-            'input_topic': '/neupan_cmd_vel_raw',
-            'output_topic': '/ackermann_cmd',
-        }],
-    )
     nav_status = Node(
         package='nav_status',
         executable='nav_status_node',
@@ -99,5 +88,5 @@ def generate_launch_description():
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
     )
     return LaunchDescription(
-        arguments + [localization, planning, scan, command_gate, nav_status, rviz]
+        arguments + [localization, planning, scan, nav_status, rviz]
     )

@@ -4,9 +4,9 @@
 #
 #   lidar   启动 Hesai LiDAR + RViz2
 #   imu     仅启动 LPMS-IG1 IMU
-#   bridge  仅启动运动控制桥 (motion_control)
-#   all     启动 LiDAR + RViz2 + 运动控制桥（不自动启动 IMU）
-#   nav     启动 LiDAR + 运动控制桥 + 定位/规划/导航基础设施
+#   bridge  仅启动 STM32 运动接口后端 (motion_interface)
+#   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
+#   nav     启动 LiDAR + motion_interface + 定位/规划/导航基础设施
 #           NeuPAN 需在另一个终端运行 scripts/run_neupan.sh
 #==========================================
 
@@ -17,7 +17,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VEHICLE_CONFIG="${VEHICLE_CONFIG:-${PROJECT_DIR}/config/vehicle.yaml}"
 LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/lidar/config/config.yaml}"
 IMU_PORT="${IMU_PORT:-/dev/ttyUSB0}"
-BRIDGE_CONFIG="${PROJECT_DIR}/src/motion_control/config/bridge_params.yaml"
+INTERFACE_CONFIG="${PROJECT_DIR}/src/motion_interface/config/bridge_params.yaml"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,9 +34,9 @@ usage() {
 
   lidar   启动 Hesai LiDAR + RViz2
   imu     仅启动 LPMS-IG1 IMU
-  bridge  仅启动运动控制桥
-  all     启动 LiDAR + RViz2 + 运动控制桥（不自动启动 IMU）
-  nav     启动 LiDAR + bridge + 定位/规划/导航基础设施
+  bridge  仅启动 motion_interface 的 STM32 后端
+  all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
+  nav     启动 LiDAR + motion_interface + 定位/规划/导航基础设施
           map 可传地图目录、map.yaml 或 map.pgm
           地图目录需包含 map.yaml、map.pgm、GlobalMap.pcd
           NeuPAN 需另开终端执行: bash scripts/run_neupan.sh
@@ -140,11 +140,11 @@ if $ENABLE_IMU; then
 fi
 
 if $ENABLE_CONTROL; then
-    if [[ ! -f "$BRIDGE_CONFIG" ]]; then
-        log_error "运动控制配置不存在: ${BRIDGE_CONFIG}"
+    if [[ ! -f "$INTERFACE_CONFIG" ]]; then
+        log_error "motion_interface 配置不存在: ${INTERFACE_CONFIG}"
         exit 1
     fi
-    log_info "Motion bridge 配置: ${BRIDGE_CONFIG}"
+    log_info "motion_interface 配置: ${INTERFACE_CONFIG}"
 fi
 
 MAP_YAML=""

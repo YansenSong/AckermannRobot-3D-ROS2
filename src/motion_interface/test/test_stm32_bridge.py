@@ -1,7 +1,7 @@
 import math
 import struct
 
-from motion_control.bridge_node import VehicleBridgeNode
+from motion_interface.stm32_bridge import Stm32VehicleBridgeNode
 
 
 class FakeSocket:
@@ -13,7 +13,7 @@ class FakeSocket:
 
 
 def make_bridge(enable_mask=3, counter=0):
-    bridge = object.__new__(VehicleBridgeNode)
+    bridge = object.__new__(Stm32VehicleBridgeNode)
     bridge._max_steer_deg = 30.0
     bridge._enable_mask = enable_mask
     bridge._counter = counter
@@ -35,8 +35,7 @@ def test_steering_angle_uses_protocol_degree_scale():
 
 
 def test_frame_matches_reference_steering_scale():
-    """30° must produce EPS field 3,000,000 (0x2DC6C0), matching the
-    empirically-verified uart_vehicle_bridge — not the doc's 300,000."""
+    """30° produces the empirically verified STM32 EPS field value."""
     bridge = make_bridge(enable_mask=3, counter=1)
     eps_raw = bridge._compute_eps_raw(math.radians(30.0))
 
@@ -47,7 +46,7 @@ def test_frame_matches_reference_steering_scale():
         '00 00 00 00 01 00 00 04 82'
     )
     assert frame == expected
-    assert len(frame) == VehicleBridgeNode.FRAME_LENGTH
+    assert len(frame) == Stm32VehicleBridgeNode.FRAME_LENGTH
     assert unpack_control_fields(frame) == (2_000, 3_000_000)
 
 

@@ -7,8 +7,7 @@
 - `config/vehicle.yaml`：项目级车辆几何、硬限制、规划限制、LiDAR/IMU 外参的唯一配置源（不是 ROS package）
 - `src/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
 - `src/imu`：LPMS-IG1 IMU 驱动（ROS package 名仍为 `lpms_ig1`）
-- `src/motion_control`：`/ackermann_cmd` 到 STM32 UDP 控制协议的实车后端
-- `src/ackermann_control`：NeuPAN 控制命令安全门，统一输出 `/ackermann_cmd`
+- `src/motion_interface`：NeuPAN 命令安全门 + `/ackermann_cmd` 到 STM32 UDP 协议的实车接口
 - `src/ackermann_bringup`：实车定位、规划、导航和硬件 bringup
 - `src/lio-sam` / `src/liorf_localization`：建图与先验地图定位
 - `src/ackermann_smac_bridge` / `src/nav2_smac_planner`：Smac 全局规划链路
@@ -31,7 +30,7 @@ source install/setup.bash
 config/vehicle.yaml
 ```
 
-它不是 ROS package，也不会通过 `get_package_share_directory()` 查找。实车启动链路把它的绝对路径传给各模块，再分别映射到 motion_control、Smac、NeuPAN、LIORF 和 LIO-SAM。
+它不是 ROS package，也不会通过 `get_package_share_directory()` 查找。实车启动链路把它的绝对路径传给各模块，再分别映射到 motion_interface、Smac、NeuPAN、LIORF 和 LIO-SAM。
 
 配置中的主要职责：
 
@@ -40,7 +39,7 @@ config/vehicle.yaml
 - `planning`：Smac/NeuPAN 使用的规划限制，例如规划速度、最小转弯半径和碰撞 footprint
 - `sensor_extrinsics.lidar_to_imu`：LIORF 与 LIO-SAM 共用的 LiDAR/IMU 外参
 
-当前车辆几何和 footprint 已按实测尺寸标记为 `VERIFIED`；底盘速度/转角硬限制和 LiDAR/IMU 外参仍需要实车确认。LiDAR IP、STM32 IP、串口等设备/部署参数不放入 `vehicle.yaml`，继续留在各自驱动配置中。
+当前车辆几何和 footprint 已按实测尺寸标记为 `VERIFIED`；底盘速度/转角硬限制和 LiDAR/IMU 外参仍需要实车确认。LiDAR IP、STM32 IP、串口等设备/部署参数不放入 `vehicle.yaml`，继续留在各自驱动或接口配置中。
 
 LiDAR/IMU 外参直接对应 LIO-SAM/LIORF 的参数语义：
 
@@ -82,21 +81,30 @@ ros2 launch ackermann_bringup real_vehicle.launch.py \
 
 只测试某一个硬件模块时，只打开对应开关即可。底盘控制不会默认启动。
 
+`motion_interface` 也可以单独启动。启用 STM32 bridge 时必须传入根车辆配置，以便读取执行侧硬限制：
+
+```bash
+ros2 launch motion_interface motion_interface.launch.py \
+  vehicle_config:=$(pwd)/config/vehicle.yaml
+```
+
 ## 5. 控制接口
 
-统一实车控制话题：
+统一实车控制链：
 
 ```text
 /neupan_cmd_vel_raw
         ↓
-   cmd_vel_mux
+motion_interface / command_gate
         ↓
  /ackermann_cmd
         ↓
- motion_control
+motion_interface / stm32_bridge
         ↓
    UDP → STM32
 ```
+
+`command_gate` 负责 `/stop` 覆盖、非法数值保护和 ROS 层命令超时；`stm32_bridge` 负责车辆硬限幅、第二层超时保护、STM32 协议编码和 UDP 发送。两个节点属于同一个 `motion_interface` ROS package，但职责保持分离。
 
 `/ackermann_cmd` 使用 `geometry_msgs/msg/Twist`：
 
@@ -108,6 +116,8 @@ ros2 launch ackermann_bringup real_vehicle.launch.py \
 ## 6. 导航与定位
 
 实车导航入口通过 `real_vehicle.launch.py enable_navigation:=true` 挂接 `navigation.launch.py`。Smac 的最小转弯半径、footprint 和 base frame 在启动时从 `config/vehicle.yaml` 注入；LIORF 的 `extrinsicTrans`、`extrinsicRot`、`extrinsicRPY` 也从同一个根配置注入。
+
+导航模式下，`real_vehicle.launch.py` 同时通过 `motion_interface.launch.py` 启动 `command_gate`；当 `enable_control:=true` 时再启动 STM32 bridge，因此不会重复创建命令安全节点。
 
 因此，在 LiDAR/IMU 外参仍为 `NOT VERIFIED` 或为空时，实车定位/导航会 fail-fast，而不会继续使用旧仿真外参。
 
