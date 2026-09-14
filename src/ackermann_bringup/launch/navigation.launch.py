@@ -1,4 +1,10 @@
-"""Compose localization, global planning, scan conversion, command muxing, and RViz."""
+"""Compose localization, planning, scan conversion, command gating, and RViz.
+
+This launch file is backend-neutral: it publishes the canonical Ackermann
+command on /ackermann_cmd but does not start a simulation or real-vehicle
+actuation backend. Use navigation_sim.launch.py for Gazebo; the real-vehicle
+bringup will attach motion_control to the same command topic.
+"""
 
 import os
 
@@ -32,32 +38,42 @@ def generate_launch_description():
         }.items())
     planning = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'planning.launch.py')),
-        launch_arguments={'map': LaunchConfiguration('map'), 'map_pgm': LaunchConfiguration('map_pgm')}.items())
-    scan = Node(package='pointcloud_to_laserscan', executable='pointcloud_to_laserscan_node',
-                name='pointcloud_to_laserscan', output='screen',
-                parameters=[os.path.join(share, 'config', 'pcl_to_scan.yaml')],
-                remappings=[('cloud_in', '/points_raw'), ('scan', '/scan')])
-    adapter = Node(
+        launch_arguments={
+            'map': LaunchConfiguration('map'),
+            'map_pgm': LaunchConfiguration('map_pgm'),
+        }.items())
+    scan = Node(
+        package='pointcloud_to_laserscan',
+        executable='pointcloud_to_laserscan_node',
+        name='pointcloud_to_laserscan',
+        output='screen',
+        parameters=[os.path.join(share, 'config', 'pcl_to_scan.yaml')],
+        remappings=[('cloud_in', '/points_raw'), ('scan', '/scan')])
+    command_gate = Node(
         package='ackermann_control',
-        executable='neupan_ackermann_adapter.py',
-        name='neupan_ackermann_adapter',
+        executable='cmd_vel_mux.py',
+        name='cmd_vel_mux',
         output='screen',
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
-            'wheelbase': 0.593,
             'input_topic': '/neupan_cmd_vel_raw',
-            'output_topic': '/neupan_cmd_vel',
+            'output_topic': '/ackermann_cmd',
         }])
-    mux = Node(package='ackermann_control', executable='cmd_vel_mux.py', name='cmd_vel_mux',
-               output='screen', parameters=[{'use_sim_time': True}])
     nav_status = Node(
-        package='nav_status', executable='nav_status_node', name='nav_status_node',
+        package='nav_status',
+        executable='nav_status_node',
+        name='nav_status_node',
         output='screen',
         parameters=[
             os.path.join(nav_status_share, 'config', 'nav_status.yaml'),
-            {'use_sim_time': True},
+            {'use_sim_time': LaunchConfiguration('use_sim_time')},
         ])
-    rviz = Node(package='rviz2', executable='rviz2', name='rviz2', output='screen',
-                arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')])
+    rviz = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        output='screen',
+        arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])
     return LaunchDescription(
-        arguments + [localization, planning, scan, adapter, mux, nav_status, rviz])
+        arguments + [localization, planning, scan, command_gate, nav_status, rviz])

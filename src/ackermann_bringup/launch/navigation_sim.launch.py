@@ -7,6 +7,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -43,10 +44,26 @@ def generate_launch_description():
             'map_pgm': LaunchConfiguration('map_pgm'),
             'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
             'params_file': LaunchConfiguration('params_file'),
+            'use_sim_time': 'true',
         }.items(),
+    )
+
+    sim_adapter = Node(
+        package='ackermann_control',
+        executable='ackermann_sim_adapter.py',
+        name='ackermann_sim_adapter',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'wheelbase': 0.593,
+            'input_topic': '/ackermann_cmd',
+            'output_topic': '/ackermann_steering_controller/reference',
+        }],
     )
 
     # Let Gazebo spawn the robot and controllers before localization starts.
     delayed_navigation = TimerAction(period=5.0, actions=[navigation])
 
-    return LaunchDescription(arguments + [gazebo, delayed_navigation])
+    return LaunchDescription(
+        arguments + [gazebo, sim_adapter, delayed_navigation]
+    )

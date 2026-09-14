@@ -3,7 +3,7 @@
 <package format="3">
   <name>motion_control</name>
   <version>0.1.0</version>
-  <description>ROS2 node that bridges /cmd_vel (geometry_msgs/Twist) to the STM32 motion control board via UDP using the 26-byte protocol.</description>
+  <description>ROS2 real-vehicle backend that converts the canonical Ackermann command to the STM32 UDP control protocol.</description>
   <maintainer email="user@example.com">user</maintainer>
   <license>BSD</license>
 

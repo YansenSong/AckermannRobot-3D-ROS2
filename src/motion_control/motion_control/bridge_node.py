@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""
-UART Vehicle Bridge Node
+"""Real-vehicle Ackermann command bridge.
 
-Subscribes to /cmd_vel (geometry_msgs/Twist), converts to the STM32 26-byte
-control protocol, and sends it as a UDP datagram to the motion control board.
+Subscribes to the canonical Ackermann command (geometry_msgs/Twist), converts
+it to the STM32 26-byte control protocol, and sends it as UDP datagrams to the
+motion-control board.
 
-/cmd_vel contract for this Ackermann vehicle:
+Canonical command contract (default topic: /ackermann_cmd):
   - linear.x: longitudinal speed (m/s)
-  - angular.z: front-wheel steering angle (rad), not yaw rate
+  - angular.z: front-wheel steering angle (rad), not body yaw rate
 
 Protocol: Chapter 3 of 普通车运控项目通信协议说明_V1.0
   - 26-byte fixed frame, big-endian
@@ -18,8 +18,9 @@ Protocol: Chapter 3 of 普通车运控项目通信协议说明_V1.0
   - SEB_MODE, SEB_VALUE, Light, Counter
   - Checksum: uint32 BE sum of bytes 0-21
 
-NeuPAN already outputs the Ackermann steering angle, so this bridge must not
-apply another kinematic conversion.
+The bridge intentionally performs no bicycle-model conversion: angular.z is
+already the front-wheel steering angle. Simulation-specific conversion to yaw
+rate belongs in ackermann_control/ackermann_sim_adapter.py instead.
 """
 
 import math
@@ -29,30 +30,29 @@ import time
 from typing import Optional
 
 import rclpy
+from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rclpy.time import Time
-from geometry_msgs.msg import Twist
 
 
 class VehicleBridgeNode(Node):
-    """Bridge /cmd_vel to the STM32 motion control board over UDP."""
+    """Bridge the canonical Ackermann command to the STM32 board over UDP."""
 
-    # Protocol constants
-    HEADER = b"cmd__"  # bytes 0-4
-    VERSION = 0x01     # byte 5
-    MODE_AUTO = 0x01   # byte 6
-    SPEED_SCALE = 10000       # v(m/s) → v_raw
-    EPS_SCALE = 10000         # EPS raw (0.1° units) × 10000 → protocol field
-    EPS_DEG_PER_RAW = 0.1     # degrees per EPS raw unit (matches uart_vehicle_bridge)
+    HEADER = b"cmd__"
+    VERSION = 0x01
+    MODE_AUTO = 0x01
+    SPEED_SCALE = 10000
+    EPS_SCALE = 10000
+    EPS_DEG_PER_RAW = 0.1
     FRAME_LENGTH = 26
-    CHECKSUM_OFFSET = 22      # checksum covers bytes 0-21
+    CHECKSUM_OFFSET = 22
     SHUTDOWN_STOP_FRAME_COUNT = 3
     SHUTDOWN_STOP_INTERVAL = 0.02
 
     def __init__(self):
         super().__init__('vehicle_bridge_node')
 
-        # --- Declare parameters ---
+        self.declare_parameter('command_topic', '/ackermann_cmd')
         self.declare_parameter('udp_host', '192.168.1.100')
         self.declare_parameter('udp_port', 2000)
         self.declare_parameter('bind_device', '')
@@ -64,7 +64,7 @@ class VehicleBridgeNode(Node):
         self.declare_parameter('publish_rate', 20.0)
         self.declare_parameter('command_timeout', 0.5)
 
-        # --- Read parameters ---
+        self._command_topic: str = self.get_parameter('command_topic').value
         self._udp_host: str = self.get_parameter('udp_host').value
         self._udp_port: int = self.get_parameter('udp_port').value
         self._bind_device: str = self.get_parameter('bind_device').value
@@ -79,153 +79,129 @@ class VehicleBridgeNode(Node):
         self._command_timeout: float = self.get_parameter(
             'command_timeout').value
 
-        # --- State ---
-        self._counter: int = 0
-        self._last_cmd_vel: Optional[Twist] = None
-        self._last_cmd_time: Optional[Time] = None
+        if self._publish_rate <= 0.0:
+            raise ValueError('publish_rate must be greater than zero')
+        if self._command_timeout <= 0.0:
+            raise ValueError('command_timeout must be greater than zero')
 
-        # --- UDP socket ---
+        self._counter: int = 0
+        self._last_command: Optional[Twist] = None
+        self._last_command_time: Optional[Time] = None
+
         self._sock = self._create_udp_socket()
         self._target = (self._udp_host, self._udp_port)
         self.get_logger().info(
             f'UDP socket ready, target: {self._udp_host}:{self._udp_port}'
         )
 
-        # --- Subscriber ---
         self._sub = self.create_subscription(
-            Twist, '/cmd_vel', self._cmd_vel_callback, 10
+            Twist, self._command_topic, self._command_callback, 10
         )
-        self.get_logger().info('Subscribed to /cmd_vel')
+        self.get_logger().info(
+            f'Subscribed to {self._command_topic} '
+            '(linear.x=speed, angular.z=steering angle)'
+        )
 
-        # --- Timer: send frames at publish_rate Hz ---
         timer_period = 1.0 / self._publish_rate
         self._timer = self.create_timer(timer_period, self._timer_callback)
         self.get_logger().info(
             f'Publish timer started: {self._publish_rate:.1f} Hz '
             f'(every {timer_period*1000:.0f} ms)'
         )
-
         self.get_logger().info('Vehicle bridge node initialized')
-
-    # ------------------------------------------------------------------
-    # UDP socket
-    # ------------------------------------------------------------------
 
     def _create_udp_socket(self) -> socket.socket:
         """Create and configure the UDP socket."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        # Allow address reuse (useful if restarting the node)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        # Bind to a specific network device (e.g., enp5s0) via SO_BINDTODEVICE.
-        # This forces all packets through the named interface regardless of
-        # the kernel routing table — critical for multi-NIC hosts with
-        # overlapping subnets.
         if self._bind_device:
             try:
                 # SO_BINDTODEVICE = 25 (Linux-specific)
-                sock.setsockopt(socket.SOL_SOCKET, 25,
-                                self._bind_device.encode('utf-8'))
+                sock.setsockopt(
+                    socket.SOL_SOCKET,
+                    25,
+                    self._bind_device.encode('utf-8'),
+                )
                 self.get_logger().info(
                     f'UDP socket bound to device {self._bind_device}'
                 )
-            except OSError as e:
+            except OSError as exc:
                 self.get_logger().error(
-                    f'Failed to bind to device {self._bind_device}: {e}. '
-                    f'Using default routing.'
+                    f'Failed to bind to device {self._bind_device}: {exc}. '
+                    'Using default routing.'
                 )
 
-        # Bind to specific interface IP (source address) if requested
         if self._bind_interface:
             try:
                 sock.bind((self._bind_interface, 0))
                 self.get_logger().info(
                     f'UDP socket bound to address {self._bind_interface}'
                 )
-            except OSError as e:
+            except OSError as exc:
                 self.get_logger().error(
-                    f'Failed to bind to {self._bind_interface}: {e}. '
-                    f'Using default routing.'
+                    f'Failed to bind to {self._bind_interface}: {exc}. '
+                    'Using default routing.'
                 )
 
         return sock
 
-    # ------------------------------------------------------------------
-    # Subscriber callback
-    # ------------------------------------------------------------------
-
-    def _cmd_vel_callback(self, msg: Twist):
-        """Store the latest cmd_vel message with timestamp."""
-        self._last_cmd_vel = msg
-        self._last_cmd_time = self.get_clock().now()
-
-    # ------------------------------------------------------------------
-    # Timer callback: main control loop
-    # ------------------------------------------------------------------
+    def _command_callback(self, msg: Twist):
+        """Store the latest canonical Ackermann command with its timestamp."""
+        self._last_command = msg
+        self._last_command_time = self.get_clock().now()
 
     def _timer_callback(self):
-        """Called at publish_rate Hz. Build frame and send via UDP."""
+        """Build and transmit one protocol frame at the configured rate."""
         now = self.get_clock().now()
 
-        # Check for command timeout → safety stop
-        if self._last_cmd_time is None:
+        if self._last_command_time is None:
             if self._counter == 0:
                 self.get_logger().warn(
-                    'No cmd_vel received yet, sending zero-velocity frame'
+                    f'No command received on {self._command_topic}; '
+                    'sending zero-velocity frame'
                 )
-            v = 0.0
+            speed = 0.0
             steer_rad = 0.0
         else:
-            dt = (now - self._last_cmd_time).nanoseconds * 1e-9
-            if dt > self._command_timeout:
-                if self._counter % 20 == 0:  # throttle warning to ~1 Hz
+            age = (now - self._last_command_time).nanoseconds * 1e-9
+            if age > self._command_timeout:
+                if self._counter % 20 == 0:
                     self.get_logger().warn(
-                        f'cmd_vel timeout '
-                        f'({dt:.2f}s > {self._command_timeout}s), '
-                        f'sending zero-velocity frame'
+                        f'Command timeout ({age:.2f}s > '
+                        f'{self._command_timeout:.2f}s); sending stop frame'
                     )
-                v = 0.0
+                speed = 0.0
                 steer_rad = 0.0
             else:
-                v = self._last_cmd_vel.linear.x
-                steer_rad = self._last_cmd_vel.angular.z
+                speed = self._last_command.linear.x
+                steer_rad = self._last_command.angular.z
 
-        # Reject malformed commands. Python min/max can turn NaN into a limit,
-        # which would otherwise convert an invalid command into full actuation.
-        v, steer_rad, command_is_valid = self._sanitize_command(v, steer_rad)
-        if not command_is_valid:
-            if self._counter % 20 == 0:
-                self.get_logger().error(
-                    'Non-finite cmd_vel received; sending stop command'
-                )
+        speed, steer_rad, command_is_valid = self._sanitize_command(
+            speed, steer_rad
+        )
+        if not command_is_valid and self._counter % 20 == 0:
+            self.get_logger().error(
+                'Non-finite Ackermann command received; sending stop frame'
+            )
 
-        # angular.z is already the front-wheel steering angle in radians.
         eps_raw = self._compute_eps_raw(steer_rad)
+        frame = self._build_frame(speed, eps_raw)
 
-        # Build 26-byte frame
-        frame = self._build_frame(v, eps_raw)
-
-        # Send via UDP
         try:
             self._sock.sendto(frame, self._target)
-        except OSError as e:
-            self.get_logger().error(f'UDP send failed: {e}')
+        except OSError as exc:
+            self.get_logger().error(f'UDP send failed: {exc}')
             return
 
-        # Log at DEBUG level
-        hex_str = ' '.join(f'{b:02X}' for b in frame)
+        hex_str = ' '.join(f'{byte:02X}' for byte in frame)
         self.get_logger().debug(
-            f'Sent frame (cnt={self._counter:3d}): v={v:+.3f} m/s, '
+            f'Sent frame (cnt={self._counter:3d}): '
+            f'v={speed:+.3f} m/s, steer={steer_rad:+.3f} rad, '
             f'eps_raw={eps_raw:+d}, hex=[{hex_str}]'
         )
 
-        # Increment counter (wraps at 255)
         self._counter = (self._counter + 1) % 256
-
-    # ------------------------------------------------------------------
-    # Steering protocol conversion
-    # ------------------------------------------------------------------
 
     def _sanitize_command(self, speed: float, steer_rad: float):
         """Validate a command and clamp speed; invalid input means stop."""
@@ -235,77 +211,35 @@ class VehicleBridgeNode(Node):
         return speed, steer_rad, True
 
     def _compute_eps_raw(self, steer_rad: float) -> int:
-        """
-        Convert a front-wheel steering angle in radians to protocol EPS raw.
-
-        Protocol: EPS raw = steering angle in units of 0.1° (deg / 0.1);
-        _build_frame then scales by EPS_SCALE (× 10000), so the wire field
-        equals angle_deg × 100000. This matches the empirically verified
-        uart_vehicle_bridge; the protocol doc's "degrees × 10000" alone does
-        not match the STM32 firmware.
-        """
+        """Convert front-wheel steering angle in radians to protocol EPS raw."""
         steer_deg = math.degrees(steer_rad)
-
-        # Clamp to configured max steering
         steer_deg = max(
             -self._max_steer_deg,
             min(self._max_steer_deg, steer_deg),
         )
-
         return int(round(steer_deg / self.EPS_DEG_PER_RAW))
 
-    # ------------------------------------------------------------------
-    # Frame builder
-    # ------------------------------------------------------------------
-
-    def _build_frame(self, v: float, eps_raw: int) -> bytes:
-        """
-        Build the 26-byte UART protocol frame.
-
-        Frame layout (all multi-byte integers big-endian):
-            Bytes   Field       Description
-            0-4     Header      "cmd__" (0x63 0x6D 0x64 0x5F 0x5F)
-            5       Version     0x01
-            6       Mode        0x01 (Auto)
-            7       Flags       0x00
-            8       EnableMask  bit0=RT49, bit1=EPS, bit2=SEB
-            9-12    V_RAW       int32: v(m/s) × 10000
-            13-16   EPS_RAW     int32: steering angle(°) / 0.1° × 10000
-            17      SEB_MODE    0 (no brake control)
-            18-19   SEB_VALUE   int16: 0
-            20      Light       0
-            21      Counter     0-255 rolling counter
-            22-25   Checksum    uint32: sum of bytes 0-21
-        """
-        v_raw = int(round(v * self.SPEED_SCALE))
+    def _build_frame(self, speed: float, eps_raw: int) -> bytes:
+        """Build the fixed 26-byte big-endian STM32 control frame."""
+        speed_raw = int(round(speed * self.SPEED_SCALE))
         eps_raw_scaled = int(round(eps_raw * self.EPS_SCALE))
-        # Pack payload bytes (bytes 0-21)
+
         payload = struct.pack(
             '>5sBBBBi i B h B B',
-            self.HEADER,                           # 0-4: header
-            self.VERSION,                          # 5:   version
-            self.MODE_AUTO,                        # 6:   mode
-            0x00,                                  # 7:   flags
-            self._enable_mask & 0x07,             # 8:   enable_mask
-            v_raw,                                 # 9-12: V_RAW (int32 BE)
-            eps_raw_scaled,                        # 13-16: EPS_RAW (int32 BE)
-            0x00,                                  # 17: SEB_MODE
-            0,                                # 18-19: SEB_VALUE (int16 BE)
-            0x00,                                  # 20: Light
-            self._counter & 0xFF,                 # 21: Counter
+            self.HEADER,
+            self.VERSION,
+            self.MODE_AUTO,
+            0x00,
+            self._enable_mask & 0x07,
+            speed_raw,
+            eps_raw_scaled,
+            0x00,
+            0,
+            0x00,
+            self._counter & 0xFF,
         )
-
-        # Compute checksum: sum of bytes 0-21
         checksum = sum(payload) & 0xFFFFFFFF
-
-        # Append checksum as uint32 BE
-        frame = payload + struct.pack('>I', checksum)
-
-        return frame
-
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
+        return payload + struct.pack('>I', checksum)
 
     def _send_shutdown_stop_frames(self):
         """Send repeated zero commands before closing the UDP socket."""
@@ -344,7 +278,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
