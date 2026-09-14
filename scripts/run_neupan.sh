@@ -7,7 +7,7 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NEUPAN_USE_SIM_TIME="${NEUPAN_USE_SIM_TIME:-false}"
 VEHICLE_CONFIG="${VEHICLE_CONFIG:-$PROJECT_DIR/config/vehicle.yaml}"
-ROBOT_CONFIG_DIR="$PROJECT_DIR/src/neupan_ros2/config/robots/ackermann_robot"
+ROBOT_CONFIG_DIR="$PROJECT_DIR/src/nav_neupan/neupan_ros2/config/robots/ackermann_robot"
 PLANNER_TEMPLATE="$ROBOT_CONFIG_DIR/planner.yaml"
 RUNTIME_PLANNER="$(mktemp /tmp/ackermann_neupan_planner.XXXXXX)"
 

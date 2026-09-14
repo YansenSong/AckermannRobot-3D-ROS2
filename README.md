@@ -8,14 +8,14 @@
 - `src/sensors`：传感器源码分类目录（不是 ROS package）
 - `src/sensors/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
 - `src/sensors/imu`：LPMS-IG1 IMU 驱动（ROS package 名仍为 `lpms_ig1`）
-- `src/planning`：全局规划源码分类目录（不是 ROS package）
-- `src/planning/ackermann_smac_bridge`：项目侧 Smac 目标/路径适配桥（ROS package 名仍为 `ackermann_smac_bridge`）
-- `src/planning/nav2_smac_planner`：Nav2 Smac 规划插件（ROS package 名仍为 `nav2_smac_planner`）
+- `src/nav_neupan`：Smac Hybrid-A* + NeuPAN 导航栈源码分类目录（不是 ROS package）
+- `src/nav_neupan/ackermann_smac_bridge`：项目侧 Smac 目标/路径适配桥（ROS package 名仍为 `ackermann_smac_bridge`）
+- `src/nav_neupan/nav2_smac_planner`：Nav2 Smac 规划插件（ROS package 名仍为 `nav2_smac_planner`）
+- `src/nav_neupan/neupan_ros2`：NeuPAN ROS2 接口（ROS package 名仍为 `neupan_ros2`）
 - `src/motion_interface`：命令安全门 + `/ackermann_cmd` 到 STM32 UDP 协议的实车接口
 - `src/ackermann_bringup`：实车硬件、定位以及 Smac + NeuPAN 导航栈 bringup
 - `src/ackermann_nav`：第二套独立 Nav2 导航栈（Smac Hybrid-A* + MPPI + BT Navigator）
 - `src/lio-sam` / `src/liorf_localization`：建图与先验地图定位
-- `src/neupan_ros2`：NeuPAN ROS2 接口
 
 ## 2. 编译
 
