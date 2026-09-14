@@ -1,47 +1,46 @@
-# NeuPAN ROS2 baseline configuration for the AckermannRobot simulation.
-# This profile keeps the official Ranger field set and only changes the
-# integration-facing frames, topics, and hardware limits.
+# NeuPAN ROS2 configuration for the real Ackermann vehicle.
+# Vehicle geometry, limits, and sensor frames still need to be checked against
+# the final real-vehicle parameter set before deployment.
 
 neupan_node:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: false
 
     # Robot identification
     robot_type: 'ackermann_robot'
-    robot_description: 'AckermannRobot Gazebo simulation'
+    robot_description: 'AckermannRobot real vehicle'
 
     # Configuration file paths (relative to robot directory)
     planner_config_file: 'planner.yaml'
     dune_checkpoint_file: 'models/dune_model_5000.pth'
 
     # TF Frame configuration
-    map_frame: 'map'           # Global map coordinate frame
-    base_frame: 'rear_axle_link'  # NeuPAN/Smac bicycle-model reference frame
-    lidar_frame: 'laser_link'     # LiDAR frame
+    map_frame: 'map'
+    base_frame: 'rear_axle_link'
+    lidar_frame: 'laser_link'
 
     # ========== Visualization Configuration ==========
-    enable_visualization: true   # Master switch for all visualization
-    enable_dune_markers: true    # Enable DUNE point cloud markers
-    enable_nrmp_markers: true    # Enable NRMP point cloud markers
-    enable_robot_marker: true    # Enable robot footprint marker
-    marker_size: 0.05            # DUNE/NRMP point marker size
-    marker_z: 1.0                # Robot marker height
+    enable_visualization: true
+    enable_dune_markers: true
+    enable_nrmp_markers: true
+    enable_robot_marker: true
+    marker_size: 0.05
+    marker_z: 1.0
 
     # ========== Laser Scan Processing Configuration ==========
-    scan_angle_max: 3.14       # Maximum scan angle (180 degrees)
-    scan_angle_min: -3.14      # Minimum scan angle (-180 degrees)
-    scan_downsample: 1         # Scan downsampling rate (1=use all points)
-    scan_range_max: 5.0        # Keep the official Ranger baseline range
-    scan_range_min: 0.15       # Physical minimum range of the simulated LiDAR
+    scan_angle_max: 3.14
+    scan_angle_min: -3.14
+    scan_downsample: 1
+    scan_range_max: 5.0
+    scan_range_min: 0.15
 
     # ========== Path Planning Configuration ==========
-    flip_angle: false                       # Whether to flip scan angles
-    refresh_initial_path: true              # Refresh path when receiving new path
-    include_initial_path_direction: true    # Preserve Smac pose heading/gear
-    control_frequency: 50.0                 # Control loop frequency (Hz)
+    flip_angle: false
+    refresh_initial_path: true
+    include_initial_path_direction: true
+    control_frequency: 50.0
 
     # ========== Topic Configuration ==========
-    # NeuPAN receives the global path from Smac and does not own /goal_pose.
     cmd_vel_topic: '/neupan_cmd_vel_raw'
     scan_topic: '/scan'
     plan_input_topic: '/plan'

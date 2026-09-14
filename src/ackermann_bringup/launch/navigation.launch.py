@@ -1,10 +1,4 @@
-"""Compose localization, planning, scan conversion, command gating, and RViz.
-
-This launch file is backend-neutral: it publishes the canonical Ackermann
-command on /ackermann_cmd but does not start a simulation or real-vehicle
-actuation backend. Use navigation_sim.launch.py for Gazebo or
-real_vehicle.launch.py for hardware.
-"""
+"""Compose the real-vehicle localization, planning, scan, command gate, and RViz stack."""
 
 import os
 
@@ -24,11 +18,11 @@ def generate_launch_description():
         DeclareLaunchArgument('map', default_value=''),
         DeclareLaunchArgument('map_pgm', default_value=''),
         DeclareLaunchArgument('globalmap_pcd', default_value=''),
-        DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument(
             'points_topic',
-            default_value='/points_raw',
-            description='Point cloud input for pointcloud_to_laserscan.',
+            default_value='/lidar_points',
+            description='Real-vehicle point cloud input for pointcloud_to_laserscan.',
         ),
         DeclareLaunchArgument(
             'use_rviz',
@@ -41,18 +35,24 @@ def generate_launch_description():
                 share, 'config', 'liorf_localization.yaml')),
     ]
     localization = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'localization.launch.py')),
+        PythonLaunchDescriptionSource(
+            os.path.join(share, 'launch', 'localization.launch.py')
+        ),
         launch_arguments={
             'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'params_file': LaunchConfiguration('params_file'),
-        }.items())
+        }.items(),
+    )
     planning = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'planning.launch.py')),
+        PythonLaunchDescriptionSource(
+            os.path.join(share, 'launch', 'planning.launch.py')
+        ),
         launch_arguments={
             'map': LaunchConfiguration('map'),
             'map_pgm': LaunchConfiguration('map_pgm'),
-        }.items())
+        }.items(),
+    )
     scan = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
@@ -62,7 +62,8 @@ def generate_launch_description():
         remappings=[
             ('cloud_in', LaunchConfiguration('points_topic')),
             ('scan', '/scan'),
-        ])
+        ],
+    )
     command_gate = Node(
         package='ackermann_control',
         executable='cmd_vel_mux.py',
@@ -72,7 +73,8 @@ def generate_launch_description():
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'input_topic': '/neupan_cmd_vel_raw',
             'output_topic': '/ackermann_cmd',
-        }])
+        }],
+    )
     nav_status = Node(
         package='nav_status',
         executable='nav_status_node',
@@ -81,7 +83,8 @@ def generate_launch_description():
         parameters=[
             os.path.join(nav_status_share, 'config', 'nav_status.yaml'),
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
-        ])
+        ],
+    )
     rviz = Node(
         package='rviz2',
         executable='rviz2',
@@ -89,6 +92,8 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(LaunchConfiguration('use_rviz')),
         arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')],
-        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    )
     return LaunchDescription(
-        arguments + [localization, planning, scan, command_gate, nav_status, rviz])
+        arguments + [localization, planning, scan, command_gate, nav_status, rviz]
+    )

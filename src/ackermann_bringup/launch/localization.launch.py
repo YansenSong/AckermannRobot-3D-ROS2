@@ -1,4 +1,4 @@
-"""Start liorf prior-map localization and the map-to-odom identity TF."""
+"""Start real-vehicle LIORF prior-map localization and map-to-odom TF."""
 
 import os
 
@@ -12,7 +12,8 @@ from launch_ros.actions import Node
 def generate_launch_description():
     bringup_share = get_package_share_directory('ackermann_bringup')
     default_params = os.path.join(
-        bringup_share, 'config', 'liorf_localization.yaml')
+        bringup_share, 'config', 'liorf_localization.yaml'
+    )
 
     params_file = LaunchConfiguration('params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -58,13 +59,16 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'globalmap_pcd', default_value='',
-            description='Absolute path to GlobalMap.pcd'),
+            'globalmap_pcd',
+            default_value='',
+            description='Absolute path to the real-vehicle GlobalMap.pcd',
+        ),
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument(
-            'use_sim_time', default_value='true'),
-        DeclareLaunchArgument(
-            'params_file', default_value=default_params,
-            description='liorf parameter file'),
+            'params_file',
+            default_value=default_params,
+            description='LIORF real-vehicle parameter file',
+        ),
         map_to_odom,
         image_projection,
         imu_preintegration,

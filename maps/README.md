@@ -1,6 +1,8 @@
 # Maps
 
-Each LIO-SAM map export is stored in a timestamped directory:
+该目录只保存实车采集或由实车点云生成的地图。
+
+建议每次建图导出到独立目录：
 
 ```text
 maps/YYYYMMDD_HHMMSS/
@@ -13,8 +15,10 @@ maps/YYYYMMDD_HHMMSS/
 └── map.yaml
 ```
 
-Use the directory name when starting navigation:
+二维地图可使用：
 
 ```bash
-bash scripts/nav_hdl_neupan.sh YYYYMMDD_HHMMSS
+bash scripts/pcd_to_map.sh maps/YYYYMMDD_HHMMSS
 ```
+
+仿真 `mini.world` 对应地图不在 `real-vehicle-integration` 分支维护。

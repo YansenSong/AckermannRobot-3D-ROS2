@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish the canonical Ackermann command with a centralized stop override.
+"""Publish the real-vehicle Ackermann command with a centralized stop override.
 
 Input contract (default: /neupan_cmd_vel_raw):
   - linear.x: longitudinal speed in m/s
@@ -9,10 +9,9 @@ Output contract (default: /ackermann_cmd):
   - linear.x: longitudinal speed in m/s
   - angular.z: front-wheel steering angle in radians
 
-The output intentionally stays in Ackermann steering-angle form. Backend-
-specific conversions happen later: the simulation adapter converts steering
-angle to body yaw rate for ros2_control, while the real-vehicle bridge converts
-steering angle directly to the STM32 EPS protocol.
+The command stays in Ackermann steering-angle form all the way to the
+real-vehicle motion-control backend, which converts it to the STM32 EPS
+protocol.
 """
 
 import math
@@ -25,7 +24,7 @@ from std_msgs.msg import Bool
 
 
 class CmdVelMux(Node):
-    """Gate planner commands and publish one backend-neutral Ackermann command."""
+    """Gate planner commands and publish the canonical real-vehicle command."""
 
     def __init__(self):
         super().__init__('cmd_vel_mux')
