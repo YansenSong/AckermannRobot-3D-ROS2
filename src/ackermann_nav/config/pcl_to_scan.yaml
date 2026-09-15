@@ -1,8 +1,10 @@
 /**:
   ros__parameters:
-    use_sim_time: false
+    # use_sim_time and min_height are supplied by navigation.launch.py, which
+    # derives min_height from vehicle.sensor_mounting.lidar in
+    # config/vehicle.yaml. Keeping them out of this file means the scan slice
+    # has exactly one real-vehicle source instead of a per-package copy.
     target_frame: laser_link
-    min_height: -0.40
     max_height: 2.0
     angle_min: -3.14159
     angle_max: 3.14159

@@ -33,6 +33,14 @@ vehicle:
     lidar: "laser_link"
     imu: "imu_link"
 
+    # Height of the kinematic reference point above the ground plane.
+    #
+    # The Ackermann reference point is the rear axle centre projected onto the
+    # ground, so this is 0.0 and the sensor heights below (which are measured
+    # from the ground) translate directly into frames.base. Raise this if
+    # rear_axle_link is ever redefined at axle-centre height instead.
+    base_height_above_ground: 0.0
+
   control_limits:
     # Existing STM32 bridge limits. Steering/speed limits are not changed by
     # this geometry update and should be verified independently on the vehicle.
@@ -62,6 +70,53 @@ vehicle:
       rear_extent: 0.200
       half_width: 0.450
       padding: 0.01
+
+  sensor_mounting:
+    # Where each sensor physically sits on the vehicle.
+    #
+    # Two different references are in play and they are NOT interchangeable:
+    #   x / y / roll / pitch / yaw  are relative to frames.base (rear_axle_link)
+    #   height_above_ground         is measured from the ground plane
+    # They are related by frames.base_height_above_ground.
+    #
+    # Two independent consumers read these:
+    #   - pointcloud_to_laserscan's height slice uses height_above_ground: the
+    #     ground plane lands at -height_above_ground in laser_link, so
+    #     min_height = ground_margin - height_above_ground.
+    #   - the static laser_link TF uses x/y/z/roll/pitch/yaw, with
+    #     z = height_above_ground - frames.base_height_above_ground.
+    #
+    # These values used to be all-zero placeholders in
+    # sensors/lidar/launch/start.py, which only publishes when the standalone
+    # RViz view is enabled (LIDAR_RVIZ=true, i.e. the lidar/all modes). The
+    # navigation modes run with LIDAR_RVIZ=false, so the stack had no laser_link
+    # TF at all and NeuPAN blocked on lookup_transform(map, laser_link).
+    lidar:
+      # x/y/z measured on the vehicle on 2026-09-15. The rotations are assumed.
+      status: "PARTIALLY VERIFIED"
+
+      # The LiDAR sits above the front-axle area, 1.01 m forward of the rear
+      # axle centre and 0.84 m above the ground. Note 1.01 > wheelbase 0.960, so
+      # it is 5 cm ahead of the front axle rather than directly above it.
+      x: 1.01
+      y: 0.0
+      height_above_ground: 0.84
+
+      # ASSUMED zero (installed level and facing forward); NOT measured.
+      # Degrees, matching max_steering_angle_deg above; the launch converts to
+      # radians for static_transform_publisher.
+      # yaw is the one to check first: a few degrees rotates the whole /scan
+      # relative to the chassis, which shifts every obstacle bearing and is easy
+      # to miss. Confirm before flipping status to VERIFIED.
+      roll_deg: 0.0
+      pitch_deg: 0.0
+      yaw_deg: 0.0
+
+      # Slice the scan this far below the measured height so a few cm of
+      # ground-plane noise does not enter it. Carried over from the simulation
+      # tuning (0.484 - 0.084 = -0.40 in laser_link); re-check it against the
+      # real lidar now that height_above_ground is measured rather than assumed.
+      ground_margin: 0.084
 
   sensor_extrinsics:
     # Single source for the LiDAR/IMU calibration consumed by both LIORF and

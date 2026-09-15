@@ -23,6 +23,70 @@ def _finite(value, field):
     return number
 
 
+def _lidar_mounting(vehicle):
+    """LiDAR layout from vehicle.sensor_mounting.lidar.
+
+    Returns the pointcloud_to_laserscan height slice plus the static transform
+    placing laser_link in frames.base. Two different references are involved --
+    see the comments in vehicle.yaml: height_above_ground is measured from the
+    ground, the transform is relative to frames.base.
+    """
+    mounting = vehicle.get('sensor_mounting', {}).get('lidar', {})
+    frames = vehicle.get('frames', {})
+    base_frame = str(frames.get('base', '')).strip()
+    lidar_frame = str(frames.get('lidar', '')).strip()
+    for label, name in (('base', base_frame), ('lidar', lidar_frame)):
+        if not name:
+            raise RuntimeError(f'vehicle.frames.{label} must not be empty')
+
+    status = str(mounting.get('status', '')).strip().upper()
+    if status != 'VERIFIED':
+        raise RuntimeError(
+            'vehicle.sensor_mounting.lidar is not VERIFIED in '
+            'config/vehicle.yaml (found '
+            f'{status or "no status"}); the scan slice and the laser_link '
+            'static transform would use unmeasured mounting values. Measure the '
+            'LiDAR height above the ground and its mounting rotations, then set '
+            'them there.'
+        )
+
+    numbers = {}
+    for field in ('x', 'y', 'height_above_ground', 'roll_deg', 'pitch_deg',
+                  'yaw_deg', 'ground_margin'):
+        value = mounting.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError(
+                f'vehicle.sensor_mounting.lidar.{field} must be a number, '
+                f'got: {value!r}'
+            )
+        numbers[field] = float(value)
+
+    base_height = frames.get('base_height_above_ground')
+    if isinstance(base_height, bool) or not isinstance(base_height, (int, float)):
+        raise RuntimeError(
+            'vehicle.frames.base_height_above_ground must be a number in '
+            f'metres, got: {base_height!r}'
+        )
+
+    # The ground plane sits at -height_above_ground in laser_link.
+    min_height = numbers['ground_margin'] - numbers['height_above_ground']
+
+    # static_transform_publisher takes radians.
+    return {
+        'min_height': min_height,
+        'tf': (
+            f"{numbers['x']}",
+            f"{numbers['y']}",
+            f"{numbers['height_above_ground'] - float(base_height)}",
+            f"{math.radians(numbers['roll_deg'])}",
+            f"{math.radians(numbers['pitch_deg'])}",
+            f"{math.radians(numbers['yaw_deg'])}",
+        ),
+        'base_frame': base_frame,
+        'lidar_frame': lidar_frame,
+    }
+
+
 def _load_vehicle(path):
     if not path:
         raise RuntimeError('navigation.launch.py requires vehicle_config:=<vehicle.yaml>')
@@ -66,6 +130,7 @@ def _load_vehicle(path):
         'padding': _finite(
             footprint.get('padding'), 'vehicle.planning.footprint.padding'
         ),
+        'lidar': _lidar_mounting(vehicle),
     }
 
     for key in ('wheelbase', 'max_speed', 'max_acceleration', 'min_radius'):
@@ -189,9 +254,28 @@ def _build_navigation(context):
         output='screen',
         parameters=[
             os.path.join(nav_share, 'config', 'pcl_to_scan.yaml'),
-            {'use_sim_time': use_sim_time},
+            {
+                'use_sim_time': use_sim_time,
+                'min_height': vehicle['lidar']['min_height'],
+            },
         ],
         remappings=[('cloud_in', points_topic), ('scan', '/scan')],
+    )
+
+    # Published unconditionally: this is the only publisher of laser_link in
+    # the navigation modes, and without it anything looking up laser_link in the
+    # TF tree blocks (NeuPAN does exactly that).
+    lidar_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='ackermann_nav_laser_link_static_tf',
+        output='screen',
+        arguments=[
+            *vehicle['lidar']['tf'],
+            vehicle['lidar']['base_frame'],
+            vehicle['lidar']['lidar_frame'],
+        ],
+        parameters=[{'use_sim_time': use_sim_time}],
     )
 
     common_parameters = [configured_params]
@@ -353,6 +437,7 @@ def _build_navigation(context):
 
     actions.extend([
         scan,
+        lidar_tf,
         map_server,
         controller_server,
         planner_server,

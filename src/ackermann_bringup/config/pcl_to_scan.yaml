@@ -1,12 +1,15 @@
 /**:
   ros__parameters:
-    use_sim_time: true
+    # use_sim_time and min_height are NOT set here; navigation.launch.py
+    # supplies both so this file cannot pin the node on its own:
+    #   - use_sim_time comes from the launch argument. This file used to say
+    #     true, which left the node waiting on /clock that no real vehicle
+    #     publishes.
+    #   - min_height is derived from vehicle.sensor_mounting.lidar in
+    #     config/vehicle.yaml. This file used to hold -0.40, which was derived
+    #     from Gazebo geometry ("LiDAR is z=0.484m in the world") rather than
+    #     measured on the vehicle.
     target_frame: laser_link
-    # Height slice relative to laser_link.  The robot is spawned at z=0.1m
-    # and the LiDAR is z≈0.484m in the world, so the flat ground is about
-    # -0.484m below laser_link.  Keep a small ground margin while retaining
-    # low static obstacles (the previous -0.15m missed obstacles below 0.33m).
-    min_height: -0.40
     max_height: 2.0
     # Full 360° scan
     angle_min: -3.14159

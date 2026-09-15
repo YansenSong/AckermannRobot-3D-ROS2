@@ -36,6 +36,12 @@ def generate_launch_description():
         # report "Fixed Frame [laser_link] does not exist" and render nothing.
         # Gated on with_rviz so the navigation stack (which owns the real TF
         # tree via liorf) is never given a second parent for laser_link.
+        #
+        # These zeros are a viewing placeholder, NOT calibration. The measured
+        # mounting pose lives in vehicle.sensor_mounting.lidar in
+        # config/vehicle.yaml and is published by each stack's navigation.launch.py.
+        # This node deliberately stays out of that path: scripts/start_vehicle.sh
+        # sets LIDAR_RVIZ=false for nav/nav2, so the two never both publish.
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
