@@ -25,7 +25,12 @@ def _numeric_list(value, length, field):
     return result
 
 
-def _load_sensor_extrinsics(path):
+def _load_vehicle_calibration(path):
+    """Runtime LIORF overrides taken from config/vehicle.yaml.
+
+    Covers the frame names as well as the LiDAR/IMU extrinsics, so the frames
+    cannot drift between vehicle.yaml and the package-local parameter file.
+    """
     if not path:
         raise RuntimeError(
             "localization.launch.py requires a non-empty 'vehicle_config' path"
@@ -36,11 +41,10 @@ def _load_sensor_extrinsics(path):
     with open(path, encoding='utf-8') as stream:
         data = yaml.safe_load(stream) or {}
 
-    extrinsics = (
-        data.get('vehicle', {})
-        .get('sensor_extrinsics', {})
-        .get('lidar_to_imu', {})
-    )
+    vehicle = data.get('vehicle', {})
+    extrinsics = vehicle.get('sensor_extrinsics', {}).get('lidar_to_imu', {})
+    frames = vehicle.get('frames', {})
+
     status = str(extrinsics.get('status', '')).strip().upper()
     if status != 'VERIFIED':
         raise RuntimeError(
@@ -48,7 +52,20 @@ def _load_sensor_extrinsics(path):
             "real localization will not start with stale/default calibration"
         )
 
+    lidar_frame = str(frames.get('lidar', '')).strip()
+    base_frame = str(frames.get('base', '')).strip()
+    for label, name in (('lidar', lidar_frame), ('base', base_frame)):
+        if not name:
+            raise RuntimeError(f"vehicle.frames.{label} must not be empty")
+
     return {
+        # LIORF publishes odometry in baselinkFrame and consumes the fixed
+        # lidarFrame->baselinkFrame transform (see TransformFusion in
+        # imuPreintegration.cpp). baselinkFrame is frames.base, NOT a separate
+        # "base_link": nothing on the real vehicle defines where base_link
+        # would be, and leaving it unset split the TF tree in two.
+        'lidarFrame': lidar_frame,
+        'baselinkFrame': base_frame,
         'extrinsicTrans': _numeric_list(
             extrinsics.get('translation_xyz'), 3,
             'vehicle.sensor_extrinsics.lidar_to_imu.translation_xyz',
@@ -70,13 +87,13 @@ def _localization_nodes(context):
     globalmap_pcd = LaunchConfiguration('globalmap_pcd').perform(context)
     use_sim_time = LaunchConfiguration('use_sim_time')
 
-    extrinsics = _load_sensor_extrinsics(vehicle_config)
+    calibration = _load_vehicle_calibration(vehicle_config)
     liorf_parameters = [
         params_file,
         {
             'use_sim_time': use_sim_time,
             'globalmap_pcd': globalmap_pcd,
-            **extrinsics,
+            **calibration,
         },
     ]
 

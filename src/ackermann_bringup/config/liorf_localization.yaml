@@ -9,9 +9,17 @@
     odomTopic: "/odom"
     gpsTopic: "/odometry/gpsz"
 
-    # Frames
+    # Frames. lidarFrame and baselinkFrame are overridden at launch from
+    # vehicle.frames in config/vehicle.yaml; the values here are the same names
+    # so this file stays correct when read on its own.
+    #
+    # baselinkFrame is frames.base (rear_axle_link), NOT a separate "base_link".
+    # LIORF publishes odometry in baselinkFrame and looks up the fixed
+    # lidarFrame->baselinkFrame transform, so naming it base_link -- a frame
+    # nothing on the real vehicle defines -- split the TF tree in two and left
+    # both LIORF and Nav2 unable to resolve their frames.
     lidarFrame: "laser_link"
-    baselinkFrame: "base_link"
+    baselinkFrame: "rear_axle_link"
     odometryFrame: "odom"
     mapFrame: "map"
 
@@ -46,6 +54,8 @@
     imuRPYWeight: 0.01
 
     # REQUIRED runtime overrides from config/vehicle.yaml:
+    #   lidarFrame
+    #   baselinkFrame
     #   extrinsicTrans
     #   extrinsicRot
     #   extrinsicRPY
