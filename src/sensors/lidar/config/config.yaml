@@ -5,12 +5,13 @@ lidar:
       # Depending on the type of source_type, fill in the corresponding configuration block (lidar_udp_type, pcap_type, serial_type)
       lidar_udp_type:
         # Real-device network values stay local to this LiDAR configuration.
-        device_ip_address: ""
-        udp_port: 0
-        ptc_port: 0
+        # Reachable only through enp2s0 (192.168.1.74); see docs.
+        device_ip_address: "192.168.1.201"
+        udp_port: 2368
+        ptc_port: 9347
         multicast_ip_address: ""
 
-        use_ptc_connected: false                      # Set to false when ptc connection is not used
+        use_ptc_connected: true                       # Let the SDK fetch the angle calibration file from the lidar over PTC (TCP ptc_port)
         host_ptc_port: 0                              # PTC source port, 0 means auto
         # Relative paths are resolved against PROJECT_PATH (package source root)
         # at runtime; do NOT hardcode absolute paths here.
@@ -81,12 +82,19 @@ lidar:
 
     ros:
       # ROS frame/topic names are device-facing settings and stay local here.
-      ros_frame_id: ""
-      ros_recv_packet_topic: ""
-      ros_send_packet_topic: ""
-      ros_send_point_cloud_topic: ""
-      ros_send_imu_topic: ""
-      ros_send_packet_loss_topic: ""
+      # WARNING: do NOT leave these as "". The driver's YamlRead() only falls
+      # back to its built-in default when a key is missing or null, so an
+      # empty string overrides the default and create_publisher("") aborts
+      # the node with InvalidTopicNameError (SIGABRT).
+      # Must match vehicle.frames.lidar in config/vehicle.yaml, which liorf
+      # (lidarFrame), pointcloud_to_laserscan (target_frame) and NeuPAN all
+      # expect. The vendor default "hesai_lidar" is NOT in this project's TF tree.
+      ros_frame_id: "laser_link"
+      ros_recv_packet_topic: "/lidar_packets"
+      ros_send_packet_topic: "/lidar_packets"
+      ros_send_point_cloud_topic: "/lidar_points"
+      ros_send_imu_topic: "/lidar_imu"
+      ros_send_packet_loss_topic: "/lidar_packet_loss"
       # ros_recv_correction_topic: /lidar_corrections     # Topic used to receive corrections file from rosbag
       # ros_send_correction_topic: /lidar_corrections     # Topic used to send correction through ROS
       # ros_send_ptp_topic: /lidar_ptp                    # Topic used to send PTP lock status, offset through ROS

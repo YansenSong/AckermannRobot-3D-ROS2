@@ -31,6 +31,19 @@ def generate_launch_description():
             output='screen',
             parameters=[{'config_path': LaunchConfiguration('config_path')}],
         ),
+        # Standalone raw-cloud viewing needs a TF tree root: the driver only
+        # stamps ros_frame_id on the cloud and publishes no TF, so RViz would
+        # report "Fixed Frame [laser_link] does not exist" and render nothing.
+        # Gated on with_rviz so the navigation stack (which owns the real TF
+        # tree via liorf) is never given a second parent for laser_link.
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='laser_link_static_tf',
+            arguments=['0', '0', '0', '0', '0', '0',
+                       'rear_axle_link', 'laser_link'],
+            condition=IfCondition(LaunchConfiguration('with_rviz')),
+        ),
         Node(
             namespace='rviz2',
             package='rviz2',
