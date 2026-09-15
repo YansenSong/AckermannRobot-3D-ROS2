@@ -50,6 +50,7 @@ def _configured_components(context, bringup_share, motion_interface_share):
                 'vehicle_config': vehicle_config,
                 'enable_command_gate': str(enable_navigation).lower(),
                 'enable_stm32_bridge': str(enable_control).lower(),
+                'bridge_params_file': LaunchConfiguration('bridge_params_file'),
                 'use_sim_time': 'false',
             }.items(),
         )
@@ -122,6 +123,17 @@ def generate_launch_description():
             'enable_control',
             default_value='false',
             description='Start the real-vehicle STM32 motion interface backend.',
+        ),
+        DeclareLaunchArgument(
+            'bridge_params_file',
+            default_value=os.path.join(
+                motion_interface_share, 'config', 'bridge_params.yaml'
+            ),
+            description=(
+                'Path to the motion_interface STM32 bridge YAML. Defaults to '
+                'the installed copy; scripts/start_vehicle.sh overrides it '
+                'with the workspace-local file.'
+            ),
         ),
         DeclareLaunchArgument(
             'enable_navigation',

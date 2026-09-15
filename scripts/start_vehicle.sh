@@ -233,6 +233,7 @@ else
         "enable_control:=${ENABLE_CONTROL}"
         "enable_navigation:=${ENABLE_NAVIGATION}"
         "navigation_rviz:=${NAVIGATION_RVIZ}"
+        "bridge_params_file:=${INTERFACE_CONFIG}"
     )
 
     if $ENABLE_NAVIGATION; then

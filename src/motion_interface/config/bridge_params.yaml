@@ -7,10 +7,17 @@
 
     # --- UDP communication ---
     # Deployment/device settings stay local to motion_interface.
-    udp_host: "192.168.1.50"
+    #
+    # The STM32 link deliberately uses 192.168.5.0/24, NOT 192.168.1.0/24:
+    # enp2s0 (LiDAR, 192.168.1.201) and enp5s0 (STM32) are two physically
+    # separate L2 segments. Numbering both 192.168.1.0/24 made the kernel
+    # routing table ambiguous, so host->LiDAR traffic went out enp5s0 and the
+    # driver could not fetch its PTC angle calibration. Keep the subnets
+    # distinct; enp2s0 must own 192.168.1.0/24 alone.
+    udp_host: "192.168.5.50"
     udp_port: 5000
     bind_device: "enp5s0"
-    bind_interface: "192.168.1.11"
+    bind_interface: "192.168.5.11"
 
     # Vehicle hard limits are supplied from the project root
     # config/vehicle.yaml at launch time. They are intentionally not duplicated

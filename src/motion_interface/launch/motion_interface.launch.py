@@ -64,7 +64,18 @@ def _load_control_limits(path):
     }
 
 
-def _configured_nodes(context, package_share):
+def _resolve_bridge_params(context):
+    path = LaunchConfiguration('bridge_params_file').perform(context)
+    if not path:
+        raise RuntimeError(
+            'bridge_params_file is required when enable_stm32_bridge=true'
+        )
+    if not os.path.isfile(path):
+        raise RuntimeError(f'Bridge params file does not exist: {path}')
+    return path
+
+
+def _configured_nodes(context):
     enable_gate = _enabled(context, 'enable_command_gate')
     enable_bridge = _enabled(context, 'enable_stm32_bridge')
     if not enable_gate and not enable_bridge:
@@ -91,9 +102,7 @@ def _configured_nodes(context, package_share):
     if enable_bridge:
         vehicle_config = LaunchConfiguration('vehicle_config').perform(context)
         limits = _load_control_limits(vehicle_config)
-        bridge_params = os.path.join(
-            package_share, 'config', 'bridge_params.yaml'
-        )
+        bridge_params = _resolve_bridge_params(context)
         actions.append(
             Node(
                 package='motion_interface',
@@ -137,8 +146,18 @@ def generate_launch_description():
             'output_topic',
             default_value='/ackermann_cmd',
         ),
+        DeclareLaunchArgument(
+            'bridge_params_file',
+            default_value=os.path.join(
+                package_share, 'config', 'bridge_params.yaml'
+            ),
+            description=(
+                'Path to the STM32 bridge YAML (UDP host/port, bind device, '
+                'enable mask, control timing). Defaults to the installed copy; '
+                'callers pass an explicit path to use a workspace-local file.'
+            ),
+        ),
         OpaqueFunction(
             function=_configured_nodes,
-            args=[package_share],
         ),
     ])
