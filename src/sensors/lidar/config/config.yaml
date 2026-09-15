@@ -53,7 +53,18 @@ lidar:
         correction_file_path: "Your correction file path"             # The path of correction file
       
       # public module
-      use_timestamp_type: 0                 # 0 use point cloud timestamp; 1 use receive timestamp
+      # Use the host receive time, NOT the point cloud (lidar-internal) time.
+      # This lidar has no PTP/GPS time source, so its internal clock is
+      # uncalibrated and stamps every frame 2019-07-25 -- ~7 years behind the
+      # host. Verified on hardware: with type 0 the cloud header read
+      # 1564024942 against host 1789470262.
+      # That stale stamp is not confined to the driver:
+      # pointcloud_to_laserscan copies the cloud stamp onto its LaserScan, so
+      # the 2019 time reaches Nav2 costmaps, and it would sit on a different
+      # time base than the IMU (host clock) once the two are fused. Per-point
+      # relative offsets inside a frame still come from the lidar, so the
+      # intra-frame timing precision is unaffected.
+      use_timestamp_type: 1                 # 0 use point cloud timestamp; 1 use receive timestamp
       frame_start_azimuth: 0                # Frame azimuth for Pandar128, range from 1 to 359, set it less than 0 if you do not want to use it      
       # parser thread num
       thread_num: 4
