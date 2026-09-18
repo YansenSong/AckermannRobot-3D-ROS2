@@ -5,6 +5,7 @@
 #   lidar   启动 Hesai LiDAR + RViz2
 #   imu     仅启动 LPMS-IG1 IMU
 #   bridge  仅启动 STM32 运动接口后端 (motion_interface)
+#   status  仅启动 sta__ 状态接收（不发任何控制帧，用于台架联调）
 #   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
 #   nav     启动 Smac Hybrid-A* + NeuPAN 实车导航基础设施
 #           NeuPAN 需在另一个终端运行 scripts/run_neupan.sh
@@ -19,6 +20,7 @@ VEHICLE_CONFIG="${VEHICLE_CONFIG:-${PROJECT_DIR}/config/vehicle.yaml}"
 LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/sensors/lidar/config/config.yaml}"
 IMU_PORT="${IMU_PORT:-/dev/ttyUSB0}"
 INTERFACE_CONFIG="${PROJECT_DIR}/src/motion_interface/config/bridge_params.yaml"
+STATUS_CONFIG="${PROJECT_DIR}/src/motion_interface/config/status_params.yaml"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,11 +33,12 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 usage() {
     cat <<EOF
-用法: $0 <lidar|imu|bridge|all|nav|nav2> [map]
+用法: $0 <lidar|imu|bridge|status|all|nav|nav2> [map]
 
   lidar   启动 Hesai LiDAR + RViz2
   imu     仅启动 LPMS-IG1 IMU
   bridge  仅启动 motion_interface 的 STM32 后端
+  status  仅启动 sta__ 状态接收，不下发任何控制帧（台架联调用）
   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
   nav     启动 Smac Hybrid-A* + NeuPAN 导航基础设施
           map 可传地图目录、map.yaml 或 map.pgm
@@ -56,6 +59,7 @@ usage() {
   $0 lidar
   $0 imu
   $0 bridge
+  $0 status
   $0 all
   $0 nav maps/my_map
   $0 nav2 maps/my_map
@@ -70,6 +74,7 @@ ENABLE_LIDAR=false
 LIDAR_RVIZ=false
 ENABLE_IMU=false
 ENABLE_CONTROL=false
+ENABLE_STATUS=false
 ENABLE_NAVIGATION=false
 NAVIGATION_RVIZ=false
 NAV_STACK=""
@@ -84,6 +89,9 @@ case "$MODE" in
         ;;
     bridge)
         ENABLE_CONTROL=true
+        ;;
+    status)
+        ENABLE_STATUS=true
         ;;
     all)
         ENABLE_LIDAR=true
@@ -162,6 +170,17 @@ if $ENABLE_CONTROL; then
     log_info "motion_interface 配置: ${INTERFACE_CONFIG}"
 fi
 
+# The bridge also starts the sta__ receiver (real_vehicle.launch.py leaves
+# enable_status_receiver at its default), so this file is needed whenever
+# either the bridge or the receiver is launched.
+if $ENABLE_CONTROL || $ENABLE_STATUS; then
+    if [[ ! -f "$STATUS_CONFIG" ]]; then
+        log_error "sta__ 接收配置不存在: ${STATUS_CONFIG}"
+        exit 1
+    fi
+    log_info "sta__ 接收配置: ${STATUS_CONFIG}"
+fi
+
 MAP_YAML=""
 MAP_PGM=""
 GLOBALMAP_PCD=""
@@ -221,6 +240,17 @@ if [[ "$MODE" == "nav2" ]]; then
         "use_sim_time:=false"
         "rviz:=${NAVIGATION_RVIZ}"
     )
+elif [[ "$MODE" == "status" ]]; then
+    # Bench bring-up only: receive and validate sta__ while commanding
+    # nothing. Goes straight to motion_interface rather than real_vehicle so
+    # that gate and bridge are unambiguously off.
+    LAUNCH_CMD=(
+        ros2 launch motion_interface motion_interface.launch.py
+        "enable_command_gate:=false"
+        "enable_stm32_bridge:=false"
+        "enable_status_receiver:=true"
+        "status_params_file:=${STATUS_CONFIG}"
+    )
 else
     LAUNCH_CMD=(
         ros2 launch ackermann_bringup real_vehicle.launch.py
@@ -234,6 +264,7 @@ else
         "enable_navigation:=${ENABLE_NAVIGATION}"
         "navigation_rviz:=${NAVIGATION_RVIZ}"
         "bridge_params_file:=${INTERFACE_CONFIG}"
+        "status_params_file:=${STATUS_CONFIG}"
     )
 
     if $ENABLE_NAVIGATION; then

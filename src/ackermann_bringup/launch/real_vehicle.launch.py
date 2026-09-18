@@ -51,6 +51,7 @@ def _configured_components(context, bringup_share, motion_interface_share):
                 'enable_command_gate': str(enable_navigation).lower(),
                 'enable_stm32_bridge': str(enable_control).lower(),
                 'bridge_params_file': LaunchConfiguration('bridge_params_file'),
+                'status_params_file': LaunchConfiguration('status_params_file'),
                 'use_sim_time': 'false',
             }.items(),
         )
@@ -131,6 +132,17 @@ def generate_launch_description():
             ),
             description=(
                 'Path to the motion_interface STM32 bridge YAML. Defaults to '
+                'the installed copy; scripts/start_vehicle.sh overrides it '
+                'with the workspace-local file.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'status_params_file',
+            default_value=os.path.join(
+                motion_interface_share, 'config', 'status_params.yaml'
+            ),
+            description=(
+                'Path to the motion_interface sta__ receiver YAML. Defaults to '
                 'the installed copy; scripts/start_vehicle.sh overrides it '
                 'with the workspace-local file.'
             ),

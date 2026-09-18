@@ -50,6 +50,34 @@ def test_frame_matches_reference_steering_scale():
     assert unpack_control_fields(frame) == (2_000, 3_000_000)
 
 
+def test_disarmed_frame_encodes_disable_mode_and_empty_enable_mask():
+    """The encoder contract the bridge's arming policy depends on.
+
+    _timer_callback passes MODE_DISABLE / 0 until the first live command, so
+    these two bytes are what keeps the actuators released before the control
+    chain is up. The checksum must still cover them.
+    """
+    bridge = make_bridge(enable_mask=7, counter=0)
+
+    frame = bridge._build_frame(
+        0.0, 0, Stm32VehicleBridgeNode.MODE_DISABLE, 0
+    )
+
+    assert len(frame) == Stm32VehicleBridgeNode.FRAME_LENGTH
+    assert frame[6] == Stm32VehicleBridgeNode.MODE_DISABLE
+    assert frame[8] == 0
+    assert int.from_bytes(frame[22:26], 'big') == sum(frame[:22])
+
+
+def test_default_frame_encodes_auto_mode_and_the_configured_mask():
+    bridge = make_bridge(enable_mask=7, counter=0)
+
+    frame = bridge._build_frame(0.0, 0)
+
+    assert frame[6] == Stm32VehicleBridgeNode.MODE_AUTO
+    assert frame[8] == 7
+
+
 def test_non_finite_command_is_replaced_with_stop():
     bridge = make_bridge()
     bridge._max_speed = 2.0

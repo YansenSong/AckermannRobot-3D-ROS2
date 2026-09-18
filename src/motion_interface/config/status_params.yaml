@@ -1,0 +1,49 @@
+/**:
+  ros__parameters:
+    # --- sta__ status feedback ---
+    # The reverse direction of the same STM32 link. The board pushes 56-byte
+    # sta__ datagrams to the host at ~50 Hz; see docs/上位机接口说明_STA56.md.
+    #
+    # 56 bytes, NOT the earlier 48-byte revision. Both use Version=1, so frame
+    # length is the only thing telling them apart.
+    #
+    # Kept in its own file rather than merged into bridge_params.yaml: both use
+    # the /**: wildcard, so merging would hand the bridge node parameter keys it
+    # never declares.
+    #
+    # 192.168.5.0/24 is the STM32 segment. enp2s0 (LiDAR, 192.168.1.201) is a
+    # physically separate L2 segment and must stay out of this flow.
+    bind_device: "enp5s0"
+    bind_interface: "192.168.5.11"
+    status_port: 5001
+
+    # How often the socket is drained. The board targets 20 ms, so draining
+    # twice as often as it sends keeps the kernel queue near-empty without
+    # needing a thread.
+    poll_period: 0.05
+
+    # Host-side loss threshold, timed against the host's monotonic clock.
+    # Section 3 suggests 200 ms as the bench initial value. This is an
+    # observation threshold, not a board stop condition.
+    feedback_timeout: 0.2
+
+    # Dump the first N well-formed frames as raw hex, before the decoded view.
+    # Kept because it is what makes a decoding disagreement arguable: the raw
+    # bytes are right there next to the numbers derived from them.
+    raw_dump_count: 3
+
+    # Period of the decoded one-line view. This is the line to read while
+    # driving a test command, so it is faster than the statistics summary.
+    detail_period: 1.0
+
+    # Period of the rate/rejection statistics summary. Slower than the decoded
+    # view on purpose: it is for spotting drift, not for reading a test run.
+    summary_period: 5.0
+
+    # Kernel receive buffer. Widen it so a late poll does not drop the backlog;
+    # the link only carries ~2.4 kB/s.
+    receive_buffer_bytes: 1048576
+
+    # Cap on datagrams consumed per poll, so a flooded socket cannot starve the
+    # executor. Exceeding it is logged rather than silently tolerated.
+    max_drain_per_poll: 256

@@ -64,21 +64,20 @@ def _load_control_limits(path):
     }
 
 
-def _resolve_bridge_params(context):
-    path = LaunchConfiguration('bridge_params_file').perform(context)
+def _resolve_params_file(context, argument, needed_for):
+    path = LaunchConfiguration(argument).perform(context)
     if not path:
-        raise RuntimeError(
-            'bridge_params_file is required when enable_stm32_bridge=true'
-        )
+        raise RuntimeError(f'{argument} is required when {needed_for}')
     if not os.path.isfile(path):
-        raise RuntimeError(f'Bridge params file does not exist: {path}')
+        raise RuntimeError(f'{argument} does not exist: {path}')
     return path
 
 
 def _configured_nodes(context):
     enable_gate = _enabled(context, 'enable_command_gate')
     enable_bridge = _enabled(context, 'enable_stm32_bridge')
-    if not enable_gate and not enable_bridge:
+    enable_status = _enabled(context, 'enable_status_receiver')
+    if not enable_gate and not enable_bridge and not enable_status:
         return []
 
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -102,7 +101,9 @@ def _configured_nodes(context):
     if enable_bridge:
         vehicle_config = LaunchConfiguration('vehicle_config').perform(context)
         limits = _load_control_limits(vehicle_config)
-        bridge_params = _resolve_bridge_params(context)
+        bridge_params = _resolve_params_file(
+            context, 'bridge_params_file', 'enable_stm32_bridge=true'
+        )
         actions.append(
             Node(
                 package='motion_interface',
@@ -116,6 +117,28 @@ def _configured_nodes(context):
                         **limits,
                     },
                 ],
+                emulate_tty=True,
+            )
+        )
+
+    if enable_status:
+        # Purely passive: receives and validates the board's sta__ feedback and
+        # publishes nothing. Runs independently of the bridge because the board
+        # ARPs for the host itself and does not need a cmd__ first, which is
+        # what makes the "receive only, command nothing" bench check possible.
+        #
+        # No use_sim_time here on purpose: its loss detection is timed against
+        # the host's monotonic clock, which must not move with simulated time.
+        status_params = _resolve_params_file(
+            context, 'status_params_file', 'enable_status_receiver=true'
+        )
+        actions.append(
+            Node(
+                package='motion_interface',
+                executable='stm32_status',
+                name='stm32_status',
+                output='screen',
+                parameters=[status_params],
                 emulate_tty=True,
             )
         )
@@ -154,6 +177,26 @@ def generate_launch_description():
             description=(
                 'Path to the STM32 bridge YAML (UDP host/port, bind device, '
                 'enable mask, control timing). Defaults to the installed copy; '
+                'callers pass an explicit path to use a workspace-local file.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'enable_status_receiver',
+            default_value='true',
+            description=(
+                'Start the passive sta__ status receiver. It publishes nothing '
+                'and sends no control frame, so it is safe to leave on and is '
+                'what the "receive status only" bench check runs.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'status_params_file',
+            default_value=os.path.join(
+                package_share, 'config', 'status_params.yaml'
+            ),
+            description=(
+                'Path to the sta__ receiver YAML (bind device/address, status '
+                'port, loss threshold). Defaults to the installed copy; '
                 'callers pass an explicit path to use a workspace-local file.'
             ),
         ),

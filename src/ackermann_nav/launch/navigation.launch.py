@@ -371,6 +371,10 @@ def _build_navigation(context):
             'vehicle_config': vehicle_config,
             'enable_command_gate': 'true',
             'enable_stm32_bridge': 'false',
+            # No STM32 board is commanded on this path, so there is no sta__
+            # feedback to listen for. Off here to keep nav2 and the
+            # real_vehicle/nav path (which leaves it on) behaving alike.
+            'enable_status_receiver': 'false',
             'use_sim_time': use_sim_time,
             'input_topic': '/ackermann_nav/ackermann_cmd_raw',
             'output_topic': '/ackermann_cmd',

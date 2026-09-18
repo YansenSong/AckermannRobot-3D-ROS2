@@ -14,7 +14,10 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (
             'share/' + package_name + '/config',
-            ['config/bridge_params.yaml'],
+            [
+                'config/bridge_params.yaml',
+                'config/status_params.yaml',
+            ],
         ),
         (
             'share/' + package_name + '/launch',
@@ -34,6 +37,7 @@ setup(
         'console_scripts': [
             'command_gate = motion_interface.command_gate:main',
             'stm32_bridge = motion_interface.stm32_bridge:main',
+            'stm32_status = motion_interface.stm32_status:main',
         ],
     },
 )
