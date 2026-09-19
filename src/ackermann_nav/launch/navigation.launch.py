@@ -228,6 +228,7 @@ def _build_navigation(context):
                     'enable_imu': LaunchConfiguration('enable_imu'),
                     'imu_interface': LaunchConfiguration('imu_interface'),
                     'imu_node_id': LaunchConfiguration('imu_node_id'),
+                    'imu_params_file': LaunchConfiguration('imu_params_file'),
                     'enable_control': 'true',
                     'enable_navigation': 'false',
                 }.items(),
@@ -487,6 +488,14 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_imu', default_value='false'),
         DeclareLaunchArgument('imu_interface', default_value='can0'),
         DeclareLaunchArgument('imu_node_id', default_value='5'),
+        DeclareLaunchArgument(
+            'imu_params_file',
+            default_value=os.path.join(
+                get_package_share_directory('lpms_ig1_ros2'),
+                'config',
+                'lpms_ig1_calibration.yaml',
+            ),
+        ),
         DeclareLaunchArgument(
             'liorf_params_file',
             default_value=os.path.join(bringup_share, 'config', 'liorf_localization.yaml'),

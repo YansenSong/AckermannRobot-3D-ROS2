@@ -93,6 +93,91 @@ ros2 topic echo /imu/data --once
 ros2 topic echo /imu/mag --once
 ```
 
+## Static gyroscope calibration
+
+Place the IMU on a stable surface, keep it completely stationary, and leave the
+driver running. In another sourced terminal run:
+
+```bash
+ros2 run lpms_ig1_ros2 gyro_calibration
+```
+
+The default procedure waits 5 seconds, samples `/imu/data_raw` for 30 seconds,
+checks gyroscope motion and acceleration magnitude, and writes a loadable ROS 2
+parameter file to:
+
+```text
+~/.ros/lpms_ig1_gyro_calibration.yaml
+```
+
+Durations and the output path can be changed, for example:
+
+```bash
+ros2 run lpms_ig1_ros2 gyro_calibration --ros-args \
+  -p warmup_duration:=10.0 \
+  -p calibration_duration:=60.0 \
+  -p output_file:=/tmp/lpms_ig1_gyro_calibration.yaml
+```
+
+Load the generated bias file on the next driver start:
+
+```bash
+ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+  params_file:=$HOME/.ros/lpms_ig1_gyro_calibration.yaml
+```
+
+With calibration loaded, `/imu/data_raw` retains the converted, uncorrected
+gyro readings. Bias subtraction is applied only to `/imu/data`.
+
+## Accelerometer calibration
+
+Run the six-position calibration while the uncalibrated driver is publishing
+`/imu/data_raw`:
+
+```bash
+ros2 run lpms_ig1_ros2 accel_calibration
+```
+
+Follow the prompts and place the sensor in this order, pressing Enter only
+after it is stable:
+
+1. +X up
+2. -X up
+3. +Y up
+4. -Y up
+5. +Z up
+6. -Z up
+
+Each orientation is sampled for 8 seconds by default. A failed motion,
+gravity-magnitude, or orientation check repeats only the current position.
+The result is written to `~/.ros/lpms_ig1_calibration.yaml`; existing gyro bias
+parameters in that file, or in the earlier gyro calibration file, are retained.
+A detailed report is written separately to
+`~/.ros/lpms_ig1_accel_calibration_report.yaml`.
+
+Load the unified calibration with:
+
+```bash
+ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+  params_file:=$HOME/.ros/lpms_ig1_calibration.yaml
+```
+
+The calibration measured for this project IMU is versioned at
+`config/lpms_ig1_calibration.yaml`, with its acquisition report at
+`config/lpms_ig1_accel_calibration_report.yaml`. The real-vehicle bringup uses
+the versioned calibration by default so the same sensor can be moved to another
+computer without recalibrating. Recalibrate if the physical IMU unit changes.
+
+The topic semantics are:
+
+- `/imu/data_raw`: SI-unit IMU data without user gyro or accelerometer calibration.
+- `/imu/data`: gyro bias removed and accelerometer offset/gain applied.
+
+Accelerometer correction is `corrected = (raw - offset) * gain`. It affects
+only the ROS acceleration values and does not change the LPMS internal AHRS or
+its fused quaternion. Perform magnetometer calibration only after final vehicle
+installation, where the local magnetic environment is representative.
+
 A stationary, Z-up sensor should show approximately:
 
 ```text

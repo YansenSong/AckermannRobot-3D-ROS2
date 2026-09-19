@@ -23,6 +23,8 @@ setup(
     entry_points={
         "console_scripts": [
             "lpms_ig1_node = lpms_ig1_ros2.lpms_ig1_node:main",
+            "gyro_calibration = lpms_ig1_ros2.gyro_calibration:main",
+            "accel_calibration = lpms_ig1_ros2.accel_calibration:main",
         ],
     },
 )

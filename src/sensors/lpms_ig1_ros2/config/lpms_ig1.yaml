@@ -22,3 +22,18 @@ lpms_ig1_node:
     angular_velocity_stddev: 0.0
     linear_acceleration_stddev: 0.0
     magnetic_field_stddev: 0.0
+
+    # Static gyro bias in rad/s. Generate with gyro_calibration.
+    # Applied to /imu/data only; /imu/data_raw remains uncorrected.
+    gyro_bias_x: 0.0
+    gyro_bias_y: 0.0
+    gyro_bias_z: 0.0
+
+    # Six-position accelerometer calibration in ROS SI units. Applied to
+    # /imu/data only as: corrected = (raw - offset) * gain.
+    accel_offset_x: 0.0
+    accel_offset_y: 0.0
+    accel_offset_z: 0.0
+    accel_gain_x: 1.0
+    accel_gain_y: 1.0
+    accel_gain_z: 1.0

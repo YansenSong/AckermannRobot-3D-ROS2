@@ -82,6 +82,7 @@ def _configured_components(context, bringup_share, motion_interface_share):
 def generate_launch_description():
     bringup_share = get_package_share_directory('ackermann_bringup')
     lidar_share = get_package_share_directory('lidar_driver')
+    imu_share = get_package_share_directory('lpms_ig1_ros2')
     motion_interface_share = get_package_share_directory('motion_interface')
 
     default_lidar_config = os.path.join(lidar_share, 'config', 'config.yaml')
@@ -118,6 +119,13 @@ def generate_launch_description():
         DeclareLaunchArgument('imu_interface', default_value='can0'),
         DeclareLaunchArgument('imu_node_id', default_value='5'),
         DeclareLaunchArgument('imu_frame_id', default_value='imu_link'),
+        DeclareLaunchArgument(
+            'imu_params_file',
+            default_value=os.path.join(
+                imu_share, 'config', 'lpms_ig1_calibration.yaml'
+            ),
+            description='LPMS-IG1 software calibration parameter file.',
+        ),
         DeclareLaunchArgument(
             'enable_control',
             default_value='false',
@@ -185,16 +193,19 @@ def generate_launch_description():
         name='lpms_ig1_node',
         output='screen',
         condition=IfCondition(LaunchConfiguration('enable_imu')),
-        parameters=[{
-            'interface': LaunchConfiguration('imu_interface'),
-            'node_id': ParameterValue(
-                LaunchConfiguration('imu_node_id'), value_type=int
-            ),
-            'frame_id': LaunchConfiguration('imu_frame_id'),
-            'invert_accel_for_ros': True,
-            'convert_nwu_to_enu': True,
-            'use_sim_time': False,
-        }],
+        parameters=[
+            LaunchConfiguration('imu_params_file'),
+            {
+                'interface': LaunchConfiguration('imu_interface'),
+                'node_id': ParameterValue(
+                    LaunchConfiguration('imu_node_id'), value_type=int
+                ),
+                'frame_id': LaunchConfiguration('imu_frame_id'),
+                'invert_accel_for_ros': True,
+                'convert_nwu_to_enu': True,
+                'use_sim_time': False,
+            },
+        ],
     )
 
     configured = OpaqueFunction(

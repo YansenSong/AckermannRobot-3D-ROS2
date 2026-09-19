@@ -26,6 +26,7 @@
   <exec_depend>ackermann_bringup</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>lpms_ig1_ros2</exec_depend>
   <exec_depend>motion_interface</exec_depend>
   <exec_depend>nav2_behaviors</exec_depend>
   <exec_depend>nav2_bt_navigator</exec_depend>

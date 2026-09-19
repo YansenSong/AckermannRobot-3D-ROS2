@@ -90,15 +90,49 @@ class LpmsIg1Ros2(Node):
         self.declare_parameter("linear_acceleration_stddev", 0.0)  # m/s^2
         self.declare_parameter("magnetic_field_stddev", 0.0)       # tesla
 
+        # User-measured static gyro biases, applied only to imu/data. The raw
+        # topic intentionally retains the converted but uncorrected readings.
+        self.declare_parameter("gyro_bias_x", 0.0)  # rad/s
+        self.declare_parameter("gyro_bias_y", 0.0)  # rad/s
+        self.declare_parameter("gyro_bias_z", 0.0)  # rad/s
+
+        # Per-axis accelerometer correction in ROS SI units. Applied only to
+        # imu/data after sign and unit conversion.
+        self.declare_parameter("accel_offset_x", 0.0)  # m/s^2
+        self.declare_parameter("accel_offset_y", 0.0)  # m/s^2
+        self.declare_parameter("accel_offset_z", 0.0)  # m/s^2
+        self.declare_parameter("accel_gain_x", 1.0)
+        self.declare_parameter("accel_gain_y", 1.0)
+        self.declare_parameter("accel_gain_z", 1.0)
+
         self.interface = str(self.get_parameter("interface").value)
         self.node_id = int(self.get_parameter("node_id").value)
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.poll_period = float(self.get_parameter("poll_period_sec").value)
         self.invert_accel = bool(self.get_parameter("invert_accel_for_ros").value)
         self.nwu_to_enu = bool(self.get_parameter("convert_nwu_to_enu").value)
+        self.gyro_bias = (
+            float(self.get_parameter("gyro_bias_x").value),
+            float(self.get_parameter("gyro_bias_y").value),
+            float(self.get_parameter("gyro_bias_z").value),
+        )
+        self.accel_offset = (
+            float(self.get_parameter("accel_offset_x").value),
+            float(self.get_parameter("accel_offset_y").value),
+            float(self.get_parameter("accel_offset_z").value),
+        )
+        self.accel_gain = (
+            float(self.get_parameter("accel_gain_x").value),
+            float(self.get_parameter("accel_gain_y").value),
+            float(self.get_parameter("accel_gain_z").value),
+        )
 
         if not (1 <= self.node_id <= 127):
             raise ValueError("node_id must be in the CANopen range 1..127")
+        if not all(math.isfinite(value) for value in self.accel_offset):
+            raise ValueError("accelerometer offsets must be finite")
+        if not all(math.isfinite(value) and value > 0.0 for value in self.accel_gain):
+            raise ValueError("accelerometer gains must be finite and > 0")
 
         self.ids = {
             0x180 + self.node_id: 1,
@@ -134,6 +168,18 @@ class LpmsIg1Ros2(Node):
         self.get_logger().info(
             f"ROS conversion: invert_accel={self.invert_accel}, "
             f"NWU->ENU orientation={self.nwu_to_enu}"
+        )
+        self.get_logger().info(
+            "Gyro bias [rad/s]: "
+            f"x={self.gyro_bias[0]:+.9f}, y={self.gyro_bias[1]:+.9f}, "
+            f"z={self.gyro_bias[2]:+.9f}"
+        )
+        self.get_logger().info(
+            "Accel calibration: offset [m/s^2]="
+            f"({self.accel_offset[0]:+.6f}, {self.accel_offset[1]:+.6f}, "
+            f"{self.accel_offset[2]:+.6f}), gain="
+            f"({self.accel_gain[0]:.6f}, {self.accel_gain[1]:.6f}, "
+            f"{self.accel_gain[2]:.6f})"
         )
 
     @staticmethod
@@ -207,15 +253,21 @@ class LpmsIg1Ros2(Node):
         # Convert LPMS g to SI. For ROS REP-145, an upward-pointing Z axis at
         # rest should read +g, while this LPMS mapping/setting was observed as -g.
         accel_sign = -1.0 if self.invert_accel else 1.0
-        ax = accel_sign * v["ax_g"] * G0
-        ay = accel_sign * v["ay_g"] * G0
-        az = accel_sign * v["az_g"] * G0
+        ax_raw = accel_sign * v["ax_g"] * G0
+        ay_raw = accel_sign * v["ay_g"] * G0
+        az_raw = accel_sign * v["az_g"] * G0
+        ax = (ax_raw - self.accel_offset[0]) * self.accel_gain[0]
+        ay = (ay_raw - self.accel_offset[1]) * self.accel_gain[1]
+        az = (az_raw - self.accel_offset[2]) * self.accel_gain[2]
 
         # --- gyro ---
         deg_to_rad = math.pi / 180.0
-        gx = v["gx_dps"] * deg_to_rad
-        gy = v["gy_dps"] * deg_to_rad
-        gz = v["gz_dps"] * deg_to_rad
+        gx_raw = v["gx_dps"] * deg_to_rad
+        gy_raw = v["gy_dps"] * deg_to_rad
+        gz_raw = v["gz_dps"] * deg_to_rad
+        gx = gx_raw - self.gyro_bias[0]
+        gy = gy_raw - self.gyro_bias[1]
+        gz = gz_raw - self.gyro_bias[2]
 
         # --- orientation ---
         q = quaternion_normalize_wxyz(
@@ -270,8 +322,12 @@ class LpmsIg1Ros2(Node):
         raw.header.frame_id = self.frame_id
         raw.orientation.w = 1.0
         raw.orientation_covariance[0] = -1.0
-        raw.angular_velocity = imu.angular_velocity
-        raw.linear_acceleration = imu.linear_acceleration
+        raw.angular_velocity.x = gx_raw
+        raw.angular_velocity.y = gy_raw
+        raw.angular_velocity.z = gz_raw
+        raw.linear_acceleration.x = ax_raw
+        raw.linear_acceleration.y = ay_raw
+        raw.linear_acceleration.z = az_raw
         raw.angular_velocity_covariance = imu.angular_velocity_covariance
         raw.linear_acceleration_covariance = imu.linear_acceleration_covariance
 

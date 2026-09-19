@@ -20,6 +20,7 @@ VEHICLE_CONFIG="${VEHICLE_CONFIG:-${PROJECT_DIR}/config/vehicle.yaml}"
 LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/sensors/lidar/config/config.yaml}"
 IMU_INTERFACE="${IMU_INTERFACE:-can0}"
 IMU_NODE_ID="${IMU_NODE_ID:-5}"
+IMU_PARAMS_FILE="${IMU_PARAMS_FILE:-${PROJECT_DIR}/src/sensors/lpms_ig1_ros2/config/lpms_ig1_calibration.yaml}"
 INTERFACE_CONFIG="${PROJECT_DIR}/src/motion_interface/config/bridge_params.yaml"
 STATUS_CONFIG="${PROJECT_DIR}/src/motion_interface/config/status_params.yaml"
 
@@ -55,6 +56,7 @@ usage() {
   LIDAR_CONFIG   Hesai 配置文件，默认: src/sensors/lidar/config/config.yaml
   IMU_INTERFACE  LPMS SocketCAN 接口，默认: can0
   IMU_NODE_ID    LPMS CANopen 节点 ID，默认: 5
+  IMU_PARAMS_FILE LPMS 软件标定文件，默认使用项目内标定结果
   ROS2_DISTRO    ROS 发行版，默认: humble
 
 示例:
@@ -240,6 +242,7 @@ if [[ "$MODE" == "nav2" ]]; then
         "enable_imu:=${ENABLE_IMU}"
         "imu_interface:=${IMU_INTERFACE}"
         "imu_node_id:=${IMU_NODE_ID}"
+        "imu_params_file:=${IMU_PARAMS_FILE}"
         "use_sim_time:=false"
         "rviz:=${NAVIGATION_RVIZ}"
     )
@@ -264,6 +267,7 @@ else
         "enable_imu:=${ENABLE_IMU}"
         "imu_interface:=${IMU_INTERFACE}"
         "imu_node_id:=${IMU_NODE_ID}"
+        "imu_params_file:=${IMU_PARAMS_FILE}"
         "enable_control:=${ENABLE_CONTROL}"
         "enable_navigation:=${ENABLE_NAVIGATION}"
         "navigation_rviz:=${NAVIGATION_RVIZ}"
