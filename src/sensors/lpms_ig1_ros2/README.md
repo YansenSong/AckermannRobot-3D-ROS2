@@ -178,6 +178,36 @@ only the ROS acceleration values and does not change the LPMS internal AHRS or
 its fused quaternion. Perform magnetometer calibration only after final vehicle
 installation, where the local magnetic environment is representative.
 
+## Vehicle mounting calibration
+
+After permanently installing the IMU, park the normally loaded vehicle on the
+flattest available ground and keep it stationary. Run the calibrated driver,
+then execute:
+
+```bash
+ros2 run lpms_ig1_ros2 mounting_calibration --ros-args \
+  -p mount_x:=0.0 -p mount_y:=0.0 -p mount_z:=0.0 \
+  -p mount_yaw_deg:=0.0
+```
+
+The XYZ parameters are the measured `imu_link` position relative to
+`base_link`, in metres (+X forward, +Y left, +Z up). Yaw must come from the
+physical installation measurement and follows the ROS +Z right-hand rule.
+Static gravity can estimate roll and pitch but **cannot determine yaw**.
+
+The result is written to `~/.ros/lpms_ig1_mounting.yaml`. The launch file can
+publish `base_link -> imu_link` from it:
+
+```bash
+ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+  mounting_file:=$HOME/.ros/lpms_ig1_mounting.yaml
+ros2 run tf2_ros tf2_echo base_link imu_link
+```
+
+If the mounting file is absent, the driver still starts and emits a warning;
+no static TF is published. Ground slope is indistinguishable from mounting
+tilt, so roll/pitch accuracy is limited by how level the vehicle and floor are.
+
 A stationary, Z-up sensor should show approximately:
 
 ```text
