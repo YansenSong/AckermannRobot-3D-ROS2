@@ -1,0 +1,24 @@
+lpms_ig1_node:
+  ros__parameters:
+    interface: can0
+    node_id: 5
+    frame_id: imu_link
+
+    # LPMS calibrated acceleration observed at rest is approximately -1 g on +Z.
+    # REP-145 style ROS IMU data should be +g on +Z when the sensor is Z-up.
+    invert_accel_for_ros: true
+
+    # LPMS acc+gyr+mag world reference is NWU (north-west-up).
+    # ROS navigation convention is commonly ENU (east-north-up).
+    # Disable this if you intentionally use LPMS heading/object reset as a local
+    # arbitrary world frame and do not want the +90 degree yaw conversion.
+    convert_nwu_to_enu: true
+
+    poll_period_sec: 0.001
+
+    # 0.0 means covariance unknown, represented by an all-zero matrix.
+    # Fill these after calibration/noise characterization if desired.
+    orientation_stddev: 0.0
+    angular_velocity_stddev: 0.0
+    linear_acceleration_stddev: 0.0
+    magnetic_field_stddev: 0.0

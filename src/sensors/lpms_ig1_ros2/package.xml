@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>lpms_ig1_ros2</name>
+  <version>0.1.0</version>
+  <description>LPMS-IG1 CANopen 16-bit SocketCAN driver for standard ROS 2 IMU topics.</description>
+
+  <maintainer email="young@example.com">young</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
