@@ -18,7 +18,8 @@ ROS2_DISTRO="${ROS2_DISTRO:-humble}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VEHICLE_CONFIG="${VEHICLE_CONFIG:-${PROJECT_DIR}/config/vehicle.yaml}"
 LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/sensors/lidar/config/config.yaml}"
-IMU_PORT="${IMU_PORT:-/dev/ttyUSB0}"
+IMU_INTERFACE="${IMU_INTERFACE:-can0}"
+IMU_NODE_ID="${IMU_NODE_ID:-5}"
 INTERFACE_CONFIG="${PROJECT_DIR}/src/motion_interface/config/bridge_params.yaml"
 STATUS_CONFIG="${PROJECT_DIR}/src/motion_interface/config/status_params.yaml"
 
@@ -52,7 +53,8 @@ usage() {
 环境变量:
   VEHICLE_CONFIG 项目级车辆参数，默认: config/vehicle.yaml
   LIDAR_CONFIG   Hesai 配置文件，默认: src/sensors/lidar/config/config.yaml
-  IMU_PORT       LPMS 串口，默认: /dev/ttyUSB0
+  IMU_INTERFACE  LPMS SocketCAN 接口，默认: can0
+  IMU_NODE_ID    LPMS CANopen 节点 ID，默认: 5
   ROS2_DISTRO    ROS 发行版，默认: humble
 
 示例:
@@ -65,7 +67,7 @@ usage() {
   $0 nav2 maps/my_map
   VEHICLE_CONFIG=/path/to/vehicle.yaml $0 bridge
   LIDAR_CONFIG=/path/to/hesai.yaml $0 lidar
-  IMU_PORT=/dev/ttyUSB1 $0 imu
+  IMU_INTERFACE=can0 IMU_NODE_ID=5 $0 imu
 EOF
 }
 
@@ -159,7 +161,7 @@ if $ENABLE_LIDAR; then
 fi
 
 if $ENABLE_IMU; then
-    log_info "IMU 串口: ${IMU_PORT}"
+    log_info "IMU SocketCAN: ${IMU_INTERFACE}, node ID: ${IMU_NODE_ID}"
 fi
 
 if $ENABLE_CONTROL; then
@@ -236,7 +238,8 @@ if [[ "$MODE" == "nav2" ]]; then
         "start_hardware:=true"
         "lidar_config:=${LIDAR_CONFIG}"
         "enable_imu:=${ENABLE_IMU}"
-        "imu_port:=${IMU_PORT}"
+        "imu_interface:=${IMU_INTERFACE}"
+        "imu_node_id:=${IMU_NODE_ID}"
         "use_sim_time:=false"
         "rviz:=${NAVIGATION_RVIZ}"
     )
@@ -259,7 +262,8 @@ else
         "lidar_config:=${LIDAR_CONFIG}"
         "lidar_rviz:=${LIDAR_RVIZ}"
         "enable_imu:=${ENABLE_IMU}"
-        "imu_port:=${IMU_PORT}"
+        "imu_interface:=${IMU_INTERFACE}"
+        "imu_node_id:=${IMU_NODE_ID}"
         "enable_control:=${ENABLE_CONTROL}"
         "enable_navigation:=${ENABLE_NAVIGATION}"
         "navigation_rviz:=${NAVIGATION_RVIZ}"

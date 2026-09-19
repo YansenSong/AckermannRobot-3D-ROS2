@@ -9,7 +9,7 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>motion_interface</exec_depend>
   <exec_depend>lidar_driver</exec_depend>
-  <exec_depend>lpms_ig1</exec_depend>
+  <exec_depend>lpms_ig1_ros2</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>lio_sam</exec_depend>

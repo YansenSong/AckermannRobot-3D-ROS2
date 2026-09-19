@@ -113,13 +113,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'enable_imu',
             default_value='false',
-            description='Start the LPMS-IG1 RS485 IMU driver.',
+            description='Start the LPMS-IG1 SocketCAN IMU driver.',
         ),
-        DeclareLaunchArgument('imu_port', default_value='/dev/ttyUSB0'),
-        DeclareLaunchArgument('imu_baudrate', default_value='115200'),
-        DeclareLaunchArgument('imu_rate', default_value='200'),
-        DeclareLaunchArgument('imu_rs485_control_pin', default_value='-1'),
-        DeclareLaunchArgument('imu_rs485_toggle_wait_ms', default_value='2'),
+        DeclareLaunchArgument('imu_interface', default_value='can0'),
+        DeclareLaunchArgument('imu_node_id', default_value='5'),
+        DeclareLaunchArgument('imu_frame_id', default_value='imu_link'),
         DeclareLaunchArgument(
             'enable_control',
             default_value='false',
@@ -182,25 +180,19 @@ def generate_launch_description():
     )
 
     imu = Node(
-        package='lpms_ig1',
-        executable='lpms_ig1_rs485_node',
-        name='lpms_ig1_rs485_node',
+        package='lpms_ig1_ros2',
+        executable='lpms_ig1_node',
+        name='lpms_ig1_node',
         output='screen',
         condition=IfCondition(LaunchConfiguration('enable_imu')),
         parameters=[{
-            'port': LaunchConfiguration('imu_port'),
-            'baudrate': ParameterValue(
-                LaunchConfiguration('imu_baudrate'), value_type=int
+            'interface': LaunchConfiguration('imu_interface'),
+            'node_id': ParameterValue(
+                LaunchConfiguration('imu_node_id'), value_type=int
             ),
-            'rate': ParameterValue(
-                LaunchConfiguration('imu_rate'), value_type=int
-            ),
-            'rs485ControlPin': ParameterValue(
-                LaunchConfiguration('imu_rs485_control_pin'), value_type=int
-            ),
-            'rs485ControlPinToggleWaitMs': ParameterValue(
-                LaunchConfiguration('imu_rs485_toggle_wait_ms'), value_type=int
-            ),
+            'frame_id': LaunchConfiguration('imu_frame_id'),
+            'invert_accel_for_ros': True,
+            'convert_nwu_to_enu': True,
             'use_sim_time': False,
         }],
     )
