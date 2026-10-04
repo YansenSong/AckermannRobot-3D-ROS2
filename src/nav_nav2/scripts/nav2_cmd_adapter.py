@@ -20,10 +20,10 @@ from rclpy.node import Node
 
 class Nav2CmdAdapter(Node):
     def __init__(self):
-        super().__init__('ackermann_nav_cmd_adapter')
+        super().__init__('nav_nav2_cmd_adapter')
 
-        self.declare_parameter('input_topic', '/ackermann_nav/cmd_vel_smoothed')
-        self.declare_parameter('output_topic', '/ackermann_nav/ackermann_cmd_raw')
+        self.declare_parameter('input_topic', '/nav_nav2/cmd_vel_smoothed')
+        self.declare_parameter('output_topic', '/nav_nav2/ackermann_cmd_raw')
         self.declare_parameter('wheelbase', 0.0)
         self.declare_parameter('max_speed', 0.0)
         self.declare_parameter('min_turning_radius', 0.0)

@@ -9,7 +9,7 @@
 #   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
 #   nav     启动 Smac Hybrid-A* + NeuPAN 实车导航基础设施
 #           NeuPAN 需在另一个终端运行 scripts/run_neupan.sh
-#   nav2    启动独立 ackermann_nav：Smac Hybrid-A* + MPPI + Nav2 BT
+#   nav2    启动独立 nav_nav2：Smac Hybrid-A* + MPPI + Nav2 BT
 #==========================================
 
 set -eo pipefail
@@ -45,7 +45,7 @@ usage() {
   nav     启动 Smac Hybrid-A* + NeuPAN 导航基础设施
           map 可传地图目录、map.yaml 或 map.pgm
           NeuPAN 需另开终端执行: bash scripts/run_neupan.sh
-  nav2    启动 ackermann_nav 完整 Nav2 栈（Smac Hybrid-A* + MPPI + BT）
+  nav2    启动 nav_nav2 完整 Nav2 栈（Smac Hybrid-A* + MPPI + BT）
           map 可传地图目录、map.yaml 或 map.pgm
 
   nav/nav2 地图目录均需包含 map.yaml、map.pgm、GlobalMap.pcd
@@ -232,7 +232,7 @@ log_info "=============================="
 
 if [[ "$MODE" == "nav2" ]]; then
     LAUNCH_CMD=(
-        ros2 launch ackermann_nav navigation.launch.py
+        ros2 launch nav_nav2 navigation.launch.py
         "vehicle_config:=${VEHICLE_CONFIG}"
         "map:=${MAP_YAML}"
         "globalmap_pcd:=${GLOBALMAP_PCD}"

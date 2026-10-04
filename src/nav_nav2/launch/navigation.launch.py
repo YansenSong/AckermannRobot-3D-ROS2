@@ -208,7 +208,7 @@ def _build_navigation(context):
     )
 
     bringup_share = get_package_share_directory('ackermann_bringup')
-    nav_share = get_package_share_directory('ackermann_nav')
+    nav_share = get_package_share_directory('nav_nav2')
     nav_status_share = get_package_share_directory('nav_status')
     motion_share = get_package_share_directory('motion_interface')
 
@@ -252,7 +252,7 @@ def _build_navigation(context):
     scan = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
-        name='ackermann_nav_pointcloud_to_laserscan',
+        name='nav_nav2_pointcloud_to_laserscan',
         output='screen',
         parameters=[
             os.path.join(nav_share, 'config', 'pcl_to_scan.yaml'),
@@ -270,7 +270,7 @@ def _build_navigation(context):
     lidar_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        name='ackermann_nav_laser_link_static_tf',
+        name='nav_nav2_laser_link_static_tf',
         output='screen',
         arguments=[
             *vehicle['lidar']['tf'],
@@ -312,7 +312,7 @@ def _build_navigation(context):
                 'FollowPath.AckermannConstraints.min_turning_r': vehicle['min_radius'],
             },
         ],
-        remappings=[('cmd_vel', '/ackermann_nav/cmd_vel_raw')],
+        remappings=[('cmd_vel', '/nav_nav2/cmd_vel_raw')],
     )
     planner_server = Node(
         package='nav2_planner', executable='planner_server', name='planner_server',
@@ -349,17 +349,17 @@ def _build_navigation(context):
             },
         ],
         remappings=[
-            ('cmd_vel', '/ackermann_nav/cmd_vel_raw'),
-            ('cmd_vel_smoothed', '/ackermann_nav/cmd_vel_smoothed'),
+            ('cmd_vel', '/nav_nav2/cmd_vel_raw'),
+            ('cmd_vel_smoothed', '/nav_nav2/cmd_vel_smoothed'),
         ],
     )
     command_adapter = Node(
-        package='ackermann_nav', executable='nav2_cmd_adapter.py',
-        name='ackermann_nav_cmd_adapter', output='screen',
+        package='nav_nav2', executable='nav2_cmd_adapter.py',
+        name='nav_nav2_cmd_adapter', output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
-            'input_topic': '/ackermann_nav/cmd_vel_smoothed',
-            'output_topic': '/ackermann_nav/ackermann_cmd_raw',
+            'input_topic': '/nav_nav2/cmd_vel_smoothed',
+            'output_topic': '/nav_nav2/ackermann_cmd_raw',
             'wheelbase': vehicle['wheelbase'],
             'max_speed': vehicle['max_speed'],
             'min_turning_radius': vehicle['min_radius'],
@@ -378,7 +378,7 @@ def _build_navigation(context):
             # real_vehicle/nav path (which leaves it on) behaving alike.
             'enable_status_receiver': 'false',
             'use_sim_time': use_sim_time,
-            'input_topic': '/ackermann_nav/ackermann_cmd_raw',
+            'input_topic': '/nav_nav2/ackermann_cmd_raw',
             'output_topic': '/ackermann_cmd',
         }.items(),
     )
@@ -421,7 +421,7 @@ def _build_navigation(context):
         }],
     )
     startup_gate = Node(
-        package='ackermann_nav', executable='nav2_startup_gate.py',
+        package='nav_nav2', executable='nav2_startup_gate.py',
         name='nav2_startup_gate', output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
@@ -434,7 +434,7 @@ def _build_navigation(context):
         }],
     )
     rviz = Node(
-        package='rviz2', executable='rviz2', name='ackermann_nav_rviz',
+        package='rviz2', executable='rviz2', name='nav_nav2_rviz',
         output='screen',
         arguments=['-d', LaunchConfiguration('rviz_config')],
         condition=IfCondition(LaunchConfiguration('rviz')),
@@ -465,7 +465,7 @@ def _build_navigation(context):
 
 def generate_launch_description():
     bringup_share = get_package_share_directory('ackermann_bringup')
-    nav_share = get_package_share_directory('ackermann_nav')
+    nav_share = get_package_share_directory('nav_nav2')
     lidar_share = get_package_share_directory('lidar_driver')
 
     return LaunchDescription([

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(ackermann_nav)
+project(nav_nav2)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)

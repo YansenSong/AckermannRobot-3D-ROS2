@@ -14,7 +14,7 @@
 - `src/nav_neupan/neupan_ros2`：NeuPAN ROS2 接口（ROS package 名仍为 `neupan_ros2`）
 - `src/motion_interface`：命令安全门 + `/ackermann_cmd` 到 STM32 UDP 协议的实车接口
 - `src/ackermann_bringup`：实车硬件、定位以及 Smac + NeuPAN 导航栈 bringup
-- `src/ackermann_nav`：第二套独立 Nav2 导航栈（Smac Hybrid-A* + MPPI + BT Navigator）
+- `src/nav_nav2`：第二套独立 Nav2 导航栈（ROS 包名 `nav_nav2`，使用 Smac Hybrid-A* + MPPI + BT Navigator）
 - `src/lio-sam` / `src/liorf_localization`：建图与先验地图定位
 
 ## 2. 编译
@@ -105,28 +105,28 @@ Smac Hybrid-A*
   -> STM32
 ```
 
-### 栈 B：ackermann_nav
+### 栈 B：nav_nav2
 
 ```text
 Smac Hybrid-A*
   -> MPPI
   -> velocity_smoother
-  -> /ackermann_nav/cmd_vel_smoothed   (speed + yaw rate)
+  -> /nav_nav2/cmd_vel_smoothed   (speed + yaw rate)
   -> nav2_cmd_adapter.py
-  -> /ackermann_nav/ackermann_cmd_raw  (speed + steering angle)
+  -> /nav_nav2/ackermann_cmd_raw  (speed + steering angle)
   -> motion_interface/command_gate
   -> /ackermann_cmd
   -> motion_interface/stm32_bridge
   -> STM32
 ```
 
-`ackermann_nav` 的 Nav2 输出中 `angular.z` 是 yaw rate，因此必须经过适配器按自行车模型换算为前轮等效转角；不能直接送给 STM32 bridge。
+`nav_nav2` 的 Nav2 输出中 `angular.z` 是 yaw rate，因此必须经过适配器按自行车模型换算为前轮等效转角；不能直接送给 STM32 bridge。
 
 ## 6. 两套导航栈的车辆参数
 
 两套栈都不在包内维护独立的实车几何副本。
 
-Smac + NeuPAN 从根 `vehicle.yaml` 获取最小转弯半径、车体几何和规划速度。`ackermann_nav` 启动时也会从同一个文件注入：
+Smac + NeuPAN 从根 `vehicle.yaml` 获取最小转弯半径、车体几何和规划速度。`nav_nav2` 启动时也会从同一个文件注入：
 
 - wheelbase
 - planning max speed / acceleration

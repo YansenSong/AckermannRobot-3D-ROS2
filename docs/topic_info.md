@@ -19,20 +19,20 @@
     -> UDP 5000 -> STM32 (192.168.5.50)
 ```
 
-## 栈 B：ackermann_nav / Nav2 + MPPI
+## 栈 B：nav_nav2 / Nav2 + MPPI
 
 ```text
 Nav2 goal
     -> BT Navigator
     -> SmacPlannerHybrid
     -> MPPI Controller
-    -> /ackermann_nav/cmd_vel_raw
+    -> /nav_nav2/cmd_vel_raw
     -> velocity_smoother
-    -> /ackermann_nav/cmd_vel_smoothed
+    -> /nav_nav2/cmd_vel_smoothed
        linear.x = speed
        angular.z = yaw rate
     -> nav2_cmd_adapter
-    -> /ackermann_nav/ackermann_cmd_raw
+    -> /nav_nav2/ackermann_cmd_raw
        linear.x = speed
        angular.z = front-wheel steering angle
     -> motion_interface/command_gate
@@ -51,8 +51,8 @@ Nav2 goal
 | `/scan` | `sensor_msgs/msg/LaserScan` | 二维障碍物输入 |
 | `/imu/data` | `sensor_msgs/msg/Imu` | LPMS-IG1 IMU 数据 |
 | `/neupan_cmd_vel_raw` | `geometry_msgs/msg/Twist` | NeuPAN 原始 Ackermann 命令 |
-| `/ackermann_nav/cmd_vel_smoothed` | `geometry_msgs/msg/Twist` | Nav2 平滑后的 body twist；`angular.z` 是 yaw rate |
-| `/ackermann_nav/ackermann_cmd_raw` | `geometry_msgs/msg/Twist` | Nav2 适配后的 Ackermann 命令；`angular.z` 是前轮转角 |
+| `/nav_nav2/cmd_vel_smoothed` | `geometry_msgs/msg/Twist` | Nav2 平滑后的 body twist；`angular.z` 是 yaw rate |
+| `/nav_nav2/ackermann_cmd_raw` | `geometry_msgs/msg/Twist` | Nav2 适配后的 Ackermann 命令；`angular.z` 是前轮转角 |
 | `/ackermann_cmd` | `geometry_msgs/msg/Twist` | 统一实车命令；`angular.z` 是前轮转角 |
 | `/stop` | `std_msgs/msg/Bool` | 集中停车覆盖；`true` 强制零指令 |
 | `/navigation/state` | `nav_status/msg/NavigationStatus` | NeuPAN 栈导航状态 |

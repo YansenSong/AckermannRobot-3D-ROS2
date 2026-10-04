@@ -22,11 +22,11 @@
 
 | 内容 | 文件 |
 |---|---|
-| Nav2 参数 | `src/ackermann_nav/config/nav2_params.yaml` |
-| 点云转 LaserScan 参数 | `src/ackermann_nav/config/pcl_to_scan.yaml` |
-| 导航启动与生命周期管理 | `src/ackermann_nav/launch/navigation.launch.py` |
-| `Twist` 转 `TwistStamped` 桥接 | `src/ackermann_nav/scripts/cmd_bridge.py` |
-| 一键启动 | `scripts/run_ackermann_nav.sh` |
+| Nav2 参数 | `src/nav_nav2/config/nav2_params.yaml` |
+| 点云转 LaserScan 参数 | `src/nav_nav2/config/pcl_to_scan.yaml` |
+| 导航启动与生命周期管理 | `src/nav_nav2/launch/navigation.launch.py` |
+| `Twist` 转 `TwistStamped` 桥接 | `src/nav_nav2/scripts/cmd_bridge.py` |
+| 一键启动 | `scripts/start_vehicle.sh nav2 maps/<map_name>` |
 
 当前仿真基线可作为起始参考，不应直接复制到新机器人：
 
