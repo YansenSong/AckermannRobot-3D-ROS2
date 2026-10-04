@@ -7,13 +7,14 @@
 - `config/vehicle.yaml`：项目级车辆几何、硬限制、规划限制、LiDAR/IMU 外参的唯一配置源（不是 ROS package）
 - `src/sensors`：传感器源码分类目录（不是 ROS package）
 - `src/sensors/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
-- `src/sensors/imu`：LPMS-IG1 IMU 驱动（ROS package 名仍为 `lpms_ig1`）
-- `src/nav_neupan`：Smac Hybrid-A* + NeuPAN 导航栈源码分类目录（不是 ROS package）
+- `src/sensors/lpms_ig1_ros2`：当前实车使用的 IG1 SocketCAN 驱动与校准工具（ROS 包名 `lpms_ig1_ros2`）
+- `src/nav_neupan`：NeuPAN 导航相关 ROS 包的源码分类目录（不是 ROS package）
+- `src/nav_neupan/nav_neupan_bringup`：Smac + NeuPAN 导航栈启动包（ROS 包名 `nav_neupan_bringup`）
 - `src/nav_neupan/ackermann_smac_bridge`：项目侧 Smac 目标/路径适配桥（ROS package 名仍为 `ackermann_smac_bridge`）
 - `src/nav_neupan/nav2_smac_planner`：Nav2 Smac 规划插件（ROS package 名仍为 `nav2_smac_planner`）
 - `src/nav_neupan/neupan_ros2`：NeuPAN ROS2 接口（ROS package 名仍为 `neupan_ros2`）
 - `src/motion_interface`：命令安全门 + `/ackermann_cmd` 到 STM32 UDP 协议的实车接口
-- `src/ackermann_bringup`：实车硬件、定位以及 Smac + NeuPAN 导航栈 bringup
+- `src/vehicle_bringup`：共用实车传感器、运动接口和定位启动（ROS 包名 `vehicle_bringup`）
 - `src/nav_nav2`：第二套独立 Nav2 导航栈（ROS 包名 `nav_nav2`，使用 Smac Hybrid-A* + MPPI + BT Navigator）
 - `src/lio-sam` / `src/liorf_localization`：建图与先验地图定位
 
@@ -74,7 +75,6 @@ vehicle:
 ```bash
 # 栈 A：Smac Hybrid-A* + NeuPAN
 ./scripts/start_vehicle.sh nav maps/<map_name>
-# 另开终端：bash scripts/run_neupan.sh
 
 # 栈 B：完整 Nav2（Smac Hybrid-A* + MPPI + BT Navigator）
 ./scripts/start_vehicle.sh nav2 maps/<map_name>

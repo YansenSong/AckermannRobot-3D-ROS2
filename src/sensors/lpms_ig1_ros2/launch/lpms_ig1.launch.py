@@ -51,6 +51,11 @@ def _mounting_tf(context):
 
 
 def generate_launch_description():
+    base_params_file = os.path.join(
+        get_package_share_directory("lpms_ig1_ros2"),
+        "config",
+        "lpms_ig1.yaml",
+    )
     default_params_file = os.path.join(
         get_package_share_directory("lpms_ig1_ros2"),
         "config",
@@ -75,6 +80,7 @@ def generate_launch_description():
             name="lpms_ig1_node",
             output="screen",
             parameters=[
+                base_params_file,
                 LaunchConfiguration("params_file"),
                 {
                     "interface": LaunchConfiguration("interface"),

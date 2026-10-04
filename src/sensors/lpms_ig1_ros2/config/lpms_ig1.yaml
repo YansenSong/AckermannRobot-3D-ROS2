@@ -15,6 +15,10 @@ lpms_ig1_node:
     convert_nwu_to_enu: true
 
     poll_period_sec: 0.001
+    auto_reconnect: true
+    reconnect_interval_sec: 2.0
+    data_timeout_sec: 2.0
+    status_period_sec: 0.5
 
     # 0.0 means covariance unknown, represented by an all-zero matrix.
     # Fill these after calibration/noise characterization if desired.

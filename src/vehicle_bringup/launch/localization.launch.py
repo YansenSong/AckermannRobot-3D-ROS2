@@ -137,7 +137,7 @@ def _localization_nodes(context):
 
 
 def generate_launch_description():
-    bringup_share = get_package_share_directory('ackermann_bringup')
+    bringup_share = get_package_share_directory('vehicle_bringup')
     default_params = os.path.join(
         bringup_share, 'config', 'liorf_localization.yaml'
     )

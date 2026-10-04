@@ -7,8 +7,7 @@
 #   bridge  仅启动 STM32 运动接口后端 (motion_interface)
 #   status  仅启动 sta__ 状态接收（不发任何控制帧，用于台架联调）
 #   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
-#   nav     启动 Smac Hybrid-A* + NeuPAN 实车导航基础设施
-#           NeuPAN 需在另一个终端运行 scripts/run_neupan.sh
+#   nav     启动 Smac Hybrid-A* + NeuPAN 完整导航栈
 #   nav2    启动独立 nav_nav2：Smac Hybrid-A* + MPPI + Nav2 BT
 #==========================================
 
@@ -42,9 +41,8 @@ usage() {
   bridge  仅启动 motion_interface 的 STM32 后端
   status  仅启动 sta__ 状态接收，不下发任何控制帧（台架联调用）
   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
-  nav     启动 Smac Hybrid-A* + NeuPAN 导航基础设施
+  nav     启动 Smac Hybrid-A* + NeuPAN 完整导航栈
           map 可传地图目录、map.yaml 或 map.pgm
-          NeuPAN 需另开终端执行: bash scripts/run_neupan.sh
   nav2    启动 nav_nav2 完整 Nav2 栈（Smac Hybrid-A* + MPPI + BT）
           map 可传地图目录、map.yaml 或 map.pgm
 
@@ -246,6 +244,26 @@ if [[ "$MODE" == "nav2" ]]; then
         "use_sim_time:=false"
         "rviz:=${NAVIGATION_RVIZ}"
     )
+elif [[ "$MODE" == "nav" ]]; then
+    LAUNCH_CMD=(
+        ros2 launch nav_neupan_bringup navigation.launch.py
+        "project_dir:=${PROJECT_DIR}"
+        "vehicle_config:=${VEHICLE_CONFIG}"
+        "map:=${MAP_YAML}"
+        "map_pgm:=${MAP_PGM}"
+        "globalmap_pcd:=${GLOBALMAP_PCD}"
+        "points_topic:=/lidar_points"
+        "start_hardware:=true"
+        "lidar_config:=${LIDAR_CONFIG}"
+        "enable_imu:=${ENABLE_IMU}"
+        "imu_interface:=${IMU_INTERFACE}"
+        "imu_node_id:=${IMU_NODE_ID}"
+        "imu_params_file:=${IMU_PARAMS_FILE}"
+        "bridge_params_file:=${INTERFACE_CONFIG}"
+        "status_params_file:=${STATUS_CONFIG}"
+        "use_sim_time:=false"
+        "use_rviz:=${NAVIGATION_RVIZ}"
+    )
 elif [[ "$MODE" == "status" ]]; then
     # Bench bring-up only: receive and validate sta__ while commanding
     # nothing. Goes straight to motion_interface rather than real_vehicle so
@@ -259,7 +277,7 @@ elif [[ "$MODE" == "status" ]]; then
     )
 else
     LAUNCH_CMD=(
-        ros2 launch ackermann_bringup real_vehicle.launch.py
+        ros2 launch vehicle_bringup real_vehicle.launch.py
         "vehicle_config:=${VEHICLE_CONFIG}"
         "enable_lidar:=${ENABLE_LIDAR}"
         "lidar_config:=${LIDAR_CONFIG}"
@@ -269,26 +287,9 @@ else
         "imu_node_id:=${IMU_NODE_ID}"
         "imu_params_file:=${IMU_PARAMS_FILE}"
         "enable_control:=${ENABLE_CONTROL}"
-        "enable_navigation:=${ENABLE_NAVIGATION}"
-        "navigation_rviz:=${NAVIGATION_RVIZ}"
         "bridge_params_file:=${INTERFACE_CONFIG}"
         "status_params_file:=${STATUS_CONFIG}"
     )
-
-    if $ENABLE_NAVIGATION; then
-        LAUNCH_CMD+=(
-            "map:=${MAP_YAML}"
-            "map_pgm:=${MAP_PGM}"
-            "globalmap_pcd:=${GLOBALMAP_PCD}"
-        )
-    fi
-fi
-
-if [[ "$MODE" == "nav" ]]; then
-    echo ""
-    log_info "NeuPAN 不由本脚本自动启动。另开终端执行:"
-    log_info "  cd ${PROJECT_DIR}"
-    log_info "  bash scripts/run_neupan.sh"
 fi
 
 echo ""

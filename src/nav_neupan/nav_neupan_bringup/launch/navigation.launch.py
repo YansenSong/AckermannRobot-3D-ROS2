@@ -1,4 +1,4 @@
-"""Compose the real-vehicle localization, planning, scan, status, and RViz stack."""
+"""Compose the real-vehicle Smac + NeuPAN navigation stack."""
 
 import math
 import os
@@ -8,12 +8,13 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
 )
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 
@@ -105,7 +106,7 @@ def _scan_node(context):
     LiDAR driver launch is gated on the standalone RViz view, which
     scripts/start_vehicle.sh turns off for nav/nav2.
     """
-    share = get_package_share_directory('ackermann_bringup')
+    share = get_package_share_directory('nav_neupan_bringup')
     vehicle_config = LaunchConfiguration('vehicle_config').perform(context)
     layout = _load_lidar_mounting(vehicle_config)
     return [
@@ -140,14 +141,41 @@ def _scan_node(context):
 
 
 def generate_launch_description():
-    share = get_package_share_directory('ackermann_bringup')
+    nav_share = get_package_share_directory('nav_neupan_bringup')
+    vehicle_share = get_package_share_directory('vehicle_bringup')
     nav_status_share = get_package_share_directory('nav_status')
+    lidar_share = get_package_share_directory('lidar_driver')
+    motion_share = get_package_share_directory('motion_interface')
+    project_dir = LaunchConfiguration('project_dir')
+    vehicle_config = LaunchConfiguration('vehicle_config')
+    use_sim_time = LaunchConfiguration('use_sim_time')
     arguments = [
+        DeclareLaunchArgument('project_dir', default_value=os.getcwd()),
+        DeclareLaunchArgument('start_hardware', default_value='false'),
         DeclareLaunchArgument('map', default_value=''),
         DeclareLaunchArgument('map_pgm', default_value=''),
         DeclareLaunchArgument('globalmap_pcd', default_value=''),
         DeclareLaunchArgument('vehicle_config', default_value=''),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument(
+            'lidar_config',
+            default_value=os.path.join(lidar_share, 'config', 'config.yaml')),
+        DeclareLaunchArgument('enable_imu', default_value='false'),
+        DeclareLaunchArgument('imu_interface', default_value='can0'),
+        DeclareLaunchArgument('imu_node_id', default_value='5'),
+        DeclareLaunchArgument(
+            'imu_params_file',
+            default_value=os.path.join(
+                get_package_share_directory('lpms_ig1_ros2'),
+                'config', 'lpms_ig1_calibration.yaml')),
+        DeclareLaunchArgument(
+            'bridge_params_file',
+            default_value=os.path.join(
+                motion_share, 'config', 'bridge_params.yaml')),
+        DeclareLaunchArgument(
+            'status_params_file',
+            default_value=os.path.join(
+                motion_share, 'config', 'status_params.yaml')),
         DeclareLaunchArgument(
             'points_topic',
             default_value='/lidar_points',
@@ -161,11 +189,30 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'params_file',
             default_value=os.path.join(
-                share, 'config', 'liorf_localization.yaml')),
+                vehicle_share, 'config', 'liorf_localization.yaml')),
     ]
+    hardware = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(vehicle_share, 'launch', 'real_vehicle.launch.py')),
+        condition=IfCondition(LaunchConfiguration('start_hardware')),
+        launch_arguments={
+            'vehicle_config': vehicle_config,
+            'enable_lidar': 'true',
+            'lidar_config': LaunchConfiguration('lidar_config'),
+            'lidar_rviz': 'false',
+            'enable_imu': LaunchConfiguration('enable_imu'),
+            'imu_interface': LaunchConfiguration('imu_interface'),
+            'imu_node_id': LaunchConfiguration('imu_node_id'),
+            'imu_params_file': LaunchConfiguration('imu_params_file'),
+            'enable_control': 'true',
+            'enable_command_gate': 'true',
+            'bridge_params_file': LaunchConfiguration('bridge_params_file'),
+            'status_params_file': LaunchConfiguration('status_params_file'),
+        }.items(),
+    )
     localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(share, 'launch', 'localization.launch.py')
+            os.path.join(vehicle_share, 'launch', 'localization.launch.py')
         ),
         launch_arguments={
             'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
@@ -176,7 +223,7 @@ def generate_launch_description():
     )
     planning = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(share, 'launch', 'planning.launch.py')
+            os.path.join(nav_share, 'launch', 'planning.launch.py')
         ),
         launch_arguments={
             'map': LaunchConfiguration('map'),
@@ -202,9 +249,20 @@ def generate_launch_description():
         name='rviz2',
         output='screen',
         condition=IfCondition(LaunchConfiguration('use_rviz')),
-        arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')],
+        arguments=['-d', os.path.join(nav_share, 'rviz', 'nav_neupan.rviz')],
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
     )
+    neupan = ExecuteProcess(
+        cmd=[
+            'bash',
+            PathJoinSubstitution([project_dir, 'scripts', 'run_neupan.sh']),
+        ],
+        additional_env={
+            'VEHICLE_CONFIG': vehicle_config,
+            'NEUPAN_USE_SIM_TIME': use_sim_time,
+        },
+        output='screen',
+    )
     return LaunchDescription(
-        arguments + [localization, planning, scan, nav_status, rviz]
+        arguments + [hardware, localization, planning, scan, nav_status, rviz, neupan]
     )

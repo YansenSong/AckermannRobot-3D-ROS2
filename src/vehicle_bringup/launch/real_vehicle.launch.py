@@ -1,4 +1,4 @@
-"""Compose real-vehicle hardware and optional navigation.
+"""Start shared real-vehicle sensors and motion interface.
 
 Project-level vehicle geometry and limits come from a root config/vehicle.yaml
 file supplied through the ``vehicle_config`` launch argument. Device/network
@@ -23,16 +23,18 @@ def _enabled(context, name):
     }
 
 
-def _configured_components(context, bringup_share, motion_interface_share):
+def _configured_components(context, motion_interface_share):
     enable_control = _enabled(context, 'enable_control')
-    enable_navigation = _enabled(context, 'enable_navigation')
-    if not enable_control and not enable_navigation:
+    enable_command_gate = _enabled(context, 'enable_command_gate')
+    if not enable_control:
+        if enable_command_gate:
+            raise RuntimeError('enable_command_gate requires enable_control:=true')
         return []
 
     vehicle_config = LaunchConfiguration('vehicle_config').perform(context)
     if not vehicle_config:
         raise RuntimeError(
-            "vehicle_config is required when control or navigation is enabled"
+            "vehicle_config is required when the motion interface is enabled"
         )
     if not os.path.isfile(vehicle_config):
         raise RuntimeError(f"Vehicle config does not exist: {vehicle_config}")
@@ -48,7 +50,7 @@ def _configured_components(context, bringup_share, motion_interface_share):
             ),
             launch_arguments={
                 'vehicle_config': vehicle_config,
-                'enable_command_gate': str(enable_navigation).lower(),
+                'enable_command_gate': str(enable_command_gate).lower(),
                 'enable_stm32_bridge': str(enable_control).lower(),
                 'bridge_params_file': LaunchConfiguration('bridge_params_file'),
                 'status_params_file': LaunchConfiguration('status_params_file'),
@@ -57,39 +59,15 @@ def _configured_components(context, bringup_share, motion_interface_share):
         )
     ]
 
-    if enable_navigation:
-        actions.append(
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(bringup_share, 'launch', 'navigation.launch.py')
-                ),
-                launch_arguments={
-                    'map': LaunchConfiguration('map'),
-                    'map_pgm': LaunchConfiguration('map_pgm'),
-                    'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
-                    'vehicle_config': vehicle_config,
-                    'params_file': LaunchConfiguration('localization_params_file'),
-                    'points_topic': LaunchConfiguration('points_topic'),
-                    'use_sim_time': 'false',
-                    'use_rviz': LaunchConfiguration('navigation_rviz'),
-                }.items(),
-            )
-        )
-
     return actions
 
 
 def generate_launch_description():
-    bringup_share = get_package_share_directory('ackermann_bringup')
     lidar_share = get_package_share_directory('lidar_driver')
     imu_share = get_package_share_directory('lpms_ig1_ros2')
     motion_interface_share = get_package_share_directory('motion_interface')
 
     default_lidar_config = os.path.join(lidar_share, 'config', 'config.yaml')
-    default_localization_params = os.path.join(
-        bringup_share, 'config', 'liorf_localization.yaml'
-    )
-
     arguments = [
         DeclareLaunchArgument(
             'vehicle_config',
@@ -132,6 +110,11 @@ def generate_launch_description():
             description='Start the real-vehicle STM32 motion interface backend.',
         ),
         DeclareLaunchArgument(
+            'enable_command_gate',
+            default_value='false',
+            description='Enable the Ackermann command gate with the motion interface.',
+        ),
+        DeclareLaunchArgument(
             'bridge_params_file',
             default_value=os.path.join(
                 motion_interface_share, 'config', 'bridge_params.yaml'
@@ -153,27 +136,6 @@ def generate_launch_description():
                 'with the workspace-local file.'
             ),
         ),
-        DeclareLaunchArgument(
-            'enable_navigation',
-            default_value='false',
-            description=(
-                'Start real-vehicle localization/planning/navigation. Keep disabled '
-                'until localization and sensor calibration are verified.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'points_topic',
-            default_value='/lidar_points',
-            description='Point cloud used by pointcloud_to_laserscan.',
-        ),
-        DeclareLaunchArgument('navigation_rviz', default_value='true'),
-        DeclareLaunchArgument('map', default_value=''),
-        DeclareLaunchArgument('map_pgm', default_value=''),
-        DeclareLaunchArgument('globalmap_pcd', default_value=''),
-        DeclareLaunchArgument(
-            'localization_params_file',
-            default_value=default_localization_params,
-        ),
     ]
 
     lidar = IncludeLaunchDescription(
@@ -194,6 +156,7 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(LaunchConfiguration('enable_imu')),
         parameters=[
+            os.path.join(imu_share, 'config', 'lpms_ig1.yaml'),
             LaunchConfiguration('imu_params_file'),
             {
                 'interface': LaunchConfiguration('imu_interface'),
@@ -210,7 +173,7 @@ def generate_launch_description():
 
     configured = OpaqueFunction(
         function=_configured_components,
-        args=[bringup_share, motion_interface_share],
+        args=[motion_interface_share],
     )
 
     return LaunchDescription(arguments + [lidar, imu, configured])

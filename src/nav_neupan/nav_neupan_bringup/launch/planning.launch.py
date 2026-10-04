@@ -74,7 +74,7 @@ def _planner(context):
     )
 
     params = os.path.join(
-        get_package_share_directory('ackermann_bringup'),
+        get_package_share_directory('nav_neupan_bringup'),
         'config', 'smac_planner.yaml')
     configured_params = ParameterFile(
         RewrittenYaml(

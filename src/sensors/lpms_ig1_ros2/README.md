@@ -13,6 +13,21 @@ LPMS-IG1 CANopen 16-bit driver using Linux SocketCAN directly.
   - orientation marked unavailable (`orientation_covariance[0] = -1`)
 - `/imu/mag` — `sensor_msgs/msg/MagneticField`
   - magnetic field in Tesla
+- `/imu/connected` — `std_msgs/msg/Bool`
+  - `true` only while complete IMU samples arrive within `data_timeout_sec`
+
+## CAN recovery
+
+The driver retries opening `can0` if it is unavailable at startup. It also
+reopens the SocketCAN socket after a receive error or a period without a
+complete IMU sample. `config/lpms_ig1.yaml` sets `auto_reconnect`,
+`reconnect_interval_sec`, `data_timeout_sec`, and `status_period_sec`. Both the
+package launch file and `vehicle_bringup` load this configuration before the
+calibration file.
+
+Use the `/imu/enable_auto_reconnect` (`std_srvs/srv/SetBool`) service to enable
+or disable retries while the node is running. `/imu/connected` continues to
+report sample freshness when retries are disabled.
 
 ## Default device settings assumed
 

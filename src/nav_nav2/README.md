@@ -6,7 +6,7 @@
 It intentionally coexists with the Smac + NeuPAN stack:
 
 - `nav_nav2`: Nav2 BT Navigator + Smac Hybrid-A* + MPPI + velocity smoother
-- `ackermann_bringup` + `neupan_ros2`: Smac Hybrid-A* + NeuPAN
+- `nav_neupan_bringup` + `neupan_ros2`: Smac Hybrid-A* + NeuPAN
 
 Do not run both navigation stacks at the same time; they use overlapping Nav2
 node names and both ultimately target `/ackermann_cmd`.

@@ -2,11 +2,15 @@
 import math
 import socket
 import struct
+import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu, MagneticField
+from std_msgs.msg import Bool
+from std_srvs.srv import SetBool
 
 
 G0 = 9.80665
@@ -74,6 +78,10 @@ class LpmsIg1Ros2(Node):
         self.declare_parameter("node_id", 5)
         self.declare_parameter("frame_id", "imu_link")
         self.declare_parameter("poll_period_sec", 0.001)
+        self.declare_parameter("auto_reconnect", True)
+        self.declare_parameter("reconnect_interval_sec", 2.0)
+        self.declare_parameter("data_timeout_sec", 2.0)
+        self.declare_parameter("status_period_sec", 0.5)
 
         # LPMS calibrated accelerometer in the observed/default convention gives
         # about -1 g on +Z when resting Z-up; REP-145 expects +g.
@@ -109,6 +117,12 @@ class LpmsIg1Ros2(Node):
         self.node_id = int(self.get_parameter("node_id").value)
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.poll_period = float(self.get_parameter("poll_period_sec").value)
+        self.auto_reconnect = bool(self.get_parameter("auto_reconnect").value)
+        self.reconnect_interval = float(
+            self.get_parameter("reconnect_interval_sec").value
+        )
+        self.data_timeout = float(self.get_parameter("data_timeout_sec").value)
+        self.status_period = float(self.get_parameter("status_period_sec").value)
         self.invert_accel = bool(self.get_parameter("invert_accel_for_ros").value)
         self.nwu_to_enu = bool(self.get_parameter("convert_nwu_to_enu").value)
         self.gyro_bias = (
@@ -129,6 +143,14 @@ class LpmsIg1Ros2(Node):
 
         if not (1 <= self.node_id <= 127):
             raise ValueError("node_id must be in the CANopen range 1..127")
+        for name, value in (
+            ("poll_period_sec", self.poll_period),
+            ("reconnect_interval_sec", self.reconnect_interval),
+            ("data_timeout_sec", self.data_timeout),
+            ("status_period_sec", self.status_period),
+        ):
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and > 0")
         if not all(math.isfinite(value) for value in self.accel_offset):
             raise ValueError("accelerometer offsets must be finite")
         if not all(math.isfinite(value) and value > 0.0 for value in self.accel_gain):
@@ -150,15 +172,24 @@ class LpmsIg1Ros2(Node):
         self.pub_mag = self.create_publisher(
             MagneticField, "imu/mag", qos_profile_sensor_data
         )
+        self.pub_connected = self.create_publisher(Bool, "imu/connected", 10)
+        self.reconnect_service = self.create_service(
+            SetBool, "imu/enable_auto_reconnect", self.set_auto_reconnect
+        )
 
-        self.sock = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
-        self.sock.setblocking(False)
-        self.sock.bind((self.interface,))
-
+        self.sock = None
+        self.socket_connected_at = None
+        self.last_complete_sample_at = None
+        self.next_reconnect_at = 0.0
+        self.last_reported_connected = None
         self.values = {}
         self.mask = 0
 
+        self.try_connect(force=True)
         self.timer = self.create_timer(self.poll_period, self.poll_can)
+        self.status_timer = self.create_timer(
+            self.status_period, self.publish_connection_status
+        )
 
         ids_text = ", ".join(f"0x{x:03X}" for x in self.ids)
         self.get_logger().info(
@@ -181,6 +212,109 @@ class LpmsIg1Ros2(Node):
             f"({self.accel_gain[0]:.6f}, {self.accel_gain[1]:.6f}, "
             f"{self.accel_gain[2]:.6f})"
         )
+
+    def try_connect(self, force=False):
+        if self.sock is not None:
+            return True
+        now = time.monotonic()
+        if not force and (
+            not self.auto_reconnect or now < self.next_reconnect_at
+        ):
+            return False
+
+        new_sock = None
+        try:
+            new_sock = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
+            new_sock.setblocking(False)
+            new_sock.bind((self.interface,))
+        except OSError as exc:
+            if new_sock is not None:
+                try:
+                    new_sock.close()
+                except OSError:
+                    pass
+            self.next_reconnect_at = now + self.reconnect_interval
+            self.get_logger().error(
+                f"Cannot open CAN interface {self.interface}: {exc}"
+            )
+            return False
+
+        self.sock = new_sock
+        self.socket_connected_at = time.monotonic()
+        self.last_complete_sample_at = None
+        self.values = {}
+        self.mask = 0
+        self.get_logger().info(f"Bound CAN interface {self.interface}")
+        return True
+
+    def close_socket(self):
+        sock = self.sock
+        self.sock = None
+        self.socket_connected_at = None
+        self.last_complete_sample_at = None
+        self.values = {}
+        self.mask = 0
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError as exc:
+                self.get_logger().warning(f"CAN socket close failed: {exc}")
+
+    def disconnect(self, reason):
+        self.close_socket()
+        self.next_reconnect_at = time.monotonic() + self.reconnect_interval
+        self.get_logger().warning(f"CAN disconnected: {reason}")
+
+    def set_auto_reconnect(self, request, response):
+        enabled = bool(request.data)
+        result = self.set_parameters(
+            [Parameter("auto_reconnect", value=enabled)]
+        )[0]
+        if not result.successful:
+            response.success = False
+            response.message = result.reason
+            return response
+
+        self.auto_reconnect = enabled
+        if self.auto_reconnect and self.sock is None:
+            self.next_reconnect_at = 0.0
+        response.success = True
+        response.message = (
+            "CAN auto reconnect enabled" if self.auto_reconnect
+            else "CAN auto reconnect disabled"
+        )
+        self.get_logger().info(response.message)
+        return response
+
+    def publish_connection_status(self):
+        now = time.monotonic()
+        last_activity = (
+            self.last_complete_sample_at
+            if self.last_complete_sample_at is not None
+            else self.socket_connected_at
+        )
+        if (
+            self.sock is not None
+            and last_activity is not None
+            and now - last_activity > self.data_timeout
+            and self.auto_reconnect
+        ):
+            self.disconnect(f"no complete IMU sample for {self.data_timeout:.1f}s")
+
+        connected = (
+            self.sock is not None
+            and self.last_complete_sample_at is not None
+            and now - self.last_complete_sample_at <= self.data_timeout
+        )
+        status = Bool()
+        status.data = connected
+        self.pub_connected.publish(status)
+        if connected != self.last_reported_connected:
+            if connected:
+                self.get_logger().info("IMU data connected")
+            else:
+                self.get_logger().warning("IMU data unavailable")
+            self.last_reported_connected = connected
 
     @staticmethod
     def unpack_i16x4(data):
@@ -231,6 +365,7 @@ class LpmsIg1Ros2(Node):
 
             if self.mask == 0b1111:
                 self.publish_sample(self.values)
+                self.last_complete_sample_at = time.monotonic()
 
             self.mask = 0
             self.values = {}
@@ -347,13 +482,16 @@ class LpmsIg1Ros2(Node):
         self.pub_mag.publish(mag)
 
     def poll_can(self):
+        if self.sock is None:
+            self.try_connect()
+            return
         while rclpy.ok():
             try:
                 frame = self.sock.recv(CAN_FRAME_SIZE)
             except BlockingIOError:
                 return
             except OSError as exc:
-                self.get_logger().error(f"CAN receive error: {exc}")
+                self.disconnect(f"receive error: {exc}")
                 return
 
             if len(frame) != CAN_FRAME_SIZE:
@@ -372,7 +510,7 @@ class LpmsIg1Ros2(Node):
 
     def destroy_node(self):
         try:
-            self.sock.close()
+            self.close_socket()
         finally:
             super().destroy_node()
 

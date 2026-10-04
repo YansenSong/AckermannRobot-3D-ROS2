@@ -207,7 +207,7 @@ def _build_navigation(context):
         allow_substs=True,
     )
 
-    bringup_share = get_package_share_directory('ackermann_bringup')
+    bringup_share = get_package_share_directory('vehicle_bringup')
     nav_share = get_package_share_directory('nav_nav2')
     nav_status_share = get_package_share_directory('nav_status')
     motion_share = get_package_share_directory('motion_interface')
@@ -230,7 +230,6 @@ def _build_navigation(context):
                     'imu_node_id': LaunchConfiguration('imu_node_id'),
                     'imu_params_file': LaunchConfiguration('imu_params_file'),
                     'enable_control': 'true',
-                    'enable_navigation': 'false',
                 }.items(),
             )
         )
@@ -464,7 +463,7 @@ def _build_navigation(context):
 
 
 def generate_launch_description():
-    bringup_share = get_package_share_directory('ackermann_bringup')
+    bringup_share = get_package_share_directory('vehicle_bringup')
     nav_share = get_package_share_directory('nav_nav2')
     lidar_share = get_package_share_directory('lidar_driver')
 

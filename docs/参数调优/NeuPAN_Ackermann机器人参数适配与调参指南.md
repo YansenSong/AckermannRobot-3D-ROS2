@@ -33,7 +33,7 @@ ackermann_steering_controller / Gazebo
 | 层级 | 代表参数 | 作用 | 主要位置 |
 |---|---|---|---|
 | 物理/接口层 | 轴距、轮距、轮胎半径、转向关节限制、底盘尺寸、传感器位姿 | 描述真实机器人和执行器 | URDF/Xacro、controller YAML、TF、launch |
-| 全局规划层 | 最小转弯半径、footprint、运动模型、地图分辨率 | 生成车辆几何上可行的全局轨迹 | src/ackermann_bringup/config/smac_planner.yaml |
+| 全局规划层 | 最小转弯半径、footprint、运动模型、地图分辨率 | 生成车辆几何上可行的全局轨迹 | src/nav_neupan/nav_neupan_bringup/config/smac_planner.yaml |
 | NeuPAN 局部优化层 | length、width、wheelbase、速度、转角、加速度、安全距离、时域 | 在 /plan 周围避障并输出控制量 | src/neupan_ros2/config/robots/ackermann_robot/ |
 
 一个物理参数经常需要同时映射到多个位置。例如轴距至少影响：
@@ -96,7 +96,7 @@ adjust:
 
 ### 2.2 全局 Smac 基线
 
-文件：src/ackermann_bringup/config/smac_planner.yaml
+文件：src/nav_neupan/nav_neupan_bringup/config/smac_planner.yaml
 
 ~~~yaml
 minimum_turning_radius: 1.320
