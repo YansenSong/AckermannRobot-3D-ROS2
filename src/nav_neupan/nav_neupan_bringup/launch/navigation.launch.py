@@ -38,6 +38,7 @@ def _load_lidar_mounting(vehicle_config):
 
     vehicle = data.get('vehicle', {})
     mounting = vehicle.get('sensor_mounting', {}).get('lidar', {})
+    footprint = vehicle.get('planning', {}).get('footprint', {})
     frames = vehicle.get('frames', {})
     base_height = frames.get('base_height_above_ground')
     base_frame = str(frames.get('base', '')).strip()
@@ -78,6 +79,15 @@ def _load_lidar_mounting(vehicle_config):
     # The ground plane sits at -height_above_ground in laser_link.
     min_height = numbers['ground_margin'] - numbers['height_above_ground']
 
+    if str(footprint.get('status', '')).strip().upper() != 'VERIFIED':
+        raise RuntimeError('vehicle.planning.footprint must be VERIFIED for self filtering')
+    body = {}
+    for field in ('front_extent', 'rear_extent', 'half_width'):
+        value = footprint.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.02:
+            raise RuntimeError(f'vehicle.planning.footprint.{field} must be > 0.02 m')
+        body[field] = float(value)
+
     # static_transform_publisher takes radians.
     tf = (
         f"{numbers['x']}",
@@ -89,6 +99,8 @@ def _load_lidar_mounting(vehicle_config):
     )
     return {
         'min_height': min_height,
+        'body': body,
+        'height_in_base': numbers['height_above_ground'] - float(base_height),
         'tf': tf,
         'base_frame': base_frame,
         'lidar_frame': lidar_frame,
@@ -111,6 +123,24 @@ def _scan_node(context):
     layout = _load_lidar_mounting(vehicle_config)
     return [
         Node(
+            package='nav_pointcloud_filter',
+            executable='self_filter_node',
+            name='nav_self_filter',
+            output='screen',
+            parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+                'base_frame': layout['base_frame'],
+                **layout['body'],
+                'xy_inset': 0.02,
+                'min_z': -0.05,
+                'max_z': layout['height_in_base'],
+            }],
+            remappings=[
+                ('points_in', LaunchConfiguration('points_topic')),
+                ('points_out', '/navigation/points_no_body'),
+            ],
+        ),
+        Node(
             package='pointcloud_to_laserscan',
             executable='pointcloud_to_laserscan_node',
             name='pointcloud_to_laserscan',
@@ -123,7 +153,7 @@ def _scan_node(context):
                 },
             ],
             remappings=[
-                ('cloud_in', LaunchConfiguration('points_topic')),
+                ('cloud_in', '/navigation/points_no_body'),
                 ('scan', '/scan'),
             ],
         ),

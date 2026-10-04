@@ -74,6 +74,7 @@ def _lidar_mounting(vehicle):
     # static_transform_publisher takes radians.
     return {
         'min_height': min_height,
+        'height_in_base': numbers['height_above_ground'] - float(base_height),
         'tf': (
             f"{numbers['x']}",
             f"{numbers['y']}",
@@ -260,7 +261,28 @@ def _build_navigation(context):
                 'min_height': vehicle['lidar']['min_height'],
             },
         ],
-        remappings=[('cloud_in', points_topic), ('scan', '/scan')],
+        remappings=[('cloud_in', '/navigation/points_no_body'), ('scan', '/scan')],
+    )
+
+    self_filter = Node(
+        package='nav_pointcloud_filter',
+        executable='self_filter_node',
+        name='nav_self_filter',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'base_frame': vehicle['base_frame'],
+            'front_extent': vehicle['front_extent'],
+            'rear_extent': vehicle['rear_extent'],
+            'half_width': vehicle['half_width'],
+            'xy_inset': 0.02,
+            'min_z': -0.05,
+            'max_z': vehicle['lidar']['height_in_base'],
+        }],
+        remappings=[
+            ('points_in', points_topic),
+            ('points_out', '/navigation/points_no_body'),
+        ],
     )
 
     # Published unconditionally: this is the only publisher of laser_link in
@@ -441,6 +463,7 @@ def _build_navigation(context):
     )
 
     actions.extend([
+        self_filter,
         scan,
         lidar_tf,
         map_server,

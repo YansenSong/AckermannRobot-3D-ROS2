@@ -22,6 +22,7 @@
   <exec_depend>nav2_planner</exec_depend>
   <exec_depend>nav2_smac_planner</exec_depend>
   <exec_depend>nav_status</exec_depend>
+  <exec_depend>nav_pointcloud_filter</exec_depend>
   <exec_depend>pointcloud_to_laserscan</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>rviz2</exec_depend>
