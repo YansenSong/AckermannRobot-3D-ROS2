@@ -13,7 +13,7 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     control_share = get_package_share_directory('ackermann_control')
-    simulation_share = get_package_share_directory('ackermann_simulation')
+    simulation_share = get_package_share_directory('simulation')
 
     publish_ekf_tf_arg = DeclareLaunchArgument(
         'publish_ekf_tf',
@@ -89,7 +89,7 @@ def generate_launch_description():
     # Gazebo's ray sensor does not publish Velodyne ring/time fields.  This
     # adapter adds them for LIO-SAM while preserving the original /points_raw.
     lidar_adapter_node = Node(
-        package='ackermann_simulation',
+        package='simulation',
         executable='gazebo_lidar_adapter.py',
         name='gazebo_lidar_adapter',
         output='screen',

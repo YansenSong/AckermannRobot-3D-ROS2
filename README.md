@@ -2,6 +2,25 @@
 
 3D LiDAR 阿克曼底盘的 Gazebo 仿真、建图与导航项目。
 
+## 项目结构
+
+`src/` 按功能分层，ROS 包名保持不变：
+
+```text
+src/
+├── mapping/lio-sam/                         # 建图
+├── localization/liorf_localization/         # 定位
+├── planning/
+│   ├── nav2_smac_planner/                    # 全局规划
+│   └── smac_neupan_bridge/                # 阿克曼规划接口
+├── control/
+│   ├── neupan_ros2/                          # 局部避障
+│   └── ackermann_control/                    # 运动控制
+├── bringup/ackermann_bringup/                # 系统启动编排
+├── simulation/          # 仿真、模型和传感器
+└── monitoring/nav_status/                    # 导航状态监控
+```
+
 ## 1. 编译
 
 在项目根目录执行：
@@ -89,14 +108,14 @@ NeuPAN 导航栈的主要链路为：
 
 ```text
 /goal_pose
-    -> ackermann_smac_bridge
+    -> smac_neupan_bridge
     -> Nav2 planner_server + SmacPlannerHybrid
     -> /plan_path
     -> NeuPAN
     -> 阿克曼底盘控制器
 ```
 
-其中 `src/ackermann_smac_bridge` 负责接收目标点、调用
+其中 `src/planning/smac_neupan_bridge` 负责接收目标点、调用
 `/compute_path_to_pose`、发布 `/plan_path` 和全局路径剩余距离；它不是
 Smac 规划器本身，也不负责局部控制。
 
@@ -105,11 +124,11 @@ Smac 规划器本身，也不负责局部控制。
 仅启动 Gazebo：
 
 ```bash
-ros2 launch ackermann_simulation gazebo.launch.py
+ros2 launch simulation gazebo.launch.py
 ```
 
 仅预览机器人模型：
 
 ```bash
-ros2 launch ackermann_simulation display.launch.py
+ros2 launch simulation display.launch.py
 ```

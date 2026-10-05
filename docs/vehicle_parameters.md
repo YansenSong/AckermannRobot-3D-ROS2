@@ -21,10 +21,10 @@
 
 来源：
 
-- [chassis.xacro](../src/ackermann_simulation/robot/xacro/chassis.xacro)
-- [ackermann_controllers.yaml](../src/ackermann_control/config/ackermann_controllers.yaml)
+- [chassis.xacro](../src/simulation/robot/xacro/chassis.xacro)
+- [ackermann_controllers.yaml](../src/control/ackermann_control/config/ackermann_controllers.yaml)
 - [planner_params.yaml](../src/hybrid_astar_planner/standalone_planner/config/planner_params.yaml)
-- [NeuPAN planner.yaml](../src/neupan_ros2/config/robots/ackermann_robot/planner.yaml)
+- [NeuPAN planner.yaml](../src/control/neupan_ros2/config/robots/ackermann_robot/planner.yaml)
 
 ### 关键坐标
 
@@ -58,7 +58,7 @@ izz  = 0.10971 kg·m²
 
 ## 底盘控制器
 
-来源：[ackermann_controllers.yaml](../src/ackermann_control/config/ackermann_controllers.yaml)
+来源：[ackermann_controllers.yaml](../src/control/ackermann_control/config/ackermann_controllers.yaml)
 
 ```text
 控制器更新频率：100 Hz
@@ -72,7 +72,7 @@ odom → base_link：由 robot_localization EKF 发布
 
 ## 3D 激光雷达
 
-来源：[sensors.xacro](../src/ackermann_simulation/robot/xacro/sensors.xacro)
+来源：[sensors.xacro](../src/simulation/robot/xacro/sensors.xacro)
 
 ```text
 坐标：laser_link = (-0.07777, 0.00081, 0.3842) m

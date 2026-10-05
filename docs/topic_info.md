@@ -9,7 +9,7 @@
 ```text
 /initialpose -> LIORF 定位
 
-/goal_pose -> ackermann_smac_bridge -> Smac planner
+/goal_pose -> smac_neupan_bridge -> Smac planner
                                       ├── /plan -> NeuPAN
                                       └── /plan_path -> nav_status_node
 
@@ -27,7 +27,7 @@ NeuPAN -> /neupan_cmd_vel_raw -> neupan_ackermann_adapter
 | `/goal_pose` | `geometry_msgs/msg/PoseStamped` | 输入 | `header.frame_id=map`；`pose.position` 为目标位置，`pose.orientation` 为目标朝向 |
 | `/map` | `nav_msgs/msg/OccupancyGrid` | 输出 | 2D 栅格地图；`info.resolution` 为分辨率，`data[]` 为栅格占用值 |
 | `/plan` | `nav_msgs/msg/Path` | 输出/输入 | Smac 全局路径；`header.frame_id=map`，`poses[]` 为路径点序列 |
-| `/plan_path` | `nav_msgs/msg/Path` | 输出 | `ackermann_smac_bridge` 发布的兼容路径，供 `nav_status_node` 和 RViz 使用 |
+| `/plan_path` | `nav_msgs/msg/Path` | 输出 | `smac_neupan_bridge` 发布的兼容路径，供 `nav_status_node` 和 RViz 使用 |
 | `/global_path_remaining_distance` | `std_msgs/msg/Float64` | 输出 | `data` 为沿全局路径到目标点的剩余距离，单位为 m |
 | `/scan` | `sensor_msgs/msg/LaserScan` | 输入 | `header.frame_id=laser_link`；`ranges[]` 为激光距离，单位为 m |
 | `/neupan_plan` | `nav_msgs/msg/Path` | 输出 | NeuPAN 优化后的局部轨迹 |

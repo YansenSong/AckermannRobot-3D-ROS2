@@ -33,7 +33,7 @@
     lidarMinRange: 1.0
     lidarMaxRange: 1000.0
 
-    # IMU settings copied from src/lio-sam/config/params.yaml.
+    # IMU settings copied from src/mapping/lio-sam/config/params.yaml.
     imuType: 1
     imuRate: 100.0
     imuAccNoise: 3.9939570888238808e-03

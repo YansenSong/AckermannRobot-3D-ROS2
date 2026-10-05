@@ -9,7 +9,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # 1. 获取包路径
-    pkg_name = 'ackermann_simulation'
+    pkg_name = 'simulation'
     pkg_share = get_package_share_directory(pkg_name)
 
     # 2. 路径定义

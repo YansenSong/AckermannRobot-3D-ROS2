@@ -17,12 +17,12 @@ Reeds-Shepp 倒车方向被保留
 
 NeuPAN 是否能够跟踪轨迹、Gazebo 中车辆是否最终到达，以及实际控制器的跟踪误差属于下游控制和集成验收，不应单独作为“全局规划失败”的判据。
 
-不得修改 src/nav2_smac_planner/** 来适配某个底盘。底盘差异应进入：
+不得修改 src/planning/nav2_smac_planner/** 来适配某个底盘。底盘差异应进入：
 
 ~~~
-src/ackermann_bringup/config/smac_planner.yaml
-src/ackermann_bringup/launch/planning.launch.py
-ackermann_smac_bridge 的 robot_frame 参数
+src/bringup/config/smac_planner.yaml
+src/bringup/launch/planning.launch.py
+smac_neupan_bridge 的 robot_frame 参数
 ~~~
 
 只有在新底盘的 ROS 坐标系或接口发生变化时，才另行处理 controller、xacro 或 NeuPAN 配置；不要把这些下游修改混入 Smac 算法适配。
@@ -228,7 +228,7 @@ circumscribed_radius = max(sqrt(x_i^2 + y_i^2))
 ~~~
 global_costmap.global_frame = map
 global_costmap.robot_base_frame = <后轴中心 frame>
-ackermann_smac_bridge.robot_frame = <同一个后轴中心 frame>
+smac_neupan_bridge.robot_frame = <同一个后轴中心 frame>
 ComputePathToPose 的 start 和 goal frame = map
 ~~~
 

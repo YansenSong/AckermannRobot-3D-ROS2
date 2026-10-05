@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "ackermann_smac_bridge/ackermann_smac_bridge.hpp"
+#include "smac_neupan_bridge/smac_neupan_bridge.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -26,11 +26,11 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/time.h"
 
-namespace ackermann_smac_bridge
+namespace smac_neupan_bridge
 {
 
 AckermannSmacBridge::AckermannSmacBridge(const rclcpp::NodeOptions & options)
-: Node("ackermann_smac_bridge", options)
+: Node("smac_neupan_bridge", options)
 {
   global_frame_ = declare_parameter<std::string>("global_frame", "map");
   robot_frame_ = declare_parameter<std::string>("robot_frame", "rear_axle_link");
@@ -344,12 +344,12 @@ void AckermannSmacBridge::publishRemainingDistance()
   }
 }
 
-}  // namespace ackermann_smac_bridge
+}  // namespace smac_neupan_bridge
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<ackermann_smac_bridge::AckermannSmacBridge>());
+  rclcpp::spin(std::make_shared<smac_neupan_bridge::AckermannSmacBridge>());
   rclcpp::shutdown();
   return 0;
 }

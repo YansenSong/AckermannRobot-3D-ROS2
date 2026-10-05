@@ -33,8 +33,8 @@ ackermann_steering_controller / Gazebo
 | 层级 | 代表参数 | 作用 | 主要位置 |
 |---|---|---|---|
 | 物理/接口层 | 轴距、轮距、轮胎半径、转向关节限制、底盘尺寸、传感器位姿 | 描述真实机器人和执行器 | URDF/Xacro、controller YAML、TF、launch |
-| 全局规划层 | 最小转弯半径、footprint、运动模型、地图分辨率 | 生成车辆几何上可行的全局轨迹 | src/ackermann_bringup/config/smac_planner.yaml |
-| NeuPAN 局部优化层 | length、width、wheelbase、速度、转角、加速度、安全距离、时域 | 在 /plan 周围避障并输出控制量 | src/neupan_ros2/config/robots/ackermann_robot/ |
+| 全局规划层 | 最小转弯半径、footprint、运动模型、地图分辨率 | 生成车辆几何上可行的全局轨迹 | src/bringup/config/smac_planner.yaml |
+| NeuPAN 局部优化层 | length、width、wheelbase、速度、转角、加速度、安全距离、时域 | 在 /plan 周围避障并输出控制量 | src/control/neupan_ros2/config/robots/ackermann_robot/ |
 
 一个物理参数经常需要同时映射到多个位置。例如轴距至少影响：
 
@@ -53,7 +53,7 @@ ackermann_steering_controller / Gazebo
 
 ### 2.1 NeuPAN planner
 
-文件：src/neupan_ros2/config/robots/ackermann_robot/planner.yaml
+文件：src/control/neupan_ros2/config/robots/ackermann_robot/planner.yaml
 
 ~~~yaml
 receding: 15
@@ -96,7 +96,7 @@ adjust:
 
 ### 2.2 全局 Smac 基线
 
-文件：src/ackermann_bringup/config/smac_planner.yaml
+文件：src/bringup/config/smac_planner.yaml
 
 ~~~yaml
 minimum_turning_radius: 1.320
@@ -112,7 +112,7 @@ footprint_padding: 0.01
 
 ### 2.3 NeuPAN ROS2 基线
 
-文件：src/neupan_ros2/config/robots/ackermann_robot/robot.yaml
+文件：src/control/neupan_ros2/config/robots/ackermann_robot/robot.yaml
 
 ~~~yaml
 map_frame: map
@@ -502,7 +502,7 @@ adapter 再换算：
 ω = v * tan(ψ) / L
 ~~~
 
-文件：src/ackermann_control/neupan_ackermann_adapter.py
+文件：src/control/ackermann_control/neupan_ackermann_adapter.py
 
 新机器人轴距变化后必须同步修改：
 
@@ -617,7 +617,7 @@ collision_threshold 适合作为接近碰撞时的最后安全停止条件，不
 当前 checkpoint：
 
 ~~~text
-src/neupan_ros2/config/robots/ackermann_robot/models/dune_model_5000.pth
+src/control/neupan_ros2/config/robots/ackermann_robot/models/dune_model_5000.pth
 ~~~
 
 它来自当前项目采用的官方 Ranger Ackermann 基线。DUNE 的距离学习和机器人几何有关，因此：

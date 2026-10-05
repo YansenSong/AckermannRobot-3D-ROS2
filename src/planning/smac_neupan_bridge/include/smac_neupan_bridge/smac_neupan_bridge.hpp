@@ -31,7 +31,7 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
-namespace ackermann_smac_bridge
+namespace smac_neupan_bridge
 {
 
 class AckermannSmacBridge final : public rclcpp::Node
@@ -86,6 +86,6 @@ private:
   nav_msgs::msg::Path active_path_;
 };
 
-}  // namespace ackermann_smac_bridge
+}  // namespace smac_neupan_bridge
 
 #endif  // ACKERMANN_SMAC_BRIDGE__ACKERMANN_SMAC_BRIDGE_HPP_

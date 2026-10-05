@@ -10,7 +10,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    simulation_share = get_package_share_directory('ackermann_simulation')
+    simulation_share = get_package_share_directory('simulation')
     bringup_share = get_package_share_directory('ackermann_bringup')
 
     arguments = [
