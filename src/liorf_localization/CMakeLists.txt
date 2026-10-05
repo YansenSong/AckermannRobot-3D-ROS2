@@ -59,7 +59,7 @@ link_directories(
   ${GTSAM_LIBRARY_DIRS}
 )
 
-file(GLOB common_lib "lib/*.cpp")
+set(common_lib lib/common_lib.cpp)
 
 ###########
 ## Build ##

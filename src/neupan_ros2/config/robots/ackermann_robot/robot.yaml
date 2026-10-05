@@ -46,6 +46,7 @@ neupan_node:
     scan_topic: '/scan'
     plan_input_topic: '/plan'
     goal_topic: '/neupan_unused_goal'
+    arrival_topic: '/neupan/arrived'
     plan_output_topic: '/neupan_plan'
     ref_state_topic: '/neupan_ref_state'
     initial_path_topic: '/neupan_initial_path'

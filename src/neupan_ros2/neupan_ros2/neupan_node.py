@@ -27,6 +27,7 @@ import tf2_ros
 from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Path
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Bool
 
 try:
     from neupan import neupan
@@ -107,6 +108,7 @@ class NeupanCore(Node):
         self.declare_parameter("scan_topic", "/scan")
         self.declare_parameter("plan_input_topic", "/plan")
         self.declare_parameter("goal_topic", "/goal_pose")
+        self.declare_parameter("arrival_topic", "/neupan/arrived")
 
         # === Configuration Loading ===
         # Get robot configuration directory (set by launch file)
@@ -274,6 +276,11 @@ class NeupanCore(Node):
         self.ref_path_pub = self.create_publisher(
             Path,
             self.get_parameter("initial_path_topic").get_parameter_value().string_value,
+            10
+        )
+        self.arrival_pub = self.create_publisher(
+            Bool,
+            self.get_parameter("arrival_topic").get_parameter_value().string_value,
             10
         )
 
@@ -506,6 +513,7 @@ class NeupanCore(Node):
         # Generate twist message using info dict (avoid reading shared state)
         vel_msg = self.generate_twist_msg(action, info["stop"], info["arrive"])
         self.vel_pub.publish(vel_msg)
+        self.arrival_pub.publish(Bool(data=bool(info["arrive"])))
 
         # Visualization (delegated to visualization manager)
         self.viz_manager.publish_visualization(
@@ -684,6 +692,7 @@ class NeupanCore(Node):
                 self.neupan_planner.reset()
                 self.arrive = False
                 self.stop = False
+                self.arrival_pub.publish(Bool(data=False))
 
     def goal_callback(self, goal: PoseStamped) -> None:
         """Update goal and regenerate initial path.

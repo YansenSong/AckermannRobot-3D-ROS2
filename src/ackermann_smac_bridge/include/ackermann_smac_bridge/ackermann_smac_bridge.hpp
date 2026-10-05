@@ -27,6 +27,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -49,6 +50,7 @@ private:
     std::uint64_t generation,
     const GoalHandle::WrappedResult & wrapped_result);
   void publishRemainingDistance();
+  void publishPlanningStatus(const std::string & status);
 
   geometry_msgs::msg::PoseStamped transformGoal(
     const geometry_msgs::msg::PoseStamped & goal) const;
@@ -64,6 +66,7 @@ private:
   std::string goal_topic_;
   std::string plan_path_topic_;
   std::string remaining_distance_topic_;
+  std::string planning_status_topic_;
   double tf_timeout_{0.2};
   double publish_rate_{10.0};
   double action_server_wait_timeout_{2.0};
@@ -71,6 +74,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr plan_path_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr remaining_distance_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr planning_status_pub_;
   rclcpp::TimerBase::SharedPtr remaining_distance_timer_;
   ActionClient::SharedPtr action_client_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

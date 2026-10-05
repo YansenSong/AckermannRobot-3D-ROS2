@@ -41,6 +41,8 @@ AckermannSmacBridge::AckermannSmacBridge(const rclcpp::NodeOptions & options)
   plan_path_topic_ = declare_parameter<std::string>("plan_path_topic", "/plan_path");
   remaining_distance_topic_ = declare_parameter<std::string>(
     "remaining_distance_topic", "/global_path_remaining_distance");
+  planning_status_topic_ = declare_parameter<std::string>(
+    "planning_status_topic", "/global_plan/status");
   tf_timeout_ = declare_parameter<double>("tf_timeout", 0.2);
   publish_rate_ = declare_parameter<double>("publish_rate", 10.0);
   action_server_wait_timeout_ = declare_parameter<double>(
@@ -69,6 +71,9 @@ AckermannSmacBridge::AckermannSmacBridge(const rclcpp::NodeOptions & options)
   plan_path_pub_ = create_publisher<nav_msgs::msg::Path>(plan_path_topic_, qos);
   remaining_distance_pub_ = create_publisher<std_msgs::msg::Float64>(
     remaining_distance_topic_, qos);
+  auto status_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+  planning_status_pub_ = create_publisher<std_msgs::msg::String>(
+    planning_status_topic_, status_qos);
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -95,6 +100,8 @@ void AckermannSmacBridge::onGoal(
   if (!msg) {
     return;
   }
+
+  publishPlanningStatus("planning");
 
   GoalHandle::SharedPtr previous_goal;
   std::uint64_t generation;
@@ -124,6 +131,7 @@ void AckermannSmacBridge::onGoal(
     start = currentRobotPose();
   } catch (const tf2::TransformException & ex) {
     RCLCPP_ERROR(get_logger(), "Cannot prepare Smac goal: %s", ex.what());
+    publishPlanningStatus(std::string("failed: cannot prepare goal: ") + ex.what());
     return;
   }
 
@@ -133,6 +141,7 @@ void AckermannSmacBridge::onGoal(
   {
     RCLCPP_ERROR(
       get_logger(), "Planner action '%s' is not available", action_name_.c_str());
+    publishPlanningStatus("failed: planner action server unavailable");
     return;
   }
 
@@ -162,6 +171,7 @@ void AckermannSmacBridge::onGoalResponse(
     std::lock_guard<std::mutex> lock(mutex_);
     if (generation == goal_generation_) {
       RCLCPP_ERROR(get_logger(), "PlannerServer rejected the Smac planning goal");
+      publishPlanningStatus("failed: planner rejected goal");
     }
     return;
   }
@@ -200,6 +210,7 @@ void AckermannSmacBridge::onResult(
     RCLCPP_WARN(
       get_logger(), "Smac planning failed or returned an empty path (result code=%d)",
       static_cast<int>(wrapped_result.code));
+    publishPlanningStatus("failed: planner returned no path");
     return;
   }
 
@@ -213,12 +224,20 @@ void AckermannSmacBridge::onResult(
   // reverse segments. The bridge deliberately does not recompute yaw.
   active_path_ = wrapped_result.result->path;
   plan_path_pub_->publish(active_path_);
+  publishPlanningStatus("succeeded");
 
   RCLCPP_INFO(
     get_logger(), "Smac planning succeeded: %zu poses in %.3f seconds",
     active_path_.poses.size(),
     static_cast<double>(wrapped_result.result->planning_time.sec) +
     static_cast<double>(wrapped_result.result->planning_time.nanosec) * 1e-9);
+}
+
+void AckermannSmacBridge::publishPlanningStatus(const std::string & status)
+{
+  std_msgs::msg::String message;
+  message.data = status;
+  planning_status_pub_->publish(message);
 }
 
 geometry_msgs::msg::PoseStamped AckermannSmacBridge::transformGoal(
