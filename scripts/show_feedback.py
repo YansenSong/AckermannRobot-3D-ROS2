@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(
-    Path(__file__).resolve().parents[1] / 'src' / 'motion_interface'
+    Path(__file__).resolve().parents[1] / 'src' / 'control' / 'motion_interface'
 ))
 
 from motion_interface.sta56 import (  # noqa: E402

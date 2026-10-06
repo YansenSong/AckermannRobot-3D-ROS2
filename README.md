@@ -5,18 +5,16 @@
 ## 1. 主要组件
 
 - `config/vehicle.yaml`：项目级车辆几何、硬限制、规划限制、LiDAR/IMU 外参的唯一配置源（不是 ROS package）
-- `src/sensors`：传感器源码分类目录（不是 ROS package）
-- `src/sensors/lidar`：Hesai LiDAR 驱动（ROS package 名仍为 `lidar_driver`）
-- `src/sensors/lpms_ig1_ros2`：当前实车使用的 IG1 SocketCAN 驱动与校准工具（ROS 包名 `lpms_ig1_ros2`）
-- `src/nav_neupan`：NeuPAN 导航相关 ROS 包的源码分类目录（不是 ROS package）
-- `src/nav_neupan/nav_neupan_bringup`：Smac + NeuPAN 导航栈启动包（ROS 包名 `nav_neupan_bringup`）
-- `src/nav_neupan/ackermann_smac_bridge`：项目侧 Smac 目标/路径适配桥（ROS package 名仍为 `ackermann_smac_bridge`）
-- `src/nav_neupan/nav2_smac_planner`：Nav2 Smac 规划插件（ROS package 名仍为 `nav2_smac_planner`）
-- `src/nav_neupan/neupan_ros2`：NeuPAN ROS2 接口（ROS package 名仍为 `neupan_ros2`）
-- `src/motion_interface`：命令安全门 + `/ackermann_cmd` 到 STM32 UDP 协议的实车接口
-- `src/vehicle_bringup`：共用实车传感器、运动接口和定位启动（ROS 包名 `vehicle_bringup`）
-- `src/nav_nav2`：第二套独立 Nav2 导航栈（ROS 包名 `nav_nav2`，使用 Smac Hybrid-A* + MPPI + BT Navigator）
-- `src/lio-sam` / `src/liorf_localization`：建图与先验地图定位
+- `src/mapping/lio-sam`：建图
+- `src/localization/liorf_localization`：先验地图定位
+- `src/planning/nav2_smac_planner`、`src/planning/smac_neupan_bridge`：Smac 全局规划及目标/路径桥接
+- `src/control/neupan_ros2`、`src/control/motion_interface`：局部规划、命令安全门及 STM32 UDP 实车接口
+- `src/bringup/nav_neupan_bringup`：Smac + NeuPAN 导航栈启动包
+- `src/bringup/vehicle_bringup`：共用实车传感器、运动接口和定位启动
+- `src/monitoring/nav_status`：导航状态监控
+- `src/sensors/lidar`、`src/sensors/lpms_ig1_ros2`、`src/sensors/nav_pointcloud_filter`：传感器驱动与导航点云过滤
+
+上述分类目录不是 ROS 功能包；各包名称以其 `package.xml` 为准。
 
 ## 2. 编译
 
@@ -24,7 +22,7 @@
 source /opt/ros/humble/setup.bash
 git submodule sync --recursive
 git submodule update --init --recursive
-colcon build --symlink-install
+colcon build --base-paths src --symlink-install --allow-overriding nav2_smac_planner
 source install/setup.bash
 ```
 
@@ -36,13 +34,13 @@ source install/setup.bash
 config/vehicle.yaml
 ```
 
-它不是 ROS package。实车启动链路把它的绝对路径传给各模块，再分别映射到 `motion_interface`、两套导航栈、NeuPAN、LIORF 和 LIO-SAM。
+它不是 ROS package。实车启动链路把它的绝对路径传给各模块，再分别映射到 `motion_interface`、Smac + NeuPAN 导航栈、LIORF 和 LIO-SAM。
 
 主要职责：
 
 - `geometry`：车长、车宽、轴距、轮距、轮胎尺寸、前后悬
 - `control_limits`：STM32 执行侧硬限制
-- `planning`：Smac、NeuPAN、MPPI 共用的规划/运动约束和 footprint
+- `planning`：Smac、NeuPAN 共用的规划/运动约束和 footprint
 - `sensor_extrinsics.lidar_to_imu`：LIORF 与 LIO-SAM 共用的 LiDAR/IMU 外参
 
 当前车辆几何和 footprint 已标记为 `VERIFIED`；底盘速度/转角硬限制和 LiDAR/IMU 外参仍需要实车确认。设备 IP、端口、串口等部署参数继续留在各自驱动/接口配置中。
@@ -70,17 +68,11 @@ vehicle:
 ./scripts/start_vehicle.sh all
 ```
 
-两套导航栈分别启动：
+启动 Smac Hybrid-A* + NeuPAN 导航：
 
 ```bash
-# 栈 A：Smac Hybrid-A* + NeuPAN
 ./scripts/start_vehicle.sh nav maps/<map_name>
-
-# 栈 B：完整 Nav2（Smac Hybrid-A* + MPPI + BT Navigator）
-./scripts/start_vehicle.sh nav2 maps/<map_name>
 ```
-
-**不要同时启动 `nav` 和 `nav2`**。两套栈都会使用标准 Nav2 节点名，并最终输出统一的 `/ackermann_cmd`。
 
 ## 5. 统一实车控制接口
 
@@ -92,7 +84,7 @@ vehicle:
   angular.z = front-wheel steering angle [rad]
 ```
 
-### 栈 A：NeuPAN
+### Smac + NeuPAN
 
 ```text
 Smac Hybrid-A*
@@ -105,42 +97,13 @@ Smac Hybrid-A*
   -> STM32
 ```
 
-### 栈 B：nav_nav2
+## 6. 导航车辆参数
 
-```text
-Smac Hybrid-A*
-  -> MPPI
-  -> velocity_smoother
-  -> /nav_nav2/cmd_vel_smoothed   (speed + yaw rate)
-  -> nav2_cmd_adapter.py
-  -> /nav_nav2/ackermann_cmd_raw  (speed + steering angle)
-  -> motion_interface/command_gate
-  -> /ackermann_cmd
-  -> motion_interface/stm32_bridge
-  -> STM32
-```
-
-`nav_nav2` 的 Nav2 输出中 `angular.z` 是 yaw rate，因此必须经过适配器按自行车模型换算为前轮等效转角；不能直接送给 STM32 bridge。
-
-## 6. 两套导航栈的车辆参数
-
-两套栈都不在包内维护独立的实车几何副本。
-
-Smac + NeuPAN 从根 `vehicle.yaml` 获取最小转弯半径、车体几何和规划速度。`nav_nav2` 启动时也会从同一个文件注入：
-
-- wheelbase
-- planning max speed / acceleration
-- minimum turning radius
-- local/global costmap footprint
-- robot base frame
-- MPPI Ackermann minimum turning radius
-- Nav2-to-Ackermann 转角换算参数
-
-这样修改实车几何时不会出现两套导航栈各用一份旧数据。
+Smac + NeuPAN 从根目录 `config/vehicle.yaml` 获取最小转弯半径、车体几何、footprint 和规划速度。
 
 ## 7. 定位与建图
 
-两套导航栈当前都使用 LIORF 先验地图定位，并要求根配置中的 LiDAR/IMU 外参为 `VERIFIED`。
+导航栈使用 LIORF 先验地图定位，并要求根配置中的 LiDAR/IMU 外参为 `VERIFIED`。
 
 LIO-SAM 建图：
 

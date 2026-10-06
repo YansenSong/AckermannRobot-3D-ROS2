@@ -93,7 +93,7 @@ kappa_max = 1 / R_phys
 ```text
 global_costmap.global_frame = map
 global_costmap.robot_base_frame = <规划参考 frame>
-ackermann_smac_bridge.robot_frame = <同一个规划参考 frame>
+smac_neupan_bridge.robot_frame = <同一个规划参考 frame>
 ComputePathToPose start/goal frame = map
 ```
 
@@ -105,7 +105,7 @@ ComputePathToPose start/goal frame = map
 2. 确认规划参考坐标系以及 `base_link`、LiDAR、IMU 的 TF。
 3. 计算真实最小转弯半径与最大曲率。
 4. 从真实碰撞外形得到 footprint。
-5. 修改 `src/nav_neupan/nav_neupan_bringup/config/smac_planner.yaml` 和必要的 frame 参数。
+5. 修改 `src/bringup/nav_neupan_bringup/config/smac_planner.yaml` 和必要的 frame 参数。
 6. 构建并确认 planner server、map server、bridge 能正常启动。
 7. 在静态地图中验证直行、转弯、窄通道，以及允许倒车时的 Reeds-Shepp 路径。
 8. 检查 `/plan` 的曲率不超过实车物理限制。
@@ -121,7 +121,7 @@ ComputePathToPose start/goal frame = map
 [ ] /compute_path_to_pose 可用
 [ ] planner plugin = nav2_smac_planner/SmacPlannerHybrid
 [ ] /plan 只有 PlannerServer 发布
-[ ] /plan_path 只有 ackermann_smac_bridge 发布
+[ ] /plan_path 只有 smac_neupan_bridge 发布
 [ ] 若允许倒车，Reeds-Shepp 倒车段方向信息保留
 [ ] 常规路径段最大曲率不超过实车物理极限
 [ ] 规划结果可以原样传入 NeuPAN

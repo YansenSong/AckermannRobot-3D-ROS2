@@ -1,38 +1,16 @@
 # 实车导航与控制话题
 
-`real-vehicle-integration` 同时保留两套可选导航栈。不要同时启动两套栈。
+`real-vehicle-integration` 使用 Smac Hybrid-A* + NeuPAN 导航栈。
 
-## 栈 A：Smac Hybrid-A* + NeuPAN
+## Smac Hybrid-A* + NeuPAN
 
 ```text
 /goal_pose
-    -> ackermann_smac_bridge
+    -> smac_neupan_bridge
     -> Nav2 SmacPlannerHybrid
     -> /plan
     -> NeuPAN
     -> /neupan_cmd_vel_raw
-       linear.x = speed
-       angular.z = front-wheel steering angle
-    -> motion_interface/command_gate
-    -> /ackermann_cmd
-    -> motion_interface/stm32_bridge
-    -> UDP 5000 -> STM32 (192.168.5.50)
-```
-
-## 栈 B：nav_nav2 / Nav2 + MPPI
-
-```text
-Nav2 goal
-    -> BT Navigator
-    -> SmacPlannerHybrid
-    -> MPPI Controller
-    -> /nav_nav2/cmd_vel_raw
-    -> velocity_smoother
-    -> /nav_nav2/cmd_vel_smoothed
-       linear.x = speed
-       angular.z = yaw rate
-    -> nav2_cmd_adapter
-    -> /nav_nav2/ackermann_cmd_raw
        linear.x = speed
        angular.z = front-wheel steering angle
     -> motion_interface/command_gate
@@ -51,8 +29,6 @@ Nav2 goal
 | `/scan` | `sensor_msgs/msg/LaserScan` | 二维障碍物输入 |
 | `/imu/data` | `sensor_msgs/msg/Imu` | LPMS-IG1 IMU 数据 |
 | `/neupan_cmd_vel_raw` | `geometry_msgs/msg/Twist` | NeuPAN 原始 Ackermann 命令 |
-| `/nav_nav2/cmd_vel_smoothed` | `geometry_msgs/msg/Twist` | Nav2 平滑后的 body twist；`angular.z` 是 yaw rate |
-| `/nav_nav2/ackermann_cmd_raw` | `geometry_msgs/msg/Twist` | Nav2 适配后的 Ackermann 命令；`angular.z` 是前轮转角 |
 | `/ackermann_cmd` | `geometry_msgs/msg/Twist` | 统一实车命令；`angular.z` 是前轮转角 |
 | `/stop` | `std_msgs/msg/Bool` | 集中停车覆盖；`true` 强制零指令 |
 | `/navigation/state` | `nav_status/msg/NavigationStatus` | NeuPAN 栈导航状态 |
@@ -106,7 +82,7 @@ linear.x  : longitudinal speed [m/s]
 angular.z : front-wheel steering angle [rad]
 ```
 
-`/ackermann_cmd.angular.z` 永远不是 yaw rate。Nav2/MPPI 的 yaw-rate 输出必须先经过 `nav2_cmd_adapter.py`。
+`/ackermann_cmd.angular.z` 是前轮转角，不是 yaw rate。NeuPAN 的转角命令经 `command_gate` 发送给 STM32。
 
 ### 转角符号约定（已实车验证，勿改）
 
@@ -119,15 +95,11 @@ angular.z > 0  =>  前轮左转（逆时针）
 整条链路**没有也不得有取反**：
 
 ```text
-Nav2 yaw rate > 0
-  -> nav2_cmd_adapter       steering = atan(wheelbase * yaw_rate / speed)   # 纯几何换算
+NeuPAN steering angle > 0
   -> command_gate           透传
   -> stm32_bridge           透传
   -> EPS 请求 = 转角(deg) × 100000
 ```
-
-`nav2_cmd_adapter.py` 的换算是纯几何的，符号由 ROS 约定一路带到 EPS。看到"没有取反"
-不要以为是漏了 —— 加负号会让规划器左转时车往右，是真实危险。
 
 仍未确认：EPS 轴角与**车轮**转角的换算关系（上文的"目测接近 5°"只是视觉估计，
 不是标定依据）；固件侧 EPS 的物理单位。这两项需与下位机工程师书面确认。

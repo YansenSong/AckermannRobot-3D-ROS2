@@ -8,7 +8,6 @@
 #   status  仅启动 sta__ 状态接收（不发任何控制帧，用于台架联调）
 #   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
 #   nav     启动 Smac Hybrid-A* + NeuPAN 完整导航栈
-#   nav2    启动独立 nav_nav2：Smac Hybrid-A* + MPPI + Nav2 BT
 #==========================================
 
 set -eo pipefail
@@ -20,8 +19,8 @@ LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/sensors/lidar/config/config.yam
 IMU_INTERFACE="${IMU_INTERFACE:-can0}"
 IMU_NODE_ID="${IMU_NODE_ID:-5}"
 IMU_PARAMS_FILE="${IMU_PARAMS_FILE:-${PROJECT_DIR}/src/sensors/lpms_ig1_ros2/config/lpms_ig1_calibration.yaml}"
-INTERFACE_CONFIG="${PROJECT_DIR}/src/motion_interface/config/bridge_params.yaml"
-STATUS_CONFIG="${PROJECT_DIR}/src/motion_interface/config/status_params.yaml"
+INTERFACE_CONFIG="${PROJECT_DIR}/src/control/motion_interface/config/bridge_params.yaml"
+STATUS_CONFIG="${PROJECT_DIR}/src/control/motion_interface/config/status_params.yaml"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,7 +33,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 usage() {
     cat <<EOF
-用法: $0 <lidar|imu|bridge|status|all|nav|nav2> [map]
+用法: $0 <lidar|imu|bridge|status|all|nav> [map]
 
   lidar   启动 Hesai LiDAR + RViz2
   imu     仅启动 LPMS-IG1 IMU
@@ -43,11 +42,7 @@ usage() {
   all     启动 LiDAR + RViz2 + STM32 运动接口（不自动启动 IMU）
   nav     启动 Smac Hybrid-A* + NeuPAN 完整导航栈
           map 可传地图目录、map.yaml 或 map.pgm
-  nav2    启动 nav_nav2 完整 Nav2 栈（Smac Hybrid-A* + MPPI + BT）
-          map 可传地图目录、map.yaml 或 map.pgm
-
-  nav/nav2 地图目录均需包含 map.yaml、map.pgm、GlobalMap.pcd
-  两套导航栈不要同时启动。
+  nav 地图目录需包含 map.yaml、map.pgm、GlobalMap.pcd
 
 环境变量:
   VEHICLE_CONFIG 项目级车辆参数，默认: config/vehicle.yaml
@@ -64,7 +59,6 @@ usage() {
   $0 status
   $0 all
   $0 nav maps/my_map
-  $0 nav2 maps/my_map
   VEHICLE_CONFIG=/path/to/vehicle.yaml $0 bridge
   LIDAR_CONFIG=/path/to/hesai.yaml $0 lidar
   IMU_INTERFACE=can0 IMU_NODE_ID=5 $0 imu
@@ -79,7 +73,6 @@ ENABLE_CONTROL=false
 ENABLE_STATUS=false
 ENABLE_NAVIGATION=false
 NAVIGATION_RVIZ=false
-NAV_STACK=""
 
 case "$MODE" in
     lidar)
@@ -105,14 +98,6 @@ case "$MODE" in
         ENABLE_CONTROL=true
         ENABLE_NAVIGATION=true
         NAVIGATION_RVIZ=true
-        NAV_STACK="neupan"
-        ;;
-    nav2)
-        ENABLE_LIDAR=true
-        ENABLE_CONTROL=true
-        ENABLE_NAVIGATION=true
-        NAVIGATION_RVIZ=true
-        NAV_STACK="nav2"
         ;;
     help|-h|--help)
         usage
@@ -220,7 +205,7 @@ if $ENABLE_NAVIGATION; then
     done
 
     log_info "导航地图目录: ${MAP_DIR}"
-    log_info "导航栈: ${NAV_STACK}"
+    log_info "导航栈: Smac + NeuPAN"
 fi
 
 echo ""
@@ -228,23 +213,7 @@ log_info "=============================="
 log_info "  实车启动模式: ${MODE}"
 log_info "=============================="
 
-if [[ "$MODE" == "nav2" ]]; then
-    LAUNCH_CMD=(
-        ros2 launch nav_nav2 navigation.launch.py
-        "vehicle_config:=${VEHICLE_CONFIG}"
-        "map:=${MAP_YAML}"
-        "globalmap_pcd:=${GLOBALMAP_PCD}"
-        "points_topic:=/lidar_points"
-        "start_hardware:=true"
-        "lidar_config:=${LIDAR_CONFIG}"
-        "enable_imu:=${ENABLE_IMU}"
-        "imu_interface:=${IMU_INTERFACE}"
-        "imu_node_id:=${IMU_NODE_ID}"
-        "imu_params_file:=${IMU_PARAMS_FILE}"
-        "use_sim_time:=false"
-        "rviz:=${NAVIGATION_RVIZ}"
-    )
-elif [[ "$MODE" == "nav" ]]; then
+if [[ "$MODE" == "nav" ]]; then
     LAUNCH_CMD=(
         ros2 launch nav_neupan_bringup navigation.launch.py
         "project_dir:=${PROJECT_DIR}"

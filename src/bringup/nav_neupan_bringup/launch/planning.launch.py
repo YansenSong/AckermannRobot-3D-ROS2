@@ -106,8 +106,8 @@ def _planner(context):
             'node_names': ['map_server', 'planner_server'],
         }])
     bridge = Node(
-        package='ackermann_smac_bridge', executable='ackermann_smac_bridge',
-        name='ackermann_smac_bridge', output='screen',
+        package='smac_neupan_bridge', executable='smac_neupan_bridge',
+        name='smac_neupan_bridge', output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
             'global_frame': 'map',

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef ACKERMANN_SMAC_BRIDGE__ACKERMANN_SMAC_BRIDGE_HPP_
-#define ACKERMANN_SMAC_BRIDGE__ACKERMANN_SMAC_BRIDGE_HPP_
+#ifndef SMAC_NEUPAN_BRIDGE__SMAC_NEUPAN_BRIDGE_HPP_
+#define SMAC_NEUPAN_BRIDGE__SMAC_NEUPAN_BRIDGE_HPP_
 
 #include <cstdint>
 #include <memory>
@@ -30,7 +30,7 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
-namespace ackermann_smac_bridge
+namespace smac_neupan_bridge
 {
 
 class AckermannSmacBridge final : public rclcpp::Node
@@ -82,6 +82,6 @@ private:
   nav_msgs::msg::Path active_path_;
 };
 
-}  // namespace ackermann_smac_bridge
+}  // namespace smac_neupan_bridge
 
-#endif  // ACKERMANN_SMAC_BRIDGE__ACKERMANN_SMAC_BRIDGE_HPP_
+#endif  // SMAC_NEUPAN_BRIDGE__SMAC_NEUPAN_BRIDGE_HPP_

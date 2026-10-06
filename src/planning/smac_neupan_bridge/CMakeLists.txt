@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(ackermann_smac_bridge)
+project(smac_neupan_bridge)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
@@ -16,13 +16,13 @@ find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
-add_executable(ackermann_smac_bridge
-  src/ackermann_smac_bridge.cpp
+add_executable(smac_neupan_bridge
+  src/smac_neupan_bridge.cpp
 )
 
-target_include_directories(ackermann_smac_bridge PRIVATE include)
+target_include_directories(smac_neupan_bridge PRIVATE include)
 
-ament_target_dependencies(ackermann_smac_bridge
+ament_target_dependencies(smac_neupan_bridge
   geometry_msgs
   nav2_msgs
   nav_msgs
@@ -34,7 +34,7 @@ ament_target_dependencies(ackermann_smac_bridge
   tf2_ros
 )
 
-install(TARGETS ackermann_smac_bridge
+install(TARGETS smac_neupan_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
 

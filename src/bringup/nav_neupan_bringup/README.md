@@ -27,5 +27,4 @@ ros2 launch nav_neupan_bringup navigation.launch.py \
   start_hardware:=true
 ```
 
-Do not run this stack at the same time as `nav_nav2`; both feed the shared
-`/ackermann_cmd` interface.
+The command gate forwards the NeuPAN output to the shared `/ackermann_cmd` interface.
