@@ -4,7 +4,7 @@ import pytest
 import rclpy
 from std_srvs.srv import SetBool
 
-from lpms_ig1_ros2 import lpms_ig1_node as driver
+from imu import lpms_ig1_node as driver
 
 
 class FakeSocket:

@@ -14,7 +14,7 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>lidar_driver</exec_depend>
-  <exec_depend>lpms_ig1_ros2</exec_depend>
+  <exec_depend>imu</exec_depend>
   <exec_depend>motion_interface</exec_depend>
   <exec_depend>nav2_common</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>

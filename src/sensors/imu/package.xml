@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>lpms_ig1_ros2</name>
+  <name>imu</name>
   <version>0.1.0</version>
   <description>LPMS-IG1 CANopen 16-bit SocketCAN driver for standard ROS 2 IMU topics.</description>
 

@@ -18,7 +18,7 @@
 当前 ROS2 驱动包：
 
 ```text
-lpms_ig1_ros2
+imu
 ```
 
 当前已经能够正常发布：
@@ -70,7 +70,7 @@ m/s^2
 
 # 2. 本次开发目标
 
-请为现有 `lpms_ig1_ros2` ROS2 包新增一个：
+请为现有 `imu` ROS2 包新增一个：
 
 ```text
 静止陀螺仪标定 / 评估工具
@@ -127,7 +127,7 @@ sample count
 用户执行：
 
 ```bash
-ros2 run lpms_ig1_ros2 gyro_calibration
+ros2 run imu gyro_calibration
 ```
 
 程序开始后应给出类似提示：
@@ -212,7 +212,7 @@ Warm-up 阶段只接收数据，不计入标定结果。
 例如：
 
 ```bash
-ros2 run lpms_ig1_ros2 gyro_calibration --ros-args \
+ros2 run imu gyro_calibration --ros-args \
   -p warmup_duration:=10.0
 ```
 
@@ -870,14 +870,14 @@ Calibration cancelled by user.
 现有：
 
 ```text
-lpms_ig1_ros2/
+imu/
 ├── package.xml
 ├── setup.py
 ├── setup.cfg
 ├── resource/
 ├── config/
 ├── launch/
-└── lpms_ig1_ros2/
+└── imu/
     ├── __init__.py
     └── lpms_ig1_node.py
 ```
@@ -885,8 +885,8 @@ lpms_ig1_ros2/
 新增：
 
 ```text
-lpms_ig1_ros2/
-└── lpms_ig1_ros2/
+imu/
+└── imu/
     └── gyro_calibration.py
 ```
 
@@ -895,8 +895,8 @@ lpms_ig1_ros2/
 ```python
 entry_points={
     "console_scripts": [
-        "lpms_ig1_node = lpms_ig1_ros2.lpms_ig1_node:main",
-        "gyro_calibration = lpms_ig1_ros2.gyro_calibration:main",
+        "lpms_ig1_node = imu.lpms_ig1_node:main",
+        "gyro_calibration = imu.gyro_calibration:main",
     ],
 }
 ```
@@ -911,7 +911,7 @@ entry_points={
 cd ~/ros2_ws
 
 colcon build --symlink-install \
-  --packages-select lpms_ig1_ros2
+  --packages-select imu
 
 source install/setup.bash
 ```
@@ -919,19 +919,19 @@ source install/setup.bash
 先启动 IMU：
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py
+ros2 launch imu lpms_ig1.launch.py
 ```
 
 另外一个终端：
 
 ```bash
-ros2 run lpms_ig1_ros2 gyro_calibration
+ros2 run imu gyro_calibration
 ```
 
 自定义 60 秒：
 
 ```bash
-ros2 run lpms_ig1_ros2 gyro_calibration \
+ros2 run imu gyro_calibration \
   --ros-args \
   -p calibration_duration:=60.0
 ```
@@ -943,14 +943,14 @@ ros2 run lpms_ig1_ros2 gyro_calibration \
 主驱动应该支持：
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+ros2 launch imu lpms_ig1.launch.py \
   calibration_file:=/home/young/.ros/lpms_ig1_gyro_calibration.yaml
 ```
 
 如果当前 launch 结构不方便传 calibration file，也可以支持：
 
 ```bash
-ros2 run lpms_ig1_ros2 lpms_ig1_node \
+ros2 run imu lpms_ig1_node \
   --ros-args \
   --params-file ~/.ros/lpms_ig1_gyro_calibration.yaml
 ```
@@ -1175,7 +1175,7 @@ TF mounting calibration
 Terminal 1：
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py
+ros2 launch imu lpms_ig1.launch.py
 ```
 
 Terminal 2：
@@ -1189,7 +1189,7 @@ ros2 topic hz /imu/data_raw
 然后：
 
 ```bash
-ros2 run lpms_ig1_ros2 gyro_calibration
+ros2 run imu gyro_calibration
 ```
 
 IMU 保持完全静止至少 30 秒。

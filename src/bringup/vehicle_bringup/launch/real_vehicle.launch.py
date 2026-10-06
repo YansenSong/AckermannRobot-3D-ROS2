@@ -64,7 +64,7 @@ def _configured_components(context, motion_interface_share):
 
 def generate_launch_description():
     lidar_share = get_package_share_directory('lidar_driver')
-    imu_share = get_package_share_directory('lpms_ig1_ros2')
+    imu_share = get_package_share_directory('imu')
     motion_interface_share = get_package_share_directory('motion_interface')
 
     default_lidar_config = os.path.join(lidar_share, 'config', 'config.yaml')
@@ -150,7 +150,7 @@ def generate_launch_description():
     )
 
     imu = Node(
-        package='lpms_ig1_ros2',
+        package='imu',
         executable='lpms_ig1_node',
         name='lpms_ig1_node',
         output='screen',

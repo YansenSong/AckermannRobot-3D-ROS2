@@ -52,17 +52,17 @@ def _mounting_tf(context):
 
 def generate_launch_description():
     base_params_file = os.path.join(
-        get_package_share_directory("lpms_ig1_ros2"),
+        get_package_share_directory("imu"),
         "config",
         "lpms_ig1.yaml",
     )
     default_params_file = os.path.join(
-        get_package_share_directory("lpms_ig1_ros2"),
+        get_package_share_directory("imu"),
         "config",
         "lpms_ig1_calibration.yaml",
     )
     default_mounting_file = os.path.join(
-        get_package_share_directory("lpms_ig1_ros2"), "config", "lpms_ig1_mounting.yaml"
+        get_package_share_directory("imu"), "config", "lpms_ig1_mounting.yaml"
     )
     return LaunchDescription([
         DeclareLaunchArgument("params_file", default_value=default_params_file),
@@ -75,7 +75,7 @@ def generate_launch_description():
         DeclareLaunchArgument("convert_nwu_to_enu", default_value="true"),
 
         Node(
-            package="lpms_ig1_ros2",
+            package="imu",
             executable="lpms_ig1_node",
             name="lpms_ig1_node",
             output="screen",

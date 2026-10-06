@@ -196,7 +196,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'imu_params_file',
             default_value=os.path.join(
-                get_package_share_directory('lpms_ig1_ros2'),
+                get_package_share_directory('imu'),
                 'config', 'lpms_ig1_calibration.yaml')),
         DeclareLaunchArgument(
             'bridge_params_file',

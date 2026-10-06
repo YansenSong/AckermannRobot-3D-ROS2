@@ -18,7 +18,7 @@ VEHICLE_CONFIG="${VEHICLE_CONFIG:-${PROJECT_DIR}/config/vehicle.yaml}"
 LIDAR_CONFIG="${LIDAR_CONFIG:-${PROJECT_DIR}/src/sensors/lidar/config/config.yaml}"
 IMU_INTERFACE="${IMU_INTERFACE:-can0}"
 IMU_NODE_ID="${IMU_NODE_ID:-5}"
-IMU_PARAMS_FILE="${IMU_PARAMS_FILE:-${PROJECT_DIR}/src/sensors/lpms_ig1_ros2/config/lpms_ig1_calibration.yaml}"
+IMU_PARAMS_FILE="${IMU_PARAMS_FILE:-${PROJECT_DIR}/src/sensors/imu/config/lpms_ig1_calibration.yaml}"
 INTERFACE_CONFIG="${PROJECT_DIR}/src/control/motion_interface/config/bridge_params.yaml"
 STATUS_CONFIG="${PROJECT_DIR}/src/control/motion_interface/config/status_params.yaml"
 

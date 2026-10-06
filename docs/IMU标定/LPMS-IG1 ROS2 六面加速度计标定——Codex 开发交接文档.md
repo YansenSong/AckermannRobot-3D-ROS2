@@ -7,7 +7,7 @@
 ```text
 LPMS-IG1
    ↓ CAN / SocketCAN
-lpms_ig1_ros2
+imu
    ↓
 /imu/data_raw
 /imu/data
@@ -256,20 +256,20 @@ mean
 新增：
 
 ```text
-lpms_ig1_ros2/
+imu/
 └── accel_calibration.py
 ```
 
 setup.py 增加：
 
 ```python
-"accel_calibration = lpms_ig1_ros2.accel_calibration:main",
+"accel_calibration = imu.accel_calibration:main",
 ```
 
 用户执行：
 
 ```bash
-ros2 run lpms_ig1_ros2 accel_calibration
+ros2 run imu accel_calibration
 ```
 
 ---
@@ -349,7 +349,7 @@ sample_duration
 建议允许：
 
 ```bash
-ros2 run lpms_ig1_ros2 accel_calibration \
+ros2 run imu accel_calibration \
   --ros-args \
   -p sample_duration:=10.0
 ```
@@ -1304,13 +1304,13 @@ Accelerometer calibration cancelled by user.
 启动 IMU：
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py
+ros2 launch imu lpms_ig1.launch.py
 ```
 
 新终端：
 
 ```bash
-ros2 run lpms_ig1_ros2 accel_calibration
+ros2 run imu accel_calibration
 ```
 
 然后程序依次要求：
@@ -1340,7 +1340,7 @@ ros2 run lpms_ig1_ros2 accel_calibration
 例如：
 
 ```bash
-ros2 run lpms_ig1_ros2 lpms_ig1_node \
+ros2 run imu lpms_ig1_node \
   --ros-args \
   --params-file ~/.ros/lpms_ig1_calibration.yaml
 ```
@@ -1348,7 +1348,7 @@ ros2 run lpms_ig1_ros2 lpms_ig1_node \
 如果现有 launch 已支持 calibration file，则也应该支持：
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+ros2 launch imu lpms_ig1.launch.py \
   calibration_file:=$HOME/.ros/lpms_ig1_calibration.yaml
 ```
 
@@ -1580,7 +1580,7 @@ Accelerometer Calibration
 
 运行：
 
-ros2 run lpms_ig1_ros2 accel_calibration
+ros2 run imu accel_calibration
 
 六面顺序：
 
@@ -1630,7 +1630,7 @@ Magnetometer calibration should be performed after final vehicle installation.
 ## Terminal 1
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py
+ros2 launch imu lpms_ig1.launch.py
 ```
 
 ## Terminal 2
@@ -1644,7 +1644,7 @@ ros2 topic hz /imu/data_raw
 然后：
 
 ```bash
-ros2 run lpms_ig1_ros2 accel_calibration
+ros2 run imu accel_calibration
 ```
 
 完成：

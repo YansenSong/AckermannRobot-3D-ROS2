@@ -12,7 +12,8 @@
 - `src/bringup/nav_neupan_bringup`：Smac + NeuPAN 导航栈启动包
 - `src/bringup/vehicle_bringup`：共用实车传感器、运动接口和定位启动
 - `src/monitoring/nav_status`：导航状态监控
-- `src/sensors/lidar`、`src/sensors/lpms_ig1_ros2`、`src/sensors/nav_pointcloud_filter`：传感器驱动与导航点云过滤
+- `src/sensors/lidar`、`src/sensors/imu`：LiDAR 与 IMU 传感器驱动
+- `src/perception/nav_pointcloud_filter`：导航点云车体过滤
 
 上述分类目录不是 ROS 功能包；各包名称以其 `package.xml` 为准。
 

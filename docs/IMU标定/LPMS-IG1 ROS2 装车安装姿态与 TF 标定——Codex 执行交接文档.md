@@ -5,7 +5,7 @@
 当前项目：
 
 ```text
-lpms_ig1_ros2
+imu
 ```
 
 硬件：
@@ -202,20 +202,20 @@ LPMS sensor frame
 新增：
 
 ```text
-lpms_ig1_ros2/
+imu/
 └── mounting_calibration.py
 ```
 
 setup.py：
 
 ```python
-"mounting_calibration = lpms_ig1_ros2.mounting_calibration:main",
+"mounting_calibration = imu.mounting_calibration:main",
 ```
 
 用户执行：
 
 ```bash
-ros2 run lpms_ig1_ros2 mounting_calibration
+ros2 run imu mounting_calibration
 ```
 
 ---
@@ -1432,7 +1432,7 @@ gravity in base_link
 然后：
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py
+ros2 launch imu lpms_ig1.launch.py
 ```
 
 检查：
@@ -1446,7 +1446,7 @@ ros2 topic hz /imu/data
 运行：
 
 ```bash
-ros2 run lpms_ig1_ros2 mounting_calibration
+ros2 run imu mounting_calibration
 ```
 
 得到：

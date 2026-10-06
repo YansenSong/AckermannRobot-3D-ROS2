@@ -1,5 +1,5 @@
 import math
-from lpms_ig1_ros2.mounting_calibration import G0, estimate_mounting_rp, rotate_vector, rpy_matrix, transpose
+from imu.mounting_calibration import G0, estimate_mounting_rp, rotate_vector, rpy_matrix, transpose
 
 def gravity_in_imu(r, p, y=0.0):
     return rotate_vector(transpose(rpy_matrix(r, p, y)), (0.0, 0.0, G0))

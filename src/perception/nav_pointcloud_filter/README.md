@@ -1,7 +1,7 @@
 # Navigation point cloud self filter
 
 `self_filter_node` removes returns from inside the vehicle body before the
-navigation stacks convert `/lidar_points` to `/scan`. Mapping and LIORF
+navigation stack converts `/lidar_points` to `/scan`. Mapping and LIORF
 localization continue to subscribe to their original point cloud.
 
 The filter transforms each point into `rear_axle_link` at the cloud timestamp
@@ -17,6 +17,6 @@ The output retains each surviving point's complete binary record, including
 points are discarded. If the timestamped transform is unavailable, that frame
 is dropped rather than publishing an unfiltered navigation cloud.
 
-Both real-vehicle navigation launches remap `points_out` to
+The real-vehicle navigation launch remaps `points_out` to
 `/navigation/points_no_body` and feed that topic to `pointcloud_to_laserscan`.
 Do not remap a mapping or localization input to this output.

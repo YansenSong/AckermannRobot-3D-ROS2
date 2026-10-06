@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 from glob import glob
 import os
 
-package_name = "lpms_ig1_ros2"
+package_name = "imu"
 
 setup(
     name=package_name,
@@ -22,10 +22,10 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            "lpms_ig1_node = lpms_ig1_ros2.lpms_ig1_node:main",
-            "gyro_calibration = lpms_ig1_ros2.gyro_calibration:main",
-            "accel_calibration = lpms_ig1_ros2.accel_calibration:main",
-            "mounting_calibration = lpms_ig1_ros2.mounting_calibration:main",
+            "lpms_ig1_node = imu.lpms_ig1_node:main",
+            "gyro_calibration = imu.gyro_calibration:main",
+            "accel_calibration = imu.accel_calibration:main",
+            "mounting_calibration = imu.mounting_calibration:main",
         ],
     },
 )

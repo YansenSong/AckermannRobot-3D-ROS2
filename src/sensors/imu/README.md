@@ -1,4 +1,4 @@
-# lpms_ig1_ros2
+# imu
 
 LPMS-IG1 CANopen 16-bit driver using Linux SocketCAN directly.
 
@@ -65,11 +65,11 @@ Copy this package into a ROS 2 workspace:
 
 ```bash
 mkdir -p ~/ros2_ws/src
-cp -r lpms_ig1_ros2 ~/ros2_ws/src/
+cp -r imu ~/ros2_ws/src/
 
 cd ~/ros2_ws
 source /opt/ros/$ROS_DISTRO/setup.bash
-colcon build --symlink-install --packages-select lpms_ig1_ros2
+colcon build --symlink-install --packages-select imu
 source install/setup.bash
 ```
 
@@ -87,13 +87,13 @@ ip -details link show can0
 ## Run
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py
+ros2 launch imu lpms_ig1.launch.py
 ```
 
 Or:
 
 ```bash
-ros2 run lpms_ig1_ros2 lpms_ig1_node --ros-args \
+ros2 run imu lpms_ig1_node --ros-args \
   -p interface:=can0 \
   -p node_id:=5 \
   -p frame_id:=imu_link
@@ -114,7 +114,7 @@ Place the IMU on a stable surface, keep it completely stationary, and leave the
 driver running. In another sourced terminal run:
 
 ```bash
-ros2 run lpms_ig1_ros2 gyro_calibration
+ros2 run imu gyro_calibration
 ```
 
 The default procedure waits 5 seconds, samples `/imu/data_raw` for 30 seconds,
@@ -128,7 +128,7 @@ parameter file to:
 Durations and the output path can be changed, for example:
 
 ```bash
-ros2 run lpms_ig1_ros2 gyro_calibration --ros-args \
+ros2 run imu gyro_calibration --ros-args \
   -p warmup_duration:=10.0 \
   -p calibration_duration:=60.0 \
   -p output_file:=/tmp/lpms_ig1_gyro_calibration.yaml
@@ -137,7 +137,7 @@ ros2 run lpms_ig1_ros2 gyro_calibration --ros-args \
 Load the generated bias file on the next driver start:
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+ros2 launch imu lpms_ig1.launch.py \
   params_file:=$HOME/.ros/lpms_ig1_gyro_calibration.yaml
 ```
 
@@ -150,7 +150,7 @@ Run the six-position calibration while the uncalibrated driver is publishing
 `/imu/data_raw`:
 
 ```bash
-ros2 run lpms_ig1_ros2 accel_calibration
+ros2 run imu accel_calibration
 ```
 
 Follow the prompts and place the sensor in this order, pressing Enter only
@@ -173,7 +173,7 @@ A detailed report is written separately to
 Load the unified calibration with:
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+ros2 launch imu lpms_ig1.launch.py \
   params_file:=$HOME/.ros/lpms_ig1_calibration.yaml
 ```
 
@@ -200,7 +200,7 @@ flattest available ground and keep it stationary. Run the calibrated driver,
 then execute:
 
 ```bash
-ros2 run lpms_ig1_ros2 mounting_calibration --ros-args \
+ros2 run imu mounting_calibration --ros-args \
   -p mount_x:=0.0 -p mount_y:=0.0 -p mount_z:=0.0 \
   -p mount_yaw_deg:=0.0
 ```
@@ -214,7 +214,7 @@ The result is written to `~/.ros/lpms_ig1_mounting.yaml`. The launch file can
 publish `base_link -> imu_link` from it:
 
 ```bash
-ros2 launch lpms_ig1_ros2 lpms_ig1.launch.py \
+ros2 launch imu lpms_ig1.launch.py \
   mounting_file:=$HOME/.ros/lpms_ig1_mounting.yaml
 ros2 run tf2_ros tf2_echo base_link imu_link
 ```
