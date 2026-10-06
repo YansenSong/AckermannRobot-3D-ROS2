@@ -39,6 +39,7 @@ AckermannSmacBridge::AckermannSmacBridge(const rclcpp::NodeOptions & options)
   planner_id_ = declare_parameter<std::string>("planner_id", "GridBased");
   goal_topic_ = declare_parameter<std::string>("goal_topic", "/goal_pose");
   plan_path_topic_ = declare_parameter<std::string>("plan_path_topic", "/plan_path");
+  execution_path_topic_ = declare_parameter<std::string>("execution_path_topic", "/plan");
   remaining_distance_topic_ = declare_parameter<std::string>(
     "remaining_distance_topic", "/global_path_remaining_distance");
   planning_status_topic_ = declare_parameter<std::string>(
@@ -69,6 +70,7 @@ AckermannSmacBridge::AckermannSmacBridge(const rclcpp::NodeOptions & options)
   goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
     goal_topic_, qos, std::bind(&AckermannSmacBridge::onGoal, this, std::placeholders::_1));
   plan_path_pub_ = create_publisher<nav_msgs::msg::Path>(plan_path_topic_, qos);
+  execution_path_pub_ = create_publisher<nav_msgs::msg::Path>(execution_path_topic_, qos);
   remaining_distance_pub_ = create_publisher<std_msgs::msg::Float64>(
     remaining_distance_topic_, qos);
   auto status_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
@@ -224,6 +226,9 @@ void AckermannSmacBridge::onResult(
   // reverse segments. The bridge deliberately does not recompute yaw.
   active_path_ = wrapped_result.result->path;
   plan_path_pub_->publish(active_path_);
+  // Only paths requested through /goal_pose are sent to the controller.
+  // Preview requests use the same planner action but never enter this bridge.
+  execution_path_pub_->publish(active_path_);
   publishPlanningStatus("succeeded");
 
   RCLCPP_INFO(

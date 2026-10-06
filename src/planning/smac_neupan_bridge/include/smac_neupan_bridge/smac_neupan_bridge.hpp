@@ -65,6 +65,7 @@ private:
   std::string planner_id_;
   std::string goal_topic_;
   std::string plan_path_topic_;
+  std::string execution_path_topic_;
   std::string remaining_distance_topic_;
   std::string planning_status_topic_;
   double tf_timeout_{0.2};
@@ -73,6 +74,7 @@ private:
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr plan_path_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr execution_path_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr remaining_distance_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr planning_status_pub_;
   rclcpp::TimerBase::SharedPtr remaining_distance_timer_;
