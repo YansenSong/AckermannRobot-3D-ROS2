@@ -11,6 +11,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 
+from imu.ros_param_yaml import format_double
+
 
 G0 = 9.80665
 POSES = (
@@ -403,11 +405,11 @@ class AccelCalibration(Node):
         gyro = [existing.get(f"gyro_bias_{axis}", 0.0) for axis in "xyz"]
         content = ["lpms_ig1_node:", "  ros__parameters:"]
         for axis, value in zip("xyz", gyro):
-            content.append(f"    gyro_bias_{axis}: {value:.12g}")
+            content.append(f"    gyro_bias_{axis}: {format_double(value)}")
         for axis, value in zip("xyz", offsets):
-            content.append(f"    accel_offset_{axis}: {value:.12g}")
+            content.append(f"    accel_offset_{axis}: {format_double(value)}")
         for axis, value in zip("xyz", gains):
-            content.append(f"    accel_gain_{axis}: {value:.12g}")
+            content.append(f"    accel_gain_{axis}: {format_double(value)}")
         self.atomic_write(self.output_file, "\n".join(content) + "\n")
 
     def write_report(

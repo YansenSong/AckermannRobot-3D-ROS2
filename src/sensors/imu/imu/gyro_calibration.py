@@ -8,6 +8,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 
+from imu.ros_param_yaml import format_double
+
 
 G0 = 9.80665
 
@@ -271,9 +273,9 @@ class GyroCalibration(Node):
         content = (
             "lpms_ig1_node:\n"
             "  ros__parameters:\n"
-            f"    gyro_bias_x: {stats[0]['mean']:.12g}\n"
-            f"    gyro_bias_y: {stats[1]['mean']:.12g}\n"
-            f"    gyro_bias_z: {stats[2]['mean']:.12g}\n"
+            f"    gyro_bias_x: {format_double(stats[0]['mean'])}\n"
+            f"    gyro_bias_y: {format_double(stats[1]['mean'])}\n"
+            f"    gyro_bias_z: {format_double(stats[2]['mean'])}\n"
         )
         self.output_file.write_text(content, encoding="utf-8")
 

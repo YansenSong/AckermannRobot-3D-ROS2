@@ -3,7 +3,7 @@ import re
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogWarning, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -12,7 +12,7 @@ from launch_ros.actions import Node
 def _mounting_tf(context):
     path = os.path.expanduser(LaunchConfiguration("mounting_file").perform(context))
     if not os.path.isfile(path):
-        return [LogWarning(msg=f"IMU mounting file not found; static TF disabled: {path}")]
+        return [LogInfo(msg=f"IMU mounting file not found; static TF disabled: {path}")]
     values = {}
     section = None
     for line in open(path, encoding="utf-8"):
@@ -33,7 +33,7 @@ def _mounting_tf(context):
                 "rotation_quaternion_xyzw.z", "rotation_quaternion_xyzw.w"]
     missing = [key for key in required if key not in values]
     if missing:
-        return [LogWarning(msg="Invalid IMU mounting file; missing: " + ", ".join(missing))]
+        return [LogInfo(msg="Invalid IMU mounting file; missing: " + ", ".join(missing))]
     return [Node(
         package="tf2_ros", executable="static_transform_publisher",
         name="lpms_ig1_mounting_tf", output="screen",
