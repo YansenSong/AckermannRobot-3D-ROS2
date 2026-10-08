@@ -2,12 +2,12 @@ from setuptools import setup
 
 
 setup(
-    name="ackermann_mission",
+    name="mission_manager",
     version="0.1.0",
-    packages=["ackermann_mission"],
+    packages=["mission_manager"],
     data_files=[
-        ("share/ament_index/resource_index/packages", ["resource/ackermann_mission"]),
-        ("share/ackermann_mission", ["package.xml"]),
+        ("share/ament_index/resource_index/packages", ["resource/mission_manager"]),
+        ("share/mission_manager", ["package.xml"]),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -17,7 +17,7 @@ setup(
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
-            "mission_manager = ackermann_mission.node:main",
+            "mission_manager = mission_manager.node:main",
         ],
     },
 )

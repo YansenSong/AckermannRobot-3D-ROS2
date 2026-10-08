@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>ackermann_bringup</name>
+  <name>robot_bringup</name>
   <version>0.1.0</version>
   <description>Composable mapping, localization, planning, and navigation bringup for the Ackermann robot.</description>
   <maintainer email="zoe@todo.todo">zoe</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>ackermann_control</exec_depend>
+  <exec_depend>vehicle_control</exec_depend>
   <exec_depend>simulation</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
@@ -21,8 +21,8 @@
   <exec_depend>nav2_planner</exec_depend>
   <exec_depend>nav2_smac_planner</exec_depend>
   <exec_depend>nav_status</exec_depend>
-  <exec_depend>ackermann_mission</exec_depend>
-  <exec_depend>ackermann_area_rules</exec_depend>
+  <exec_depend>mission_manager</exec_depend>
+  <exec_depend>area_rules</exec_depend>
   <exec_depend>pointcloud_to_laserscan</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

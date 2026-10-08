@@ -9,7 +9,7 @@ from geometry_msgs.msg import PoseStamped
 from nav_status.msg import NavigationStatus
 from std_msgs.msg import String
 
-from ackermann_mission.node import MissionManager
+from mission_manager.node import MissionManager
 
 
 class MissionNodeTest(unittest.TestCase):

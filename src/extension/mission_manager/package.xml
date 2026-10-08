@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>ackermann_mission</name>
+  <name>mission_manager</name>
   <version>0.1.0</version>
   <description>Robot-side persistent mission execution and status.</description>
   <maintainer email="young@example.com">young</maintainer>

@@ -1,6 +1,6 @@
 # Robot-side missions
 
-`ackermann_mission` is started by `ackermann_bringup/launch/navigation.launch.py`.
+`mission_manager` is started by `robot_bringup/launch/navigation.launch.py`.
 It keeps mission definitions and run records in `~/.ros/ackermann_missions.sqlite3`
 on the robot. Override the `database_path` ROS parameter to move the database.
 The browser can close while a task is running. After the mission manager itself

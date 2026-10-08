@@ -1,6 +1,6 @@
 # 地图规则
 
-`ackermann_area_rules` 将规则保存在机器人本机的
+`area_rules` 将规则保存在机器人本机的
 `~/.local/share/ackermann_robot/area_rules.json`，并按 `/map` 的内容哈希隔离。
 在 UI「地图管理 → 已保存的地图」中点击对应地图的「编辑」，然后拖动绘制；也可展开「规则列表与坐标录入」输入坐标并添加。编辑非当前地图时，UI 会先将其加载到机器人；规则会立即发布到：
 
@@ -18,7 +18,7 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
-colcon build --packages-up-to ackermann_bringup ackermann_area_rules --symlink-install
+colcon build --packages-up-to robot_bringup area_rules --symlink-install
 source install/setup.bash
 bash scripts/nav_liorf_neupan.sh maps/mini
 ```

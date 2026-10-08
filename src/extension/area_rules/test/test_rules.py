@@ -7,7 +7,7 @@ import unittest
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ackermann_area_rules.rules import (RuleStore, covers, grid_to_world, map_key,
+from area_rules.rules import (RuleStore, covers, grid_to_world, map_key,
                                         rasterize, validate_rule)
 
 

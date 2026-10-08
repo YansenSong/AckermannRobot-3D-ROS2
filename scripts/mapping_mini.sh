@@ -19,7 +19,7 @@ echo "Starting mini.world mapping with LIO-SAM..."
 echo "Map exports will be written to: $PROJECT_DIR/maps/YYYYMMDD_HHMMSS/"
 # Place the whole launch tree in its own process group.  Gazebo, RViz and the
 # included launch files otherwise outlive the parent `ros2 launch` process.
-setsid ros2 launch ackermann_bringup mapping.launch.py &
+setsid ros2 launch robot_bringup mapping.launch.py &
 MAPPING_PID=$!
 
 cleanup() {
@@ -33,4 +33,4 @@ trap cleanup EXIT INT TERM
 echo "Waiting for Gazebo to initialize..."
 sleep 5
 echo "Keyboard control is active in this terminal (arrow keys; Q exits)."
-ros2 run ackermann_control arrow_key_control.py
+ros2 run vehicle_control arrow_key_control.py

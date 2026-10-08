@@ -4,7 +4,7 @@
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NEUPAN_USE_SIM_TIME="${NEUPAN_USE_SIM_TIME:-true}"
-ROBOT_CONFIG_DIR="$PROJECT_DIR/src/control/neupan_ros2/config/robots/ackermann_robot"
+ROBOT_CONFIG_DIR="$PROJECT_DIR/src/control/neupan_ros2/config/robots/vehicle"
 
 # source ROS 2 workspace (先干这个，保证 ros2 命令可用)
 source "$PROJECT_DIR/install/setup.bash"

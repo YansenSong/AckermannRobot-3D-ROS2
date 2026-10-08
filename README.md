@@ -15,8 +15,8 @@ src/
 │   └── smac_neupan_bridge/                # 阿克曼规划接口
 ├── control/
 │   ├── neupan_ros2/                          # 局部避障
-│   └── ackermann_control/                    # 运动控制
-├── bringup/ackermann_bringup/                # 系统启动编排
+│   └── vehicle_control/                    # 运动控制
+├── bringup/                             # 系统启动编排（robot_bringup）
 ├── simulation/          # 仿真、模型和传感器
 └── extension/
     ├── nav_status/                            # 导航状态监控

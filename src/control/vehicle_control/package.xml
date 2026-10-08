@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>ackermann_control</name>
+  <name>vehicle_control</name>
   <version>0.1.0</version>
   <description>Command processing, teleoperation, and controller configuration for the Ackermann robot.</description>
   <maintainer email="zoe@todo.todo">zoe</maintainer>

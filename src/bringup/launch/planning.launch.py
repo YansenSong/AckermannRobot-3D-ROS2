@@ -24,7 +24,7 @@ def _planner(context):
         raise RuntimeError(f"Map resolution must be positive, got {resolution}")
 
     params = os.path.join(
-        get_package_share_directory('ackermann_bringup'),
+        get_package_share_directory('robot_bringup'),
         'config', 'smac_planner.yaml')
     configured_params = ParameterFile(
         RewrittenYaml(

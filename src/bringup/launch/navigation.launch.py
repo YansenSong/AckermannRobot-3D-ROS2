@@ -12,7 +12,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    share = get_package_share_directory('ackermann_bringup')
+    share = get_package_share_directory('robot_bringup')
     nav_status_share = get_package_share_directory('nav_status')
     arguments = [
         DeclareLaunchArgument('map', default_value=''),
@@ -40,7 +40,7 @@ def generate_launch_description():
                 parameters=[os.path.join(share, 'config', 'pcl_to_scan.yaml')],
                 remappings=[('cloud_in', '/points_raw'), ('scan', '/scan')])
     adapter = Node(
-        package='ackermann_control',
+        package='vehicle_control',
         executable='neupan_ackermann_adapter.py',
         name='neupan_ackermann_adapter',
         output='screen',
@@ -51,11 +51,11 @@ def generate_launch_description():
             'output_topic': '/neupan_cmd_vel',
         }])
     area_rules = Node(
-        package='ackermann_area_rules', executable='area_rules',
+        package='area_rules', executable='area_rules',
         name='area_rules', output='screen',
         respawn=True, respawn_delay=1.0,
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])
-    mux = Node(package='ackermann_control', executable='cmd_vel_mux.py', name='cmd_vel_mux',
+    mux = Node(package='vehicle_control', executable='cmd_vel_mux.py', name='cmd_vel_mux',
                output='screen', parameters=[{
                    'use_sim_time': LaunchConfiguration('use_sim_time'),
                    'area_rules_required': True,
@@ -68,7 +68,7 @@ def generate_launch_description():
             {'use_sim_time': True},
         ])
     mission_manager = Node(
-        package='ackermann_mission', executable='mission_manager',
+        package='mission_manager', executable='mission_manager',
         name='mission_manager', output='screen',
         respawn=True, respawn_delay=1.0,
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])

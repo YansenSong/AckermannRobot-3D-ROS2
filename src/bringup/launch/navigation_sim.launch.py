@@ -11,7 +11,7 @@ from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
     simulation_share = get_package_share_directory('simulation')
-    bringup_share = get_package_share_directory('ackermann_bringup')
+    bringup_share = get_package_share_directory('robot_bringup')
 
     arguments = [
         DeclareLaunchArgument('map'),
@@ -20,7 +20,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'params_file',
             default_value=os.path.join(
-                get_package_share_directory('ackermann_bringup'),
+                get_package_share_directory('robot_bringup'),
                 'config', 'liorf_localization.yaml')),
     ]
 

@@ -34,11 +34,11 @@ test -f "$MAP_DIR/map.pgm"
 test -f "$MAP_DIR/map.yaml"
 source "$PROJECT_DIR/install/setup.bash"
 
-for required_package in ackermann_bringup nav_status ackermann_mission ackermann_area_rules; do
+for required_package in robot_bringup nav_status mission_manager area_rules; do
     if ! ros2 pkg prefix "$required_package" >/dev/null 2>&1; then
         echo "缺少 ROS 包 $required_package。请先在项目根目录构建并重新加载环境：" >&2
         echo "  source /opt/ros/humble/setup.bash" >&2
-        echo "  colcon build --packages-up-to ackermann_bringup ackermann_mission ackermann_area_rules" >&2
+        echo "  colcon build --packages-up-to robot_bringup mission_manager area_rules" >&2
         echo "  source install/setup.bash" >&2
         exit 1
     fi
@@ -54,7 +54,7 @@ echo "  网页相机需要 UI 后端与 web_video_server，在第三个终端启
 echo "    bash scripts/run_ros2_ui.sh"
 echo "=============================================="
 
-exec ros2 launch ackermann_bringup navigation_sim.launch.py \
+exec ros2 launch robot_bringup navigation_sim.launch.py \
     map:="$MAP_DIR/map.yaml" \
     map_pgm:="$MAP_DIR/map.pgm" \
     globalmap_pcd:="$MAP_DIR/GlobalMap.pcd"

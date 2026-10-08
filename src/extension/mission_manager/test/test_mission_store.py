@@ -2,8 +2,8 @@ import os
 import tempfile
 import unittest
 
-from ackermann_mission.node import validated_mission
-from ackermann_mission.store import MissionStore
+from mission_manager.node import validated_mission
+from mission_manager.store import MissionStore
 
 
 class MissionStoreTest(unittest.TestCase):

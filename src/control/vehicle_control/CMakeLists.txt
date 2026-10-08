@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(ackermann_control)
+project(vehicle_control)
 
 find_package(ament_cmake REQUIRED)
 

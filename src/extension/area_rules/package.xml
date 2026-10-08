@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>ackermann_area_rules</name>
+  <name>area_rules</name>
   <version>0.1.0</version>
   <description>Persistent map rules and robot-side navigation constraints.</description>
   <maintainer email="young@example.com">young</maintainer>
