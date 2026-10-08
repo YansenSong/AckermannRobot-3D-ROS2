@@ -1,4 +1,4 @@
-# AckermannRobot-3D-ROS2
+# Alpha
 
 3D LiDAR 阿克曼底盘的 Gazebo 仿真、建图与导航项目。
 
@@ -29,7 +29,6 @@ src/
 
 ```bash
 source /opt/ros/humble/setup.bash
-git submodule update --init --recursive
 colcon build --symlink-install
 source install/setup.bash
 ```
