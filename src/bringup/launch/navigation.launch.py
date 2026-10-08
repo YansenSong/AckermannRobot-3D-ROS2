@@ -5,6 +5,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -18,6 +19,7 @@ def generate_launch_description():
         DeclareLaunchArgument('map_pgm', default_value=''),
         DeclareLaunchArgument('globalmap_pcd', default_value=''),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('use_rviz', default_value='true'),
         DeclareLaunchArgument(
             'params_file',
             default_value=os.path.join(
@@ -48,8 +50,16 @@ def generate_launch_description():
             'input_topic': '/neupan_cmd_vel_raw',
             'output_topic': '/neupan_cmd_vel',
         }])
+    area_rules = Node(
+        package='ackermann_area_rules', executable='area_rules',
+        name='area_rules', output='screen',
+        respawn=True, respawn_delay=1.0,
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])
     mux = Node(package='ackermann_control', executable='cmd_vel_mux.py', name='cmd_vel_mux',
-               output='screen', parameters=[{'use_sim_time': True}])
+               output='screen', parameters=[{
+                   'use_sim_time': LaunchConfiguration('use_sim_time'),
+                   'area_rules_required': True,
+               }])
     nav_status = Node(
         package='nav_status', executable='nav_status_node', name='nav_status_node',
         output='screen',
@@ -57,7 +67,14 @@ def generate_launch_description():
             os.path.join(nav_status_share, 'config', 'nav_status.yaml'),
             {'use_sim_time': True},
         ])
+    mission_manager = Node(
+        package='ackermann_mission', executable='mission_manager',
+        name='mission_manager', output='screen',
+        respawn=True, respawn_delay=1.0,
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])
     rviz = Node(package='rviz2', executable='rviz2', name='rviz2', output='screen',
+                condition=IfCondition(LaunchConfiguration('use_rviz')),
                 arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')])
     return LaunchDescription(
-        arguments + [localization, planning, scan, adapter, mux, nav_status, rviz])
+        arguments + [localization, area_rules, planning, scan, adapter, mux,
+                     nav_status, mission_manager, rviz])

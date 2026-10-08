@@ -18,7 +18,9 @@ src/
 │   └── ackermann_control/                    # 运动控制
 ├── bringup/ackermann_bringup/                # 系统启动编排
 ├── simulation/          # 仿真、模型和传感器
-└── monitoring/nav_status/                    # 导航状态监控
+└── extension/
+    ├── nav_status/                            # 导航状态监控
+    └── mission_manager/                       # 机器人侧任务管理
 ```
 
 ## 1. 编译

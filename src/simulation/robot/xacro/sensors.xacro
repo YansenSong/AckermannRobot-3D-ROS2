@@ -162,11 +162,9 @@
             </camera>
             <plugin name="depth_camera_controller" filename="libgazebo_ros_camera.so">
                 <ros>
-                    <remapping>custom_camera/image_raw:=color/image_raw</remapping>
-                    <remapping>custom_camera/image_depth:=depth/image_raw</remapping>
-                    <remapping>custom_camera/camera_info:=color/camera_info</remapping>
-                    <remapping>custom_camera/camera_info_depth:=depth/camera_info</remapping>
-                    <remapping>custom_camera/points:=depth/points</remapping>
+                    <remapping>depth_camera/image_depth:=depth_camera/depth/image_raw</remapping>
+                    <remapping>depth_camera/camera_info_depth:=depth_camera/depth/camera_info</remapping>
+                    <remapping>depth_camera/points:=depth_camera/depth/points</remapping>
                 </ros>
                 
                 <camera_name>depth_camera</camera_name>

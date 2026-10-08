@@ -43,6 +43,7 @@ def generate_launch_description():
             'map_pgm': LaunchConfiguration('map_pgm'),
             'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
             'params_file': LaunchConfiguration('params_file'),
+            'use_rviz': 'false',
         }.items(),
     )
 

@@ -10,14 +10,19 @@ priority.
 The /stop topic is a centralized stop override.  Publishing
 std_msgs/msg/Bool with data=true forces zero velocity regardless of the
 currently selected planner; publishing data=false releases the override.
+The mission manager has a separate /mission/hold override so resuming a task
+cannot release an operator's /stop request.
 
 """
+import copy
+import json
+import math
 import time
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, TwistStamped
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 
 
 class CmdVelMux(Node):
@@ -37,6 +42,12 @@ class CmdVelMux(Node):
         self.stop_sub = self.create_subscription(
             Bool, '/stop', self.stop_callback, 10
         )
+        self.mission_hold_sub = self.create_subscription(
+            Bool, '/mission/hold', self.mission_hold_callback, 10
+        )
+        self.area_control_sub = self.create_subscription(
+            String, '/area_rules/control', self.area_control_callback, 10
+        )
 
         self.neupan_msg: Twist | None = None
         self.manual_msg: Twist | None = None
@@ -46,12 +57,19 @@ class CmdVelMux(Node):
             self.get_parameter('manual_cmd_timeout').value
         )
         self.stop_requested = False
+        self.mission_hold_requested = False
+        self.declare_parameter('area_rules_required', False)
+        self.declare_parameter('area_control_timeout', 0.5)
+        self.area_rules_required = bool(self.get_parameter('area_rules_required').value)
+        self.area_control_timeout = float(self.get_parameter('area_control_timeout').value)
+        self.area_control = None
+        self.area_control_received_at = None
 
         self.timer = self.create_timer(0.05, self.timer_callback)
 
         self.get_logger().info(
             'cmd_vel_mux started: manual(/cmd_vel) overrides '
-            'NeuPAN(/neupan_cmd_vel); /stop overrides both → '
+            'NeuPAN(/neupan_cmd_vel); /stop and /mission/hold override both → '
             '/ackermann_steering_controller/reference'
         )
 
@@ -72,8 +90,32 @@ class CmdVelMux(Node):
             )
         self.stop_requested = requested
 
+    def mission_hold_callback(self, msg: Bool):
+        self.mission_hold_requested = bool(msg.data)
+
+    def area_control_callback(self, msg: String):
+        try:
+            control = json.loads(msg.data)
+            if not isinstance(control.get('ready'), bool) or not isinstance(control.get('stop'), bool):
+                return
+            limit = control.get('speed_limit')
+            if limit is not None and (not isinstance(limit, (int, float))
+                                      or isinstance(limit, bool) or not math.isfinite(limit)
+                                      or limit <= 0):
+                return
+        except (ValueError, TypeError, AttributeError):
+            return
+        self.area_control = control
+        self.area_control_received_at = time.monotonic()
+
     def timer_callback(self):
-        if self.stop_requested:
+        area_fresh = (self.area_control is not None
+                      and self.area_control_received_at is not None
+                      and time.monotonic() - self.area_control_received_at <= self.area_control_timeout)
+        area_blocked = ((self.area_rules_required or self.area_control_received_at is not None)
+                        and (not area_fresh or not self.area_control['ready']
+                             or self.area_control['stop']))
+        if self.stop_requested or self.mission_hold_requested or area_blocked:
             # Publish at the mux timer rate so the controller receives a
             # continuous zero command and cannot resume from a stale command.
             twist = Twist()
@@ -93,6 +135,14 @@ class CmdVelMux(Node):
                 source = 'neupan'
             else:
                 return
+
+            if area_fresh and self.area_control['speed_limit'] is not None:
+                limit = self.area_control['speed_limit']
+                if abs(twist.linear.x) > limit:
+                    twist = copy.deepcopy(twist)
+                    ratio = limit / abs(twist.linear.x)
+                    twist.linear.x *= ratio
+                    twist.angular.z *= ratio
 
         ts = TwistStamped()
         ts.header.stamp = self.get_clock().now().to_msg()

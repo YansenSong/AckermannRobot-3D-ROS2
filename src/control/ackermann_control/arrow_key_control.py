@@ -10,7 +10,7 @@ Arrow key teleop for Ackermann robot with D/R gear.
   Space : emergency stop (speed → 0)
   Q / Ctrl-C : quit
 
-Publishes geometry_msgs/TwistStamped to /ackermann_steering_controller/reference.
+Publishes geometry_msgs/Twist to /cmd_vel, through cmd_vel_mux.
 """
 
 import os
@@ -22,7 +22,7 @@ import threading
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import TwistStamped
+from geometry_msgs.msg import Twist
 
 
 # Arrow key escape sequences
@@ -41,7 +41,7 @@ class ArrowKeyTeleop(Node):
     def __init__(self):
         super().__init__('arrow_key_teleop')
 
-        self.pub = self.create_publisher(TwistStamped, '/ackermann_steering_controller/reference', 10)
+        self.pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
         # Parameters
         self.declare_parameter('max_linear', 2.0)
@@ -83,11 +83,9 @@ class ArrowKeyTeleop(Node):
 
     # ----------------------------------------------------------------
     def publish_cmd(self):
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'base_link'
-        msg.twist.linear.x  = self._cmd_linear()
-        msg.twist.angular.z = self.angular
+        msg = Twist()
+        msg.linear.x  = self._cmd_linear()
+        msg.angular.z = self.angular
         self.pub.publish(msg)
 
     # ----------------------------------------------------------------

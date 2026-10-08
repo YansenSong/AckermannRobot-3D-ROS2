@@ -51,6 +51,11 @@ global_costmap:
       footprint: "[[-0.10, -0.36], [0.74, -0.36], [0.74, 0.36], [-0.10, 0.36]]"
       footprint_padding: 0.01
       plugins: ["static_layer", "inflation_layer"]
+      filters: ["area_keepout_filter"]
+
+      area_keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        filter_info_topic: "/area_rules/filter_info"
 
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
