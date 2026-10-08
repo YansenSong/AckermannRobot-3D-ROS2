@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UI_ROOT="${PROJECT_ROOT}/third_party/ROS2_UI"
+UI_ROOT="${PROJECT_ROOT}/third_party/RobotPilot"
 WEB_DIR="${UI_ROOT}/web"
 BACKEND_SCRIPT="${UI_ROOT}/scripts/run_ui_backend.sh"
 

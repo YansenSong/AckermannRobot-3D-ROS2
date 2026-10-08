@@ -51,7 +51,7 @@ echo "  NeuPAN 在另一个终端启动:"
 echo "    cd $PROJECT_DIR"
 echo "    bash scripts/run_neupan.sh"
 echo "  网页相机需要 UI 后端与 web_video_server，在第三个终端启动:"
-echo "    bash scripts/run_ros2_ui.sh"
+echo "    bash scripts/run_robotpilot.sh"
 echo "=============================================="
 
 exec ros2 launch robot_bringup navigation_sim.launch.py \

@@ -22,7 +22,7 @@ rosbridge。Vite 服务器只提供前端；使用 Flask `/api/*` 路由的功�
 完成前端依赖安装和 ROS 工作区构建后，在 AckermannRobot 项目根目录运行：
 
 ```bash
-bash scripts/run_ros2_ui.sh
+bash scripts/run_robotpilot.sh
 ```
 
 前端地址为 `http://localhost:3000/`，ROS 后端地址为 `http://127.0.0.1:5050/`。
