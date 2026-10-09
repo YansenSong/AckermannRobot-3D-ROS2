@@ -37,6 +37,8 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
+S0 平台接口、机器人事件补传与安全门禁的当前状态见 [S0 实施记录](docs/s0/S0_IMPLEMENTATION_REPORT.md)、[架构边界](docs/s0/architecture.md) 和 [协议目录](docs/s0/contracts/api-v1.md)。可用 `bash scripts/check_s0.sh` 执行本地构建与单测；需要先在 `third_party/RobotPilot/web` 运行 `npm ci`。脚本会明确跳过需要 Gazebo 运行态与实机设备的验收。
+
 每个新终端均需加载环境：
 
 ```bash

@@ -31,27 +31,25 @@ Maps 页不启动建图节点。在 AckermannRobot 项目根目录运行 `bash s
 
 ## 构建并运行 UI 后端
 
-ROS 工作区面向 ROS 2 Jazzy。安装 ROS 依赖后，从仓库根目录构建：
+当前 AckermannRobot 集成工作区已在 ROS 2 Humble 上构建验证。安装 ROS 依赖后，从 AckermannRobot 仓库根目录构建：
 
 ```bash
-cd ros2
-source /opt/ros/jazzy/setup.bash
-rosdep install --from-paths src --ignore-src -r -y
-cd ..
-bash scripts/build_frontend.sh
-bash scripts/sync_frontend_to_ros.sh
-source /opt/ros/jazzy/setup.bash
-bash scripts/build_ros.sh
-source ros2/install/setup.bash
+source /opt/ros/humble/setup.bash
+cd third_party/RobotPilot/web
+npm ci
+npm run build
+cd ../../..
+bash scripts/check_s0.sh
+source /tmp/alpha-s0-check/install/setup.bash
 ros2 launch robotpilot_ui_package new_ui_launch.py
 ```
 
-打开 `http://127.0.0.1:5050/`。上述命令直接启动已构建的 UI 后端；根目录的 `scripts/run_robotpilot.sh` 会同时启动开发版前端和后端。UI launch 会启动 Flask 和面向浏览器的 ROS 节点；
+上述命令启动 UI 后端；开发页面仍建议使用根目录 `bash scripts/run_robotpilot.sh` 启动 Vite 与后端。若要从后端 `http://127.0.0.1:5050/` 提供最新打包页面，需要先运行 `bash third_party/RobotPilot/scripts/sync_frontend_to_ros.sh` 同步构建产物；该同步脚本会替换 `static/app` 内旧资源，应单独检查其文件改动。UI launch 会启动 Flask 和面向浏览器的 ROS 节点；
 如果已安装相应软件包，还会启动 `rosbridge_server`、`rosapi` 和
 `web_video_server`。它不会启动机器人驱动、Nav2、定位组件、传感器或仿真器；
 如需实时数据，请另行启动兼容的机器人或仿真器 ROS 工作区。
 
-当前检出版本没有 Dockerfile 或 Docker Compose 配置。前端开发与构建步骤见
+当前检出版本没有 Dockerfile 或 Docker Compose 配置。S0 检查可运行 `bash scripts/check_s0.sh`；前端开发与构建步骤见
 [web/README.md](web/README.md)。
 
 `AUTH_MODE=local` 已支持登录、角色、CSRF 和带角色检查的 rosbridge gateway。局域网试运行仍需按部署环境配置 Flask HTTPS、反向代理 `/rosbridge`、Origin allowlist、ROS_DOMAIN_ID、地图与数据库路径和防火墙；步骤见[启动 Profiles](../../docs/deployment/run-profiles.md)。首次启动后执行 `AUTH_MODE=local python3 -m robotpilot_ui_package.auth <用户名> --role Admin` 创建管理员。仓库未自动安装 systemd service，也不会修改网络或证书。

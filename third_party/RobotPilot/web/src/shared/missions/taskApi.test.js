@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startOneOffMission } from "./taskApi";
+import { sendStoredMissionCommand, startOneOffMission } from "./taskApi";
 
 const response = (payload, status = 200) =>
   new Response(JSON.stringify(payload), { status });
@@ -44,5 +44,33 @@ describe("startOneOffMission", () => {
         new Headers(options.headers).get("Idempotency-Key"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("sendStoredMissionCommand", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("routes saved mission controls through the platform task API", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, options = {}) => {
+      if (String(url).endsWith("/auth/csrf")) return response({ csrf_token: "csrf" });
+      calls.push({ url: String(url), options });
+      return response({ command_id: `cmd-${calls.length}`, status: "accepted" }, 202);
+    }));
+
+    await sendStoredMissionCommand("robot-001", { command: "save", mission: { id: "m" } });
+    await sendStoredMissionCommand("robot-001", { command: "start", mission_id: "m" });
+    await sendStoredMissionCommand("robot-001", { command: "pause", task_id: "t" });
+    await sendStoredMissionCommand("robot-001", { command: "delete", mission_id: "m" });
+
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/robots/robot-001/missions",
+      "/api/v1/robots/robot-001/tasks",
+      "/api/v1/robots/robot-001/tasks/t/commands",
+      "/api/v1/robots/robot-001/missions/m",
+    ]);
+    expect(JSON.parse(calls[2].options.body)).toEqual({ action: "pause" });
+    expect(calls[3].options.method).toBe("DELETE");
+    expect(calls.every(({ options }) => new Headers(options.headers).get("Idempotency-Key"))).toBe(true);
   });
 });

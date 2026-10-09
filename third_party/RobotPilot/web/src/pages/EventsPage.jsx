@@ -1,137 +1,193 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useContext, useEffect, useState } from "react";
 
-import useEventLog from "../shared/hooks/useEventLog";
-import { EVENT_SEVERITY, clearEvents } from "../shared/events/eventLog";
+import { AuthContext } from "../app/App";
+import { getEvents } from "../shared/events/eventLog";
+import { apiFetch } from "../shared/api/apiFetch";
 import { DashboardCard, EmptyState, SectionHeader } from "../shared/ui/Dashboard";
-import { useT } from "../shared/i18n/i18n";
 
-const TYPE_FILTERS = ["all", "navigation", "docking", "battery", "safety", "system"];
-const SEVERITY_FILTERS = ["all", "info", "success", "warning", "error"];
-
-const fmt = (iso) => {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { hour12: false });
+const PAGE_SIZE = 50;
+const SEVERITY_STYLE = {
+  INFO: "text-statusBlue",
+  WARNING: "text-statusYellow",
+  ERROR: "text-statusRed",
+};
+const TYPE_LABEL = {
+  "task.event": "任务事件",
+  "task.status_changed": "任务状态变化",
+  "fault.raised": "故障发生",
+  "fault.updated": "故障更新",
+  "fault.resolved": "故障恢复",
 };
 
-/**
- * 可供回顾的机器人事件时间线。EventRecorder 会将导航结果、对接、低电量、E-stop 等事件写入共用的持久化事件日志。
- * 可按类型和严重程度筛选；数据保存在 localStorage 中，页面重载后仍会保留。
- */
-const EventsPage = () => {
-  const { t } = useT();
-  const events = useEventLog();
-  const [type, setType] = useState("all");
-  const [severity, setSeverity] = useState("all");
+const formatTime = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+};
 
-  const filtered = useMemo(
-    () =>
-      events.filter(
-        (e) =>
-          (type === "all" || e.type === type) &&
-          (severity === "all" || e.severity === severity),
-      ),
-    [events, type, severity],
+const EventsPage = () => {
+  const { robotId } = useContext(AuthContext);
+  const [events, setEvents] = useState([]);
+  const [nextBefore, setNextBefore] = useState(null);
+  const [type, setType] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [taskId, setTaskId] = useState("");
+  const [requestId, setRequestId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadPage = useCallback(
+    async (before = null) => {
+      if (!robotId) return;
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+        if (before) params.set("before", String(before));
+        if (type) params.set("type", type);
+        if (severity) params.set("severity", severity);
+        if (taskId.trim()) params.set("task_id", taskId.trim());
+        if (requestId.trim()) params.set("request_id", requestId.trim());
+        const response = await apiFetch(
+          `/api/v1/robots/${encodeURIComponent(robotId)}/events/history?${params}`,
+          { cache: "no-store" },
+        );
+        const payload = await response.json();
+        setEvents((current) => {
+          const combined = before
+            ? [...current, ...(payload.events || [])]
+            : payload.events || [];
+          const unique = new Map(combined.map((event) => [event.event_id, event]));
+          return [...unique.values()].sort((a, b) => b.cursor - a.cursor);
+        });
+        setNextBefore(payload.next_before || null);
+        setError("");
+      } catch (cause) {
+        setError(cause.message || "事件历史加载失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [robotId, type, severity, taskId, requestId],
   );
 
-  const handleClear = () => {
-    if (
-      !window.confirm(
-        t("This permanently deletes all recorded events, even if you're currently viewing a filtered list. This can't be undone. Continue?"),
-      )
-    )
-      return;
-    clearEvents();
-  };
+  useEffect(() => {
+    setEvents([]);
+    setNextBefore(null);
+    loadPage();
+  }, [loadPage]);
 
-  const exportJson = () => {
-    const blob = new Blob([JSON.stringify(events, null, 2)], {
+  useEffect(() => {
+    if (!robotId || typeof EventSource === "undefined") return undefined;
+    const stream = new EventSource(
+      `/api/v1/robots/${encodeURIComponent(robotId)}/events`,
+      { withCredentials: true },
+    );
+    const refresh = () => loadPage();
+    stream.addEventListener("robot_event", refresh);
+    return () => {
+      stream.removeEventListener("robot_event", refresh);
+      stream.close();
+    };
+  }, [robotId, loadPage]);
+
+  const exportLegacy = () => {
+    const blob = new Blob([JSON.stringify(getEvents(), null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `robotpilot-events-${Date.now()}.json`;
-    a.click();
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `robotpilot-browser-events-${Date.now()}.json`;
+    link.click();
     URL.revokeObjectURL(url);
   };
-
-  const pill = (value, current, setter) => (
-    <button
-      key={value}
-      onClick={() => setter(value)}
-      className={`rounded-lg border px-2.5 py-1 text-xs capitalize transition-colors ${
-        current === value
-          ? "border-themeBlue bg-themeBlue/10 text-themeBlue"
-          : "border-borderSubtle text-themeTextGray hover:border-themeBlue"
-      }`}
-    >
-      {t(value)}
-    </button>
-  );
 
   return (
     <div className="sectionHeight space-y-5 py-4 sm:py-6">
       <SectionHeader
         eyebrow="Audit"
-        title="Events"
-        description="A persisted timeline of navigation, docking, battery and safety events — reviewable after the fact. Kept locally in the browser."
+        title="事件记录"
+        description="机器人端事件由平台持久保存；浏览器断开后仍可查询。"
         action={
-          <div className="flex gap-2">
-            <button
-              onClick={exportJson}
-              disabled={events.length === 0}
-              className="rounded-lg border border-borderSubtle px-3 py-1.5 text-xs text-themeTextGray transition-colors hover:border-themeBlue hover:text-themeBlue disabled:opacity-40"
-            >
-              {t("Export")}
-            </button>
-            <button
-              onClick={handleClear}
-              disabled={events.length === 0}
-              className="rounded-lg border border-borderSubtle px-3 py-1.5 text-xs text-themeTextGray transition-colors hover:border-statusRed/50 hover:text-statusRed disabled:opacity-40"
-            >
-              {t("Clear all events")}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={exportLegacy}
+            className="rounded-lg border border-borderSubtle px-3 py-1.5 text-xs text-themeTextGray hover:border-themeBlue"
+          >
+            导出旧浏览器记录
+          </button>
         }
       />
 
-      <DashboardCard className="p-3 font-[RobotoMono]">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[10px] uppercase tracking-wider text-themeTextGray">{t("Type")}</span>
-          {TYPE_FILTERS.map((v) => pill(v, type, setType))}
-          <span className="ml-3 text-[10px] uppercase tracking-wider text-themeTextGray">{t("Severity")}</span>
-          {SEVERITY_FILTERS.map((v) => pill(v, severity, setSeverity))}
-        </div>
+      <DashboardCard className="flex flex-wrap gap-3 p-4 text-sm">
+        <label className="flex flex-col gap-1">
+          类型
+          <select value={type} onChange={(event) => setType(event.target.value)}>
+            <option value="">全部</option>
+            <option value="task.event">任务事件</option>
+            <option value="task.status_changed">任务状态变化</option>
+            <option value="fault.raised">故障发生</option>
+            <option value="fault.updated">故障更新</option>
+            <option value="fault.resolved">故障恢复</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          等级
+          <select value={severity} onChange={(event) => setSeverity(event.target.value)}>
+            <option value="">全部</option>
+            <option value="INFO">信息</option>
+            <option value="WARNING">警告</option>
+            <option value="ERROR">错误</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          任务 ID
+          <input value={taskId} onChange={(event) => setTaskId(event.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1">
+          请求 ID
+          <input value={requestId} onChange={(event) => setRequestId(event.target.value)} />
+        </label>
       </DashboardCard>
 
+      {error && <p className="text-sm text-statusRed">{error}</p>}
       <DashboardCard className="p-0">
-        {filtered.length === 0 ? (
+        {events.length === 0 ? (
           <EmptyState
-            title={events.length === 0 ? "No events recorded yet" : "No events match the filters"}
-            description={
-              events.length === 0
-                ? "Navigation, docking and battery events will appear here as they happen."
-                : "Try widening the type or severity filter."
-            }
+            title={loading ? "正在加载事件…" : "暂无机器人事件"}
+            description="任务状态变化会在机器人端写入并同步到这里。"
           />
         ) : (
-          <ul className="divide-y divide-borderSubtle/30 font-[RobotoMono]">
-            {filtered.map((e) => {
-              const sev = EVENT_SEVERITY[e.severity] || EVENT_SEVERITY.info;
-              return (
-                <li key={e.id} className="flex items-center gap-3 px-4 py-2 text-sm">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${sev.dot}`} />
-                  <span className="w-40 shrink-0 text-xs text-themeTextGray">{fmt(e.ts)}</span>
-                  <span className="w-20 shrink-0 text-[11px] uppercase tracking-wider text-themeTextGray/70">
-                    {e.type}
+          <ul className="divide-y divide-borderSubtle/30">
+            {events.map((event) => (
+              <li key={event.event_id} className="space-y-1 px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-xs text-themeTextGray">{formatTime(event.occurred_at)}</span>
+                  <span className={SEVERITY_STYLE[event.severity] || "text-themeTextGray"}>
+                    {event.severity}
                   </span>
-                  <span className={`min-w-0 flex-1 ${sev.color}`}>{e.message}</span>
-                </li>
-              );
-            })}
+                  <span>{TYPE_LABEL[event.type] || event.type}：{event.payload?.reason || event.payload?.message || "—"}</span>
+                  {event.simulation && <span className="text-xs text-themeTextGray">仿真</span>}
+                </div>
+                <div className="break-all font-[RobotoMono] text-[11px] text-themeTextGray">
+                  {event.correlation?.task_id && `任务 ${event.correlation.task_id}`}
+                  {event.correlation?.request_id && ` · 请求 ${event.correlation.request_id}`}
+                  {` · ${event.source} #${event.source_seq}`}
+                </div>
+              </li>
+            ))}
           </ul>
         )}
       </DashboardCard>
+      {nextBefore && (
+        <button
+          type="button"
+          onClick={() => loadPage(nextBefore)}
+          disabled={loading}
+          className="rounded-lg border border-borderSubtle px-4 py-2 text-sm disabled:opacity-40"
+        >
+          加载更早事件
+        </button>
+      )}
     </div>
   );
 };

@@ -114,7 +114,15 @@ const InfoPage = () => {
             }
           />
         </div>
-        <div className="grid gap-2 text-xs text-themeTextGray sm:grid-cols-3">
+        <div className="grid gap-2 text-xs text-themeTextGray sm:grid-cols-2 xl:grid-cols-4">
+          <p>
+            机器人连接：{" "}
+            {robotStatus.stale || platform?.robot_connection?.stale
+              ? "已断开或过期"
+              : platform?.robot_connection?.online
+              ? "在线"
+              : "未知"}
+          </p>
           <p>
             <T>{"Current map"}</T>:{" "}
             {robotStatus.stale

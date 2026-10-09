@@ -37,7 +37,7 @@ from .log_maintenance import prune_expired_logs
 from .route_tasks import list_saved_routes, route_mission
 from .storage_monitor import storage_report
 
-PLATFORM_SCHEMA_VERSION = 1
+PLATFORM_SCHEMA_VERSION = 3
 
 try:
     from ament_index_python.packages import get_package_share_directory
@@ -77,6 +77,26 @@ def autonomy_readiness(snapshot):
         blockers.append("software stop state unconfirmed or not durable")
     elif stop.get("active"):
         blockers.append("software stop is active")
+    battery = snapshot.get("battery_state")
+    if not snapshot.get("battery_online") or not isinstance(battery, dict):
+        blockers.append("battery state unavailable or stale")
+    elif (os.environ.get("ROBOT_MODE") == "hardware"
+          and (battery.get("simulated") is True or battery.get("source") == "simulated")):
+        blockers.append("simulated battery cannot authorize hardware motion")
+    elif battery.get("low_battery") is not False:
+        blockers.append("battery low or charge level unknown")
+    elif battery.get("charging") is not False:
+        blockers.append("battery charging state is active or unknown")
+    if snapshot.get("area_control_seen"):
+        if not snapshot.get("area_control_online"):
+            blockers.append("area control is stale")
+        elif not snapshot.get("area_control", {}).get("ready") or snapshot["area_control"].get("stop"):
+            blockers.append("area control blocks motion")
+    if any(item.get("level", 0) >= 2 and time.monotonic() - item.get("last_seen", 0) < 5
+           for item in snapshot.get("diagnostics", {}).values()):
+        blockers.append("critical diagnostics are active")
+    if (snapshot.get("mission") or {}).get("event_sync", {}).get("capacity_warning"):
+        blockers.append("robot event outbox is above the safe capacity threshold")
     return {"ready": not blockers, "blockers": blockers}
 
 
@@ -208,6 +228,81 @@ class PlatformStore:
                     timestamp TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS platform_events_robot_id ON platform_events(robot_id, id);
+                CREATE TABLE IF NOT EXISTS robot_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL UNIQUE,
+                    robot_id TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    source_seq INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    task_id TEXT,
+                    request_id TEXT,
+                    occurred_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    ingested_at TEXT NOT NULL,
+                    schema_version INTEGER NOT NULL,
+                    UNIQUE(robot_id, source, source_seq)
+                );
+                CREATE INDEX IF NOT EXISTS robot_events_history
+                    ON robot_events(robot_id, id DESC);
+                CREATE INDEX IF NOT EXISTS robot_events_task
+                    ON robot_events(robot_id, task_id, id DESC);
+                CREATE INDEX IF NOT EXISTS robot_events_request
+                    ON robot_events(robot_id, request_id, id DESC);
+                CREATE TABLE IF NOT EXISTS assets (
+                    robot_id TEXT NOT NULL,
+                    asset_id TEXT NOT NULL,
+                    map_id TEXT,
+                    map_version_id TEXT,
+                    name TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (robot_id, asset_id)
+                );
+                CREATE INDEX IF NOT EXISTS assets_map ON assets(robot_id, map_id, map_version_id);
+                CREATE TABLE IF NOT EXISTS inspection_results (
+                    robot_id TEXT NOT NULL,
+                    inspection_result_id TEXT NOT NULL,
+                    asset_id TEXT,
+                    mission_id TEXT,
+                    task_id TEXT,
+                    waypoint_id TEXT,
+                    outcome TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    details_json TEXT NOT NULL DEFAULT '{}',
+                    PRIMARY KEY (robot_id, inspection_result_id)
+                );
+                CREATE INDEX IF NOT EXISTS inspection_results_task
+                    ON inspection_results(robot_id, task_id, occurred_at DESC);
+                CREATE TABLE IF NOT EXISTS event_evidence (
+                    robot_id TEXT NOT NULL,
+                    evidence_id TEXT NOT NULL,
+                    event_id TEXT,
+                    inspection_result_id TEXT,
+                    media_type TEXT NOT NULL,
+                    uri_or_path TEXT,
+                    checksum TEXT,
+                    available INTEGER NOT NULL DEFAULT 0,
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (robot_id, evidence_id)
+                );
+                CREATE INDEX IF NOT EXISTS event_evidence_event
+                    ON event_evidence(robot_id, event_id);
+                CREATE TABLE IF NOT EXISTS device_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    robot_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    simulated INTEGER NOT NULL,
+                    stale INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS device_snapshots_recent
+                    ON device_snapshots(robot_id, device_id, id DESC);
                 CREATE TABLE IF NOT EXISTS waypoints (
                     robot_id TEXT NOT NULL,
                     waypoint_id TEXT NOT NULL,
@@ -320,6 +415,28 @@ class PlatformStore:
                     "DELETE FROM audit_entries WHERE timestamp < ?", (cutoff,)
                 )
 
+    def audit_history(self, robot_id, *, limit=100, before=None, actor=None,
+                      request_id=None, method=None, from_time=None, to_time=None):
+        query = "SELECT * FROM audit_entries WHERE robot_id = ?"
+        values = [robot_id]
+        if before is not None:
+            query += " AND id < ?"
+            values.append(before)
+        for column, value in (("actor", actor), ("request_id", request_id), ("method", method)):
+            if value:
+                query += f" AND {column} = ?"
+                values.append(value)
+        if from_time:
+            query += " AND timestamp >= ?"
+            values.append(from_time)
+        if to_time:
+            query += " AND timestamp <= ?"
+            values.append(to_time)
+        query += " ORDER BY id DESC LIMIT ?"
+        values.append(max(1, min(int(limit), 200)))
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(query, values)]
+
     def append_state_event(self, robot_id, payload):
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         fingerprint_payload = dict(payload)
@@ -369,6 +486,117 @@ class PlatformStore:
                 "WHERE robot_id = ? AND id > ? ORDER BY id ASC LIMIT 1000",
                 (robot_id, event_id),
             )]
+
+    def ingest_robot_events(self, robot_id, events):
+        """Commit a bounded outbox batch before the bridge acknowledges it."""
+        if not isinstance(events, list) or not 1 <= len(events) <= 100:
+            raise ValueError("outbox batch must contain 1 to 100 events")
+        prepared = []
+        previous_seq = None
+        batch_source = None
+        for event in events:
+            if not isinstance(event, dict) or event.get("schema_version") != 1:
+                raise ValueError("unsupported robot event schema")
+            if event.get("robot_id") != robot_id:
+                raise ValueError("robot event belongs to a different robot")
+            seq = event.get("source_seq")
+            if isinstance(seq, bool) or not isinstance(seq, int) or seq < 1:
+                raise ValueError("robot event source_seq is invalid")
+            if previous_seq is not None and seq != previous_seq + 1:
+                raise ValueError("robot event batch has a sequence gap")
+            previous_seq = seq
+            event_id = event.get("event_id")
+            source = event.get("source")
+            event_type = event.get("type")
+            occurred_at = event.get("occurred_at")
+            if not isinstance(event_id, str) or not isinstance(source, str) or not isinstance(event_type, str):
+                raise ValueError("robot event identity is invalid")
+            if not event_id or len(event_id) > 128 or not source or len(source) > 64 or not event_type or len(event_type) > 128:
+                raise ValueError("robot event identity is too long")
+            if batch_source is None:
+                batch_source = source
+            elif source != batch_source:
+                raise ValueError("robot event batch has mixed sources")
+            correlation = event.get("correlation")
+            if not isinstance(correlation, dict):
+                raise ValueError("robot event correlation must be an object")
+            for field in ("task_id", "request_id"):
+                value = correlation.get(field)
+                if value is not None and (not isinstance(value, str) or len(value) > 128):
+                    raise ValueError(f"robot event {field} is invalid")
+            if event.get("severity") not in ("INFO", "WARNING", "ERROR"):
+                raise ValueError("robot event severity is invalid")
+            try:
+                timestamp = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+            except (AttributeError, ValueError):
+                raise ValueError("robot event occurred_at must be RFC3339") from None
+            if timestamp.tzinfo is None:
+                raise ValueError("robot event occurred_at must include timezone")
+            try:
+                encoded = json.dumps(event, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            except (TypeError, ValueError):
+                raise ValueError("robot event payload is invalid JSON") from None
+            if len(encoded.encode("utf-8")) > 65536:
+                raise ValueError("robot event exceeds 64 KiB")
+            prepared.append((event_id, source, seq, event_type, occurred_at, encoded, event))
+        with self.connect() as db:
+            last_committed_seq = db.execute(
+                "SELECT COALESCE(MAX(source_seq), 0) FROM robot_events WHERE robot_id = ? AND source = ?",
+                (robot_id, prepared[0][1]),
+            ).fetchone()[0]
+            for event_id, source, seq, event_type, occurred_at, encoded, event in prepared:
+                existing = db.execute(
+                    """SELECT event_id, robot_id, source, source_seq, payload_json FROM robot_events
+                       WHERE event_id = ? OR (robot_id = ? AND source = ? AND source_seq = ?)""",
+                    (event_id, robot_id, source, seq),
+                ).fetchone()
+                if existing:
+                    if ((existing["event_id"], existing["robot_id"], existing["source"], existing["source_seq"]) != (event_id, robot_id, source, seq)
+                            or json.loads(existing["payload_json"]) != event):
+                        raise ValueError("robot event identity conflicts with existing history")
+                    continue
+                if seq != last_committed_seq + 1:
+                    raise ValueError("robot event batch has an uncommitted sequence gap")
+                correlation = event["correlation"]
+                db.execute(
+                    """INSERT INTO robot_events(event_id, robot_id, source, source_seq,
+                       event_type, severity, task_id, request_id, occurred_at,
+                       payload_json, ingested_at, schema_version)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                    (event_id, robot_id, source, seq, event_type,
+                     str(event.get("severity") or "INFO"),
+                     correlation.get("task_id"), correlation.get("request_id"),
+                     occurred_at, encoded, utc_now()),
+                )
+                self._append_event(db, robot_id, "robot_event", event)
+                last_committed_seq = seq
+        return prepared[-1][2]
+
+    def robot_event_history(self, robot_id, *, limit=100, before=None,
+                            event_type=None, severity=None, task_id=None,
+                            request_id=None, from_time=None, to_time=None):
+        limit = max(1, min(int(limit), 200))
+        with self.connect() as db:
+            query = "SELECT id, payload_json, ingested_at FROM robot_events WHERE robot_id = ?"
+            values = [robot_id]
+            if before is not None:
+                query += " AND id < ?"
+                values.append(before)
+            for column, value in (("event_type", event_type), ("severity", severity),
+                                  ("task_id", task_id), ("request_id", request_id)):
+                if value:
+                    query += f" AND {column} = ?"
+                    values.append(value)
+            if from_time:
+                query += " AND occurred_at >= ?"
+                values.append(from_time)
+            if to_time:
+                query += " AND occurred_at <= ?"
+                values.append(to_time)
+            query += " ORDER BY id DESC LIMIT ?"
+            values.append(limit)
+            return [{"cursor": row["id"], "ingested_at": row["ingested_at"],
+                     **json.loads(row["payload_json"])} for row in db.execute(query, values)]
 
     def latest_event_id(self, robot_id):
         with self.connect() as db:
@@ -733,6 +961,8 @@ class RobotBridge(Node):
         self.acks = {}
         self.mission_state = None
         self.mission_seen = 0
+        self.heartbeat = None
+        self.heartbeat_seen = 0
         self.pose = None
         self.pose_seen = 0
         self.pose_observed_at = None
@@ -749,16 +979,21 @@ class RobotBridge(Node):
         self.software_stop_state = None
         self.software_stop_seen = 0
         self.diagnostics = {}
+        self.area_control = None
+        self.area_control_seen = 0
         self.fault_candidates = {}
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.command_pub = self.create_publisher(String, "/mission/command", 10)
+        self.outbox_ack_pub = self.create_publisher(String, "/robot/events/ack", 10)
         self.battery_scenario_pub = self.create_publisher(String, "/battery/sim_scenario", 10)
         config_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.battery_config_pub = self.create_publisher(String, "/battery/platform_config", config_qos)
         self.create_subscription(String, "/mission/state", self._mission_state, qos)
+        self.create_subscription(String, "/robot/heartbeat", self._heartbeat, 10)
         self.create_subscription(String, "/mission/ack", self._mission_ack, 10)
+        self.create_subscription(String, "/robot/events/outbox", self._robot_outbox, 10)
         self.create_subscription(Odometry, "/liorf_localization/mapping/odometry", self._pose, 10)
         self.create_subscription(Odometry, "/odometry/filtered", self._odom, 10)
         # Keep the legacy Float32 topic subscribed for compatibility with
@@ -767,6 +1002,7 @@ class RobotBridge(Node):
         self.create_subscription(String, "/battery/state", self._battery_state, 10)
         self.create_subscription(String, "/ackermann/routes/catalog", self._route_catalog, 10)
         self.create_subscription(String, "/safety/software_stop/state", self._software_stop_state, 10)
+        self.create_subscription(String, "/area_rules/control", self._area_control, 10)
         self.create_subscription(DiagnosticArray, "/diagnostics", self._diagnostic, 10)
         if NavigationStatus is not None:
             self.create_subscription(NavigationStatus, "/navigation/state", self._navigation, 10)
@@ -813,6 +1049,17 @@ class RobotBridge(Node):
             self.software_stop_state = state
             self.software_stop_seen = time.monotonic()
 
+    def _area_control(self, message):
+        try:
+            state = json.loads(message.data)
+        except (ValueError, TypeError, AttributeError):
+            return
+        if not isinstance(state, dict) or not isinstance(state.get("ready"), bool) or not isinstance(state.get("stop"), bool):
+            return
+        with self.lock:
+            self.area_control = state
+            self.area_control_seen = time.monotonic()
+
     def _mission_state(self, message):
         try:
             state = json.loads(message.data)
@@ -823,6 +1070,28 @@ class RobotBridge(Node):
                 self.mission_state = state
                 self.mission_seen = time.monotonic()
 
+    def _heartbeat(self, message):
+        try:
+            heartbeat = json.loads(message.data)
+            if (not isinstance(heartbeat, dict) or heartbeat.get("schema_version") != 1
+                    or heartbeat.get("robot_id") != self.robot_id
+                    or heartbeat.get("source") != "mission_manager"
+                    or isinstance(heartbeat.get("heartbeat_seq"), bool)
+                    or not isinstance(heartbeat.get("heartbeat_seq"), int)
+                    or heartbeat["heartbeat_seq"] < 1):
+                return
+            observed_at = datetime.fromisoformat(heartbeat["observed_at"].replace("Z", "+00:00"))
+            if observed_at.tzinfo is None:
+                return
+        except (ValueError, TypeError, AttributeError, KeyError):
+            return
+        with self.lock:
+            if (self.heartbeat and time.monotonic() - self.heartbeat_seen < 6
+                    and heartbeat["heartbeat_seq"] <= self.heartbeat["heartbeat_seq"]):
+                return
+            self.heartbeat = heartbeat
+            self.heartbeat_seen = time.monotonic()
+
     def _mission_ack(self, message):
         try:
             ack = json.loads(message.data)
@@ -831,6 +1100,19 @@ class RobotBridge(Node):
         with self.condition:
             self.acks[ack.get("request_id")] = ack
             self.condition.notify_all()
+
+    def _robot_outbox(self, message):
+        try:
+            batch = json.loads(message.data)
+            if batch.get("schema_version") != 1 or batch.get("robot_id") != self.robot_id:
+                raise ValueError("outbox batch identity is invalid")
+            through_seq = self.store.ingest_robot_events(self.robot_id, batch.get("events"))
+        except (ValueError, TypeError, AttributeError, sqlite3.Error) as error:
+            self.get_logger().error(f"Robot event sync failed: {error}")
+            return
+        self.outbox_ack_pub.publish(String(data=json.dumps({
+            "schema_version": 1, "robot_id": self.robot_id, "through_seq": through_seq,
+        }, separators=(",", ":"))))
 
     def _pose(self, message):
         q = message.pose.pose.orientation
@@ -931,6 +1213,8 @@ class RobotBridge(Node):
                 battery_state_recent and battery_state and battery_state.get("available")
             )
             return {
+                "heartbeat": copy.deepcopy(self.heartbeat),
+                "heartbeat_online": self.heartbeat is not None and time.monotonic() - self.heartbeat_seen < 6,
                 "mission": copy.deepcopy(self.mission_state),
                 "mission_online": time.monotonic() - self.mission_seen < 6,
                 "pose": copy.deepcopy(self.pose),
@@ -947,6 +1231,9 @@ class RobotBridge(Node):
                 "map_identity_observed_at": self.map_identity_observed_at,
                 "software_stop_state": copy.deepcopy(self.software_stop_state),
                 "software_stop_online": self.software_stop_state is not None and time.monotonic() - self.software_stop_seen < 3,
+                "area_control": copy.deepcopy(self.area_control),
+                "area_control_seen": self.area_control_seen > 0,
+                "area_control_online": self.area_control is not None and time.monotonic() - self.area_control_seen < 3,
                 "diagnostics": copy.deepcopy(self.diagnostics),
             }
 
@@ -1356,6 +1643,12 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
         return jsonify({
             "robot_id": robot_id, "observed_at": utc_now(),
             "online": snapshot["pose_online"] or snapshot["odom_online"],
+            "robot_connection": {
+                **(snapshot.get("heartbeat") or {}),
+                "online": bool(snapshot.get("heartbeat_online")),
+                "stale": not snapshot.get("heartbeat_online", False),
+                "status": "online" if snapshot.get("heartbeat_online") else "stale",
+            },
             "pose": {**(snapshot["pose"] or {}), "stale": not snapshot["pose_online"]},
             "localization": {
                 "pose": snapshot["pose"], "online": snapshot["pose_online"],
@@ -1372,6 +1665,11 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
                 "available": snapshot["software_stop_online"],
                 "stale": not snapshot["software_stop_online"],
             },
+            "area_control": {
+                **(snapshot.get("area_control") or {}),
+                "available": bool(snapshot.get("area_control_online")),
+                "stale": not snapshot.get("area_control_online", False),
+            },
             "autonomy_ready": readiness["ready"],
             "readiness_blockers": readiness["blockers"],
             "battery": {
@@ -1383,6 +1681,7 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
             },
             "navigation": {**(snapshot["navigation"] or {}), "stale": not snapshot["navigation_online"]},
             "task": mission.get("run"), "task_stale": not snapshot["mission_online"],
+            "event_sync": mission.get("event_sync") if snapshot["mission_online"] else None,
             "fault_counts": {
                 "active": len(store.faults(robot_id, active_only=True)),
             },
@@ -1444,6 +1743,11 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
             "map_identity_online": snapshot["map_identity_online"],
             "software_stop_state": snapshot["software_stop_state"],
             "software_stop_online": snapshot["software_stop_online"],
+            "robot_connection": {
+                **(snapshot.get("heartbeat") or {}),
+                "online": bool(snapshot.get("heartbeat_online")),
+                "stale": not snapshot.get("heartbeat_online", False),
+            },
             "autonomy_ready": readiness["ready"],
             "readiness_blockers": readiness["blockers"],
             "navigation_online": snapshot["navigation_online"],
@@ -1537,6 +1841,41 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Accel-Buffering"] = "no"
         return response
+
+    @app.get(prefix + "/events/history")
+    @require_role("Viewer")
+    def platform_event_history(robot_id):
+        try:
+            limit = int(request.args.get("limit", "50"))
+            before_raw = request.args.get("before")
+            before = int(before_raw) if before_raw else None
+        except ValueError:
+            abort(400, "limit and before must be integers")
+        if not 1 <= limit <= 200 or (before is not None and before < 1):
+            abort(400, "limit must be 1–200 and before must be positive")
+        filters = {}
+        for field in ("type", "severity", "task_id", "request_id", "from", "to"):
+            value = request.args.get(field)
+            if value is not None:
+                if len(value) > 128:
+                    abort(400, f"{field} is too long")
+                filters[field] = value
+        for field in ("from", "to"):
+            if filters.get(field):
+                try:
+                    timestamp = datetime.fromisoformat(filters[field].replace("Z", "+00:00"))
+                except ValueError:
+                    abort(400, f"{field} must be RFC3339")
+                if timestamp.tzinfo is None:
+                    abort(400, f"{field} must include timezone")
+                filters[field] = timestamp.astimezone(timezone.utc).isoformat()
+        events = store.robot_event_history(
+            robot_id, limit=limit, before=before,
+            event_type=filters.get("type"), severity=filters.get("severity"),
+            task_id=filters.get("task_id"), request_id=filters.get("request_id"),
+            from_time=filters.get("from"), to_time=filters.get("to"),
+        )
+        return jsonify({"events": events, "next_before": events[-1]["cursor"] if len(events) == limit else None})
 
     @app.get(prefix + "/missions")
     @require_role("Viewer")
@@ -1710,7 +2049,7 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
     def platform_task_command(robot_id, task_id):
         payload = request.get_json(silent=True) or {}
         action = payload.get("action")
-        if action not in {"pause", "resume", "cancel", "retry", "skip"}:
+        if action not in {"pause", "resume", "cancel", "retry", "skip", "release_hold"}:
             abort(400, "Unsupported task action.")
         return dispatch(robot_id, "task." + action, {"command": action, "task_id": task_id})
 
@@ -1833,6 +2172,25 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
                     }
                     store.finish_command(command_id, "rejected", result)
         return jsonify(result)
+
+    @app.get(prefix + "/audit")
+    @require_role("Engineer")
+    def platform_audit(robot_id):
+        try:
+            limit = max(1, min(int(request.args.get("limit", "100")), 200))
+            before_text = request.args.get("before")
+            before = int(before_text) if before_text else None
+            if before is not None and before < 1:
+                raise ValueError()
+        except ValueError:
+            abort(400, "limit and before must be positive integers.")
+        rows = store.audit_history(
+            robot_id, limit=limit, before=before,
+            actor=request.args.get("actor"), request_id=request.args.get("request_id"),
+            method=request.args.get("method"), from_time=request.args.get("from"),
+            to_time=request.args.get("to"),
+        )
+        return jsonify({"entries": rows, "next_before": rows[-1]["id"] if len(rows) == limit else None})
 
     @app.get(prefix + "/faults")
     @require_role("Viewer")

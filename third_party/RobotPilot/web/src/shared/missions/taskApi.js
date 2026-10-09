@@ -17,9 +17,9 @@ const waitForCommand = async (robotId, result) => {
   throw new Error("Robot command acknowledgement timed out.");
 };
 
-const postCommand = async (robotId, path, body) => {
+const postCommand = async (robotId, path, body, method = "POST") => {
   const response = await apiFetch(path, {
-    method: "POST",
+    method,
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": requestKey(),
@@ -32,6 +32,32 @@ const postCommand = async (robotId, path, body) => {
   }
   return result;
 };
+
+/** Send the legacy mission editor's commands through the audited platform API. */
+export async function sendStoredMissionCommand(robotId, command) {
+  const prefix = `/api/v1/robots/${encodeURIComponent(robotId)}`;
+  const missionId = encodeURIComponent(command.mission_id || "");
+  const taskId = encodeURIComponent(command.task_id || "");
+  switch (command.command) {
+    case "save":
+      return postCommand(robotId, `${prefix}/missions`, command.mission);
+    case "delete":
+      return postCommand(robotId, `${prefix}/missions/${missionId}`, undefined, "DELETE");
+    case "start":
+      return postCommand(robotId, `${prefix}/tasks`, { mission_id: command.mission_id });
+    case "pause":
+    case "resume":
+    case "cancel":
+    case "retry":
+    case "skip":
+    case "release_hold":
+      return postCommand(robotId, `${prefix}/tasks/${taskId}/commands`, {
+        action: command.command,
+      });
+    default:
+      throw new Error(`Unsupported mission command: ${command.command}`);
+  }
+}
 
 /** Persist a map-bound one-off mission and start it through the robot task API. */
 export async function startOneOffMission({

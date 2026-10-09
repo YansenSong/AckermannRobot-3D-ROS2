@@ -20,6 +20,7 @@ from robotpilot_ui_package.platform_api import (
     battery_config_payload,
     register_platform_api,
 )
+from mission_manager.store import MissionStore
 
 
 class FakeBridge:
@@ -54,6 +55,7 @@ class FakeBridge:
                 "simulated": True,
                 "available": True,
                 "charging": False,
+                "low_battery": False,
                 "observed_at": "2026-10-08T00:00:00+00:00",
                 "stale": False,
             },
@@ -90,6 +92,94 @@ class FakeBridge:
 
 
 class PlatformApiTest(unittest.TestCase):
+    def test_offline_robot_outbox_replays_once_after_both_stores_restart(self):
+        robot_path = str(Path(self.directory.name) / "robot-missions.sqlite3")
+        robot = MissionStore(robot_path, "robot-001")
+        mission = robot.save_mission({
+            "id": "mission-1", "name": "Patrol", "steps": [],
+            "map_id": "map-1", "map_version_id": "map-v1",
+        })
+        robot.new_run("task-1", mission, record_start_event=True)
+        robot.update_run("task-1", status="FAILED", reason="offline failure",
+                         event_reason="offline failure")
+        robot.observe_fault("sensor", 2, "offline")
+        robot.observe_fault("sensor", 0, "restored")
+        robot.close()
+
+        robot = MissionStore(robot_path, "robot-001")
+        batch = robot.pending_events()
+        self.assertEqual([event["source_seq"] for event in batch], [1, 2, 3, 4])
+        self.assertEqual(self.store.robot_event_history("robot-001"), [])
+        self.assertEqual(self.store.ingest_robot_events("robot-001", batch), 4)
+        # Simulate the platform transaction committing and the ACK being lost.
+        self.assertEqual(self.store.ingest_robot_events("robot-001", batch), 4)
+        self.assertEqual(len(self.store.robot_event_history("robot-001")), 4)
+        robot.close()
+
+        robot = MissionStore(robot_path, "robot-001")
+        self.assertEqual(len(robot.pending_events()), 4)
+        robot.acknowledge_events(4)
+        self.assertEqual(robot.pending_events(), [])
+        robot.close()
+
+    def test_heartbeat_rejects_wrong_robot_and_non_increasing_sequence(self):
+        bridge = SimpleNamespace(
+            robot_id="robot-001", lock=threading.RLock(), heartbeat=None, heartbeat_seen=0,
+        )
+        heartbeat = {
+            "schema_version": 1, "robot_id": "robot-001", "source": "mission_manager",
+            "heartbeat_seq": 1, "observed_at": "2026-10-09T10:00:00+00:00",
+        }
+        RobotBridge._heartbeat(bridge, SimpleNamespace(data=json.dumps(heartbeat)))
+        self.assertEqual(bridge.heartbeat["heartbeat_seq"], 1)
+        RobotBridge._heartbeat(bridge, SimpleNamespace(data=json.dumps({
+            **heartbeat, "robot_id": "other", "heartbeat_seq": 2,
+        })))
+        self.assertEqual(bridge.heartbeat["heartbeat_seq"], 1)
+        RobotBridge._heartbeat(bridge, SimpleNamespace(data=json.dumps({
+            **heartbeat, "observed_at": "2026-10-09T11:00:00+00:00",
+        })))
+        self.assertEqual(bridge.heartbeat["observed_at"], heartbeat["observed_at"])
+
+    def test_audit_history_is_robot_scoped_and_filterable(self):
+        self.store.audit("req-1", "engineer", "robot-001", "POST", "/tasks", 202)
+        self.store.audit("req-2", "viewer", "robot-001", "GET", "/status", 200)
+        self.store.audit("req-3", "engineer", "other", "POST", "/tasks", 202)
+        rows = self.store.audit_history("robot-001", actor="engineer")
+        self.assertEqual([row["request_id"] for row in rows], ["req-1"])
+        response = self.client.get(self.base + "/audit?request_id=req-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["request_id"] for row in response.json["entries"]], ["req-1"])
+        self.assertEqual(self.client.get(self.base + "/audit?before=bad").status_code, 400)
+
+    def test_robot_outbox_ingest_is_idempotent_and_history_is_queryable(self):
+        event = {
+            "schema_version": 1, "event_id": "event-1", "robot_id": "robot-001",
+            "source": "mission_manager", "source_seq": 1,
+            "type": "task.status_changed", "occurred_at": "2026-10-09T10:00:00+00:00",
+            "recorded_at": "2026-10-09T10:00:00+00:00", "simulation": True,
+            "severity": "INFO", "correlation": {"task_id": "task-1", "request_id": "req-1"},
+            "payload": {"status": "RUNNING", "reason": "task started"},
+        }
+        self.assertEqual(self.store.ingest_robot_events("robot-001", [event]), 1)
+        self.assertEqual(self.store.ingest_robot_events("robot-001", [event]), 1)
+        history = self.store.robot_event_history("robot-001", task_id="task-1")
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["event_id"], "event-1")
+        self.assertEqual(self.store.robot_event_history("robot-001", task_id="other"), [])
+        response = self.client.get(self.base + "/events/history?task_id=task-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["events"][0]["event_id"], "event-1")
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            self.store.ingest_robot_events("robot-001", [{**event, "event_id": "event-2"}])
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            self.store.ingest_robot_events("robot-001", [{**event, "payload": {"status": "FAILED"}}])
+        with self.assertRaisesRegex(ValueError, "correlation"):
+            self.store.ingest_robot_events("robot-001", [{**event, "correlation": []}])
+        with self.assertRaisesRegex(ValueError, "sequence gap"):
+            self.store.ingest_robot_events("robot-001", [{**event, "event_id": "event-3", "source_seq": 3}])
+        self.assertEqual(len(self.store.robot_event_history("robot-001")), 1)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.previous_log_root = os.environ.get("ROBOTPILOT_LOG_ROOT")
@@ -351,7 +441,7 @@ class PlatformApiTest(unittest.TestCase):
         self.assertIn("version", response.json)
         self.assertIn("commit", response.json)
         self.assertIn("frontend_build", response.json)
-        self.assertEqual(response.json["schema_versions"]["platform"], 1)
+        self.assertEqual(response.json["schema_versions"]["platform"], 3)
         self.assertIsNone(response.json["schema_versions"]["auth"])
         self.assertNotIn("path", response.json)
 
@@ -577,6 +667,7 @@ class PlatformApiTest(unittest.TestCase):
 
         viewer_csrf = login("Viewer")
         self.assertEqual(client.get(base + "/status").status_code, 200)
+        self.assertEqual(client.get(base + "/audit").status_code, 403)
         self.assertEqual(client.get("/api/v1/robots/robot-002/status").status_code, 403)
         self.assertEqual(
             client.post(base + "/waypoints", json={"map_id": "simulation/map-a", "name": "A", "x": 0, "y": 0, "yaw": 0},
@@ -598,6 +689,7 @@ class PlatformApiTest(unittest.TestCase):
         )
 
         operator_csrf = login("Operator")
+        self.assertEqual(client.get(base + "/audit").status_code, 403)
         self.assertEqual(
             client.post(base + "/waypoints", json={"map_id": "simulation/map-a", "name": "A", "x": 0, "y": 0, "yaw": 0},
                         headers={"X-CSRF-Token": operator_csrf}).status_code,
@@ -696,8 +788,32 @@ class PlatformApiTest(unittest.TestCase):
         ready = autonomy_readiness({
             "mission_online": True, "map_identity_online": True, "pose_online": True,
             "software_stop_online": True, "software_stop_state": bridge.software_stop_state,
+            "battery_online": True,
+            "battery_state": {"available": True, "low_battery": False, "charging": False},
         })
         self.assertTrue(ready["ready"])
+        blocked = autonomy_readiness({
+            "mission_online": True, "map_identity_online": True, "pose_online": True,
+            "software_stop_online": True, "software_stop_state": bridge.software_stop_state,
+            "battery_online": True,
+            "battery_state": {"available": True, "low_battery": True, "charging": False},
+            "area_control_seen": True, "area_control_online": True,
+            "area_control": {"ready": True, "stop": True},
+            "diagnostics": {"motor": {"level": 2, "last_seen": time.monotonic()}},
+        })
+        self.assertFalse(blocked["ready"])
+        self.assertIn("battery low or charge level unknown", blocked["blockers"])
+        self.assertIn("area control blocks motion", blocked["blockers"])
+        self.assertIn("critical diagnostics are active", blocked["blockers"])
+        with patch.dict(os.environ, {"ROBOT_MODE": "hardware"}):
+            simulated = autonomy_readiness({
+                "mission_online": True, "map_identity_online": True, "pose_online": True,
+                "software_stop_online": True, "software_stop_state": bridge.software_stop_state,
+                "battery_online": True,
+                "battery_state": {"available": True, "low_battery": False,
+                                  "charging": False, "source": "simulated"},
+            })
+        self.assertIn("simulated battery cannot authorize hardware motion", simulated["blockers"])
         bridge.software_stop_seen = 0
         stopped = autonomy_readiness({
             "mission_online": True, "map_identity_online": True, "pose_online": True,
@@ -808,18 +924,23 @@ class PlatformApiTest(unittest.TestCase):
         self.assertIsNone(migrated["valid_from"])
         self.assertIsNone(migrated["valid_until"])
         with sqlite3.connect(legacy_path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+            tables = {row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )}
+            self.assertTrue({"assets", "inspection_results", "event_evidence",
+                             "device_snapshots", "robot_events"} <= tables)
 
     def test_platform_database_rejects_future_schema_before_mutation(self):
         future_path = str(Path(self.directory.name) / "future-platform.sqlite3")
         with sqlite3.connect(future_path) as db:
-            db.execute("PRAGMA user_version = 2")
+            db.execute("PRAGMA user_version = 4")
         os.chmod(future_path, 0o644)
         with self.assertRaisesRegex(RuntimeError, "schema is newer"):
             PlatformStore(future_path)
         self.assertEqual(Path(future_path).stat().st_mode & 0o777, 0o644)
         with sqlite3.connect(future_path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
 
     def test_waypoint_payload_rejects_invalid_values_duplicate_and_unsupported_action(self):
         body = {"map_id": "simulation/map-a", "name": "A", "x": 0, "y": 0, "yaw": 0}

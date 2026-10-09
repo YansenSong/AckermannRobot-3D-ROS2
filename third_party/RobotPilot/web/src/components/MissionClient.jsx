@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useContext, useEffect } from "react";
 import { toast } from "react-toastify";
 import { useRos, useRosStatus } from "../app/App";
+import { AuthContext } from "../app/App";
 import { AppConfig } from "../shared/constants";
 import {
   replaceMissionsFromRobot,
@@ -8,23 +9,19 @@ import {
 } from "../shared/missions/missions";
 import { setHistory, setRun } from "../shared/missions/missionClient";
 import { setMissionCommandTransport } from "../shared/missions/transport";
-import { newMissionId } from "../shared/missions/id";
+import { sendStoredMissionCommand } from "../shared/missions/taskApi";
 
 // A ROS bridge only: closing this tab cannot stop the robot-side executor.
 const MissionClient = () => {
   const ros = useRos();
   const rosStatus = useRosStatus();
+  const { robotId } = useContext(AuthContext);
   useEffect(() => {
     if (rosStatus !== "connected") {
       setMissionOnline(false);
       setMissionCommandTransport(null);
       return;
     }
-    const commandTopic = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.MISSION_COMMAND_TOPIC,
-      messageType: "std_msgs/String",
-    });
     const stateTopic = new window.ROSLIB.Topic({
       ros,
       name: AppConfig.MISSION_STATE_TOPIC,
@@ -36,13 +33,11 @@ const MissionClient = () => {
       messageType: "std_msgs/String",
     });
     let latestState = 0;
-    const send = (command) =>
-      commandTopic.publish(
-        new window.ROSLIB.Message({
-          data: JSON.stringify({ ...command, request_id: newMissionId() }),
-        }),
-      );
-    setMissionCommandTransport(send);
+    setMissionCommandTransport((command) =>
+      sendStoredMissionCommand(robotId, command).catch((error) => {
+        toast.error(`任务指令被拒绝：${error.message}`);
+      }),
+    );
     stateTopic.subscribe((msg) => {
       try {
         const state = JSON.parse(msg.data);
@@ -65,10 +60,8 @@ const MissionClient = () => {
         /* ignore malformed ROS messages */
       }
     });
-    send({ command: "query" });
     const watchdog = setInterval(() => {
       if (Date.now() - latestState > 6000) setMissionOnline(false);
-      else send({ command: "query" });
     }, 3000);
     return () => {
       clearInterval(watchdog);
@@ -77,7 +70,7 @@ const MissionClient = () => {
       setMissionCommandTransport(null);
       setMissionOnline(false);
     };
-  }, [ros, rosStatus]);
+  }, [ros, rosStatus, robotId]);
   return null;
 };
 export default MissionClient;

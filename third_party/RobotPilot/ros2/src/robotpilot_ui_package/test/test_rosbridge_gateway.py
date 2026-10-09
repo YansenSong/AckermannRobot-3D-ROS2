@@ -8,7 +8,11 @@ from robotpilot_ui_package.rosbridge_gateway import allowed_origin, required_rol
 class GatewayPolicyTest(unittest.TestCase):
     def test_default_deny_and_role_categories(self):
         self.assertEqual(required_role({"op": "subscribe", "topic": "/mission/state"}), "Viewer")
-        self.assertEqual(required_role({"op": "publish", "topic": "/mission/command"}), "Operator")
+        self.assertIsNone(required_role({"op": "publish", "topic": "/mission/command"}))
+        self.assertEqual(required_role({"op": "publish", "topic": "/mission/command",
+                                        "msg": {"data": '{"command":"query"}'}}), "Viewer")
+        self.assertIsNone(required_role({"op": "publish", "topic": "/mission/command",
+                                        "msg": {"data": '{"command":"start"}'}}))
         self.assertEqual(required_role({"op": "publish", "topic": "/initialpose"}), "Engineer")
         self.assertIsNone(required_role({"op": "publish", "topic": "/cmd_vel"}))
         self.assertIsNone(required_role({"op": "publish", "topic": "/unknown"}))

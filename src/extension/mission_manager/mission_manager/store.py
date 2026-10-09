@@ -3,11 +3,13 @@
 import json
 import os
 import sqlite3
+import hashlib
+import uuid
 from datetime import datetime, timezone
 
 
 ACTIVE_STATUSES = ("RUNNING", "PAUSED")
-MISSION_SCHEMA_VERSION = 2
+MISSION_SCHEMA_VERSION = 3
 
 
 def utc_now():
@@ -15,8 +17,9 @@ def utc_now():
 
 
 class MissionStore:
-    def __init__(self, path):
+    def __init__(self, path, robot_id="robot-001"):
         path = os.path.expanduser(path)
+        self.robot_id = robot_id
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.db = sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
@@ -109,6 +112,36 @@ class MissionStore:
             );
             CREATE INDEX IF NOT EXISTS schedule_runs_history
                 ON schedule_runs(robot_id, schedule_id, scheduled_for DESC);
+            CREATE TABLE IF NOT EXISTS command_results (
+                request_id TEXT PRIMARY KEY,
+                body_hash TEXT NOT NULL,
+                status TEXT NOT NULL,
+                ack_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS robot_event_outbox (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                robot_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                acked_at TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(robot_id, seq)
+            );
+            CREATE INDEX IF NOT EXISTS robot_event_outbox_pending
+                ON robot_event_outbox(robot_id, acked_at, seq);
+            CREATE TABLE IF NOT EXISTS diagnostic_fault_states (
+                name TEXT PRIMARY KEY,
+                level INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
                 """
             )
             with self.db:
@@ -181,7 +214,8 @@ class MissionStore:
             cursor = self.db.execute("DELETE FROM missions WHERE id = ?", (mission_id,))
         return cursor.rowcount > 0
 
-    def new_run(self, task_id, mission, origin_request_id=None):
+    def new_run(self, task_id, mission, origin_request_id=None, robot_pose=None,
+                record_start_event=False):
         now = utc_now()
         with self.db:
             self.db.execute(
@@ -192,6 +226,11 @@ class MissionStore:
                 (task_id, mission["id"], mission["name"], json.dumps(mission["steps"]), mission.get("map_id"),
                  mission.get("map_version_id"), now, now, origin_request_id),
             )
+            if record_start_event:
+                self._insert_event(
+                    task_id, "RUNNING", 0, "task started", robot_pose,
+                    origin_request_id, event_type="task.status_changed",
+                )
         return self.run(task_id)
 
     def run(self, task_id):
@@ -209,11 +248,13 @@ class MissionStore:
         return [self._run(row) for row in rows]
 
     def update_run(self, task_id, *, status=None, step_index=None, attempt=None,
-                   remaining_seconds=None, reason=None, hold_active=None):
+                   remaining_seconds=None, reason=None, hold_active=None,
+                   event_reason=None, event_pose=None, event_request_id=None):
         current = self.run(task_id)
         if current is None:
             raise ValueError("unknown task_id")
         next_status = status if status is not None else current["status"]
+        next_step_index = step_index if step_index is not None else current["step_index"]
         ended_at = utc_now() if next_status in ("SUCCEEDED", "FAILED", "CANCELLED") else None
         with self.db:
             self.db.execute(
@@ -223,7 +264,7 @@ class MissionStore:
                    WHERE task_id = ?""",
                 (
                     next_status,
-                    step_index if step_index is not None else current["step_index"],
+                    next_step_index,
                     attempt if attempt is not None else current["attempt"],
                     remaining_seconds if remaining_seconds is not None else current["remaining_seconds"],
                     utc_now(),
@@ -233,20 +274,189 @@ class MissionStore:
                     task_id,
                 ),
             )
+            if event_reason is not None:
+                self._insert_event(
+                    task_id, next_status, next_step_index, event_reason,
+                    event_pose, event_request_id,
+                    event_type="task.status_changed" if next_status != current["status"] else "task.event",
+                )
         return self.run(task_id)
 
     def add_event(
         self, task_id, status, step_index, reason, robot_pose=None, request_id=None
     ):
         with self.db:
+            self._insert_event(task_id, status, step_index, reason, robot_pose, request_id)
+
+    def _insert_event(self, task_id, status, step_index, reason, robot_pose,
+                      request_id, *, event_type="task.event"):
+        """Write the run history and its durable outbound event in one transaction."""
+        now = utc_now()
+        self.db.execute(
+            """INSERT INTO run_events(task_id, timestamp, status, step_index,
+               reason, robot_pose_json, request_id) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (task_id, now, status, step_index, reason,
+             json.dumps(robot_pose) if robot_pose is not None else None, request_id),
+        )
+        run = self.db.execute(
+            "SELECT mission_id, map_id, map_version_id FROM runs WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        event_id = str(uuid.uuid4())
+        event = {
+            "schema_version": 1, "event_id": event_id,
+            "robot_id": self.robot_id, "source": "mission_manager",
+            "type": event_type, "occurred_at": now, "recorded_at": now,
+            "simulation": os.environ.get("ROBOT_MODE") == "simulation",
+            "correlation": {
+                "task_id": task_id, "mission_id": run["mission_id"] if run else None,
+                "request_id": request_id,
+                "map_id": run["map_id"] if run else None,
+                "map_version_id": run["map_version_id"] if run else None,
+            },
+            "severity": "ERROR" if status == "FAILED" else "INFO",
+            "payload": {"status": status, "step_index": step_index, "reason": reason,
+                        "robot_pose": robot_pose},
+        }
+        self._write_outbox(event)
+
+    def _write_outbox(self, event):
+        now = event["occurred_at"]
+        event_id = event["event_id"]
+        event_type = event["type"]
+        cursor = self.db.execute(
+            """INSERT INTO robot_event_outbox
+               (event_id, robot_id, source, event_type, occurred_at, payload_json,
+                schema_version, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
+            (event_id, self.robot_id, event["source"], event_type, now,
+             json.dumps(event, separators=(",", ":"), allow_nan=False), now),
+        )
+        event["source_seq"] = cursor.lastrowid
+        self.db.execute(
+            "UPDATE robot_event_outbox SET payload_json = ? WHERE seq = ?",
+            (json.dumps(event, separators=(",", ":"), allow_nan=False), cursor.lastrowid),
+        )
+
+    def observe_fault(self, name, level, message):
+        """Persist diagnostic state changes on the robot even when Flask is offline."""
+        if not isinstance(name, str) or not name or len(name) > 256:
+            raise ValueError("diagnostic name is invalid")
+        if isinstance(level, bool) or level not in (0, 1, 2, 3):
+            raise ValueError("diagnostic level is invalid")
+        message = str(message)[:1024]
+        with self.db:
+            previous = self.db.execute(
+                "SELECT level, message FROM diagnostic_fault_states WHERE name = ?", (name,)
+            ).fetchone()
+            if previous and previous["level"] == level and previous["message"] == message:
+                return None
+            now = utc_now()
             self.db.execute(
-                """INSERT INTO run_events(task_id, timestamp, status, step_index,
-                   reason, robot_pose_json, request_id) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    task_id, utc_now(), status, step_index, reason,
-                    json.dumps(robot_pose) if robot_pose is not None else None,
-                    request_id,
-                ),
+                """INSERT INTO diagnostic_fault_states(name, level, message, updated_at)
+                   VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET
+                   level = excluded.level, message = excluded.message,
+                   updated_at = excluded.updated_at""",
+                (name, level, message, now),
+            )
+            if level == 0 and (previous is None or previous["level"] == 0):
+                return None
+            event_type = ("fault.resolved" if level == 0 else
+                          "fault.updated" if previous and previous["level"] > 0 else
+                          "fault.raised")
+            current_run = self.latest_run()
+            event = {
+                "schema_version": 1, "event_id": str(uuid.uuid4()),
+                "robot_id": self.robot_id, "source": "mission_manager",
+                "type": event_type, "occurred_at": now, "recorded_at": now,
+                "simulation": os.environ.get("ROBOT_MODE") == "simulation",
+                "correlation": {
+                    "task_id": current_run["task_id"] if current_run and current_run["status"] in ACTIVE_STATUSES else None,
+                    "request_id": current_run.get("origin_request_id") if current_run and current_run["status"] in ACTIVE_STATUSES else None,
+                    "fault_code": "DIAG-" + hashlib.sha1(name.encode()).hexdigest()[:12].upper(),
+                },
+                "severity": "ERROR" if level >= 2 else "WARNING" if level == 1 else "INFO",
+                "payload": {"name": name, "message": message, "level": level},
+            }
+            self._write_outbox(event)
+            return event["event_id"]
+
+    def active_critical_faults(self):
+        return [dict(row) for row in self.db.execute(
+            "SELECT name, level, message FROM diagnostic_fault_states WHERE level >= 2 ORDER BY name"
+        ).fetchall()]
+
+    def reserve_command(self, request_id, command):
+        """Persist a claim before execution; a crash leaves an unknown result, never a replay."""
+        body_hash = hashlib.sha256(json.dumps(
+            command, sort_keys=True, separators=(",", ":")
+        ).encode()).hexdigest()
+        now = utc_now()
+        with self.db:
+            inserted = self.db.execute(
+                """INSERT OR IGNORE INTO command_results
+                   (request_id, body_hash, status, ack_json, created_at, updated_at)
+                   VALUES (?, ?, 'pending', NULL, ?, ?)""",
+                (request_id, body_hash, now, now),
+            )
+            row = self.db.execute(
+                "SELECT body_hash, status, ack_json FROM command_results WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if row["body_hash"] != body_hash:
+                raise ValueError("request_id was used for a different command")
+            return inserted.rowcount == 1, json.loads(row["ack_json"]) if row["ack_json"] else None
+
+    def finish_command(self, request_id, ack):
+        with self.db:
+            self.db.execute(
+                """UPDATE command_results SET status = ?, ack_json = ?, updated_at = ?
+                   WHERE request_id = ? AND status = 'pending'""",
+                ("accepted" if ack.get("ok") else "rejected",
+                 json.dumps(ack, separators=(",", ":")), utc_now(), request_id),
+            )
+
+    def pending_events(self, limit=100):
+        limit = max(1, min(int(limit), 100))
+        with self.db:
+            rows = list(self.db.execute(
+                """SELECT seq, payload_json FROM robot_event_outbox
+                   WHERE robot_id = ? AND acked_at IS NULL ORDER BY seq LIMIT ?""",
+                (self.robot_id, limit),
+            ))
+            if rows:
+                self.db.executemany(
+                    "UPDATE robot_event_outbox SET retry_count = retry_count + 1 WHERE seq = ?",
+                    [(row["seq"],) for row in rows],
+                )
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def outbox_status(self):
+        row = self.db.execute(
+            """SELECT COUNT(*) AS pending_count, MIN(seq) AS oldest_pending_seq,
+                      MAX(seq) AS latest_seq, MAX(retry_count) AS max_retry_count
+               FROM robot_event_outbox WHERE robot_id = ? AND acked_at IS NULL""",
+            (self.robot_id,),
+        ).fetchone()
+        latest = self.db.execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM robot_event_outbox WHERE robot_id = ?",
+            (self.robot_id,),
+        ).fetchone()[0]
+        return {
+            "pending_count": row["pending_count"],
+            "oldest_pending_seq": row["oldest_pending_seq"],
+            "latest_seq": latest,
+            "max_retry_count": row["max_retry_count"] or 0,
+            "capacity_warning": row["pending_count"] >= 10000,
+        }
+
+    def acknowledge_events(self, through_seq):
+        if isinstance(through_seq, bool) or not isinstance(through_seq, int) or through_seq < 1:
+            raise ValueError("through_seq must be a positive integer")
+        with self.db:
+            self.db.execute(
+                """UPDATE robot_event_outbox SET acked_at = ?
+                   WHERE robot_id = ? AND seq <= ? AND acked_at IS NULL""",
+                (utc_now(), self.robot_id, through_seq),
             )
 
     def events(self, task_id, limit=200):

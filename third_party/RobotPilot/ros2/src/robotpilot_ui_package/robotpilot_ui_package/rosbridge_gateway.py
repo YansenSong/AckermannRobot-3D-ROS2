@@ -16,7 +16,7 @@ READ_REQUEST_TOPICS = {
     "/nav_data_req", "/ackermann/routes/request", "/WP_req",
 }
 OPERATOR_TOPICS = {
-    "/mission/command", "/goal_pose", "/stop", "/dock_trigger", "/undock_robot",
+    "/goal_pose", "/stop", "/dock_trigger", "/undock_robot",
 }
 SOFTWARE_STOP_REQUEST_TOPIC = "/safety/software_stop/request"
 ENGINEER_TOPICS = {
@@ -41,6 +41,14 @@ def required_role(message):
         return "Viewer"
     if operation in ("advertise", "unadvertise", "publish"):
         topic = message.get("topic")
+        if topic == "/mission/command":
+            if operation != "publish":
+                return "Viewer"
+            try:
+                command = json.loads(message.get("msg", {}).get("data", ""))
+            except (TypeError, AttributeError, json.JSONDecodeError):
+                return None
+            return "Viewer" if isinstance(command, dict) and command.get("command") == "query" else None
         if topic == SOFTWARE_STOP_REQUEST_TOPIC and operation in ("advertise", "unadvertise"):
             return "Viewer"
         if topic == SOFTWARE_STOP_REQUEST_TOPIC:

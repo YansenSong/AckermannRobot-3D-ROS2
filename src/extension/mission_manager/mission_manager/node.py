@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from nav_status.msg import NavigationStatus
@@ -24,7 +25,7 @@ from .scheduler import next_run_at, parse_utc
 NAV_TIMEOUT = 600.0
 DOCK_TIMEOUT = 120.0
 ACTIVE = ("RUNNING", "PAUSED")
-REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 def validated_mission(raw):
@@ -97,7 +98,8 @@ class MissionManager(Node):
         super().__init__("mission_manager")
         default_db = mission_database_path()
         self.declare_parameter("database_path", default_db)
-        self.store = MissionStore(self.get_parameter("database_path").value)
+        self.robot_id = os.environ.get("ROBOT_ID", "robot-001")
+        self.store = MissionStore(self.get_parameter("database_path").value, self.robot_id)
         self.run = self.store.latest_run()
         self.active_request_id = None
         self.pose = None
@@ -113,32 +115,47 @@ class MissionManager(Node):
         self.software_stop_received_at = None
         self.map_identity = None
         self.map_identity_received_at = None
-        self.robot_id = os.environ.get("ROBOT_ID", "robot-001")
+        self.fault_candidates = {}
+        self.battery_state = None
+        self.battery_received_at = None
+        self.area_control = None
+        self.area_control_received_at = None
+        self.heartbeat_seq = 0
+        self.last_sent_seq = 0
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.state_pub = self.create_publisher(String, "/mission/state", qos)
         self.ack_pub = self.create_publisher(String, "/mission/ack", 10)
+        self.outbox_pub = self.create_publisher(String, "/robot/events/outbox", 10)
+        self.heartbeat_pub = self.create_publisher(String, "/robot/heartbeat", 10)
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.hold_pub = self.create_publisher(Bool, "/mission/hold", 10)
         self.dock_pub = self.create_publisher(Bool, "/dock_trigger", 10)
         self.undock_pub = self.create_publisher(Bool, "/undock_robot", 10)
         self.create_subscription(String, "/mission/command", self.on_command, 10)
+        self.create_subscription(String, "/robot/events/ack", self.on_outbox_ack, 10)
         self.create_subscription(
             String, "/safety/software_stop/state", self.on_software_stop_state, 10
         )
         self.create_subscription(String, "/ackermann/routes/catalog", self.on_route_catalog, 10)
+        self.create_subscription(DiagnosticArray, "/diagnostics", self.on_diagnostics, 10)
+        self.create_subscription(String, "/battery/state", self.on_battery_state, 10)
+        self.create_subscription(String, "/area_rules/control", self.on_area_control, 10)
         self.create_subscription(NavigationStatus, "/navigation/state", self.on_nav, 10)
         self.create_subscription(PoseStamped, "/goal_pose", self.on_goal, 10)
         self.create_subscription(String, "/dock_trigger_status", self.on_dock, 10)
         self.create_subscription(Odometry, "/liorf_localization/mapping/odometry", self.on_odom, 10)
         self.create_timer(0.2, self.tick)
         self.create_timer(2.0, self.publish_state)
+        self.create_timer(5.0, self.publish_outbox)
+        self.create_timer(2.0, self.publish_heartbeat)
         self.store.recover_claimed_schedules(self.robot_id)
         self.create_timer(1.0, self.scheduler_tick)
         if self.run and (self.run["status"] in ACTIVE or self.run["hold_active"]):
             self._stop_motion()
             if self.run["status"] == "RUNNING":
                 self._transition("PAUSED", "mission manager restarted; resume required")
+        self.publish_heartbeat()
         self.publish_state()
 
     def _event(self, reason):
@@ -150,9 +167,64 @@ class MissionManager(Node):
                              ))
 
     def _transition(self, status, reason, **fields):
-        self.run = self.store.update_run(self.run["task_id"], status=status, reason=reason, **fields)
-        self._event(reason)
+        self.run = self.store.update_run(
+            self.run["task_id"], status=status, reason=reason,
+            event_reason=reason, event_pose=self.pose,
+            event_request_id=(self.active_request_id or self.run.get("origin_request_id")),
+            **fields,
+        )
         self.publish_state()
+
+    def publish_outbox(self):
+        events = self.store.pending_events(limit=100)
+        if events:
+            self.last_sent_seq = events[-1]["source_seq"]
+            self.outbox_pub.publish(String(data=json.dumps({
+                "schema_version": 1, "robot_id": self.robot_id, "events": events,
+            }, separators=(",", ":"))))
+
+    def publish_heartbeat(self):
+        self.heartbeat_seq += 1
+        self.heartbeat_pub.publish(String(data=json.dumps({
+            "schema_version": 1, "robot_id": self.robot_id,
+            "source": "mission_manager", "heartbeat_seq": self.heartbeat_seq,
+            "observed_at": utc_now(),
+            "robot_mode": os.environ.get("ROBOT_MODE", "unknown"),
+            "network_transport": "simulated" if os.environ.get("ROBOT_MODE") == "simulation" else "unknown",
+            "status": "online",
+        }, separators=(",", ":"))))
+
+    def on_outbox_ack(self, message):
+        try:
+            ack = json.loads(message.data)
+            if ack.get("schema_version") != 1 or ack.get("robot_id") != self.robot_id:
+                return
+            if (isinstance(ack.get("through_seq"), bool)
+                    or not isinstance(ack.get("through_seq"), int)
+                    or ack["through_seq"] > self.last_sent_seq):
+                return
+            self.store.acknowledge_events(ack.get("through_seq"))
+        except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+            return
+
+    def on_diagnostics(self, message):
+        now = time.monotonic()
+        for item in message.status:
+            if not item.name or len(item.name) > 256:
+                continue
+            level = item.level[0] if isinstance(item.level, (bytes, bytearray)) else int(item.level)
+            if level not in (0, 1, 2, 3):
+                continue
+            if level == 0:
+                self.fault_candidates.pop(item.name, None)
+                self.store.observe_fault(item.name, 0, item.message)
+                continue
+            candidate = self.fault_candidates.get(item.name)
+            if candidate is None or candidate[0:2] != (level, item.message) or now - candidate[2] > 5:
+                self.fault_candidates[item.name] = (level, item.message, now)
+                continue
+            if now - candidate[2] >= 3:
+                self.store.observe_fault(item.name, level, item.message)
 
     def _stop_motion(self):
         self.hold_pub.publish(Bool(data=True))
@@ -177,6 +249,26 @@ class MissionManager(Node):
         self.software_stop_state = state
         self.software_stop_received_at = time.monotonic()
 
+    def on_battery_state(self, message):
+        try:
+            state = json.loads(message.data)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return
+        if not isinstance(state, dict) or not isinstance(state.get("available"), bool):
+            return
+        self.battery_state = state
+        self.battery_received_at = time.monotonic()
+
+    def on_area_control(self, message):
+        try:
+            state = json.loads(message.data)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return
+        if not isinstance(state, dict) or not isinstance(state.get("ready"), bool) or not isinstance(state.get("stop"), bool):
+            return
+        self.area_control = state
+        self.area_control_received_at = time.monotonic()
+
     def motion_guard_block_reason(self):
         if (
             self.software_stop_state is None
@@ -190,6 +282,31 @@ class MissionManager(Node):
             return "software stop state is not durable"
         if self.software_stop_state["active"]:
             return "software stop is active"
+        if (
+            self.battery_state is None
+            or self.battery_received_at is None
+            or time.monotonic() - self.battery_received_at > 5.0
+        ):
+            return "battery state is unavailable or stale"
+        if not self.battery_state["available"]:
+            return "battery is unavailable"
+        if (os.environ.get("ROBOT_MODE") == "hardware"
+                and (self.battery_state.get("simulated") is True
+                     or self.battery_state.get("source") == "simulated")):
+            return "simulated battery cannot authorize hardware motion"
+        if self.battery_state.get("low_battery") is not False:
+            return "battery is low or its charge level is unknown"
+        if self.battery_state.get("charging") is not False:
+            return "battery is charging or charge state is unknown"
+        if self.area_control_received_at is not None:
+            if time.monotonic() - self.area_control_received_at > 3.0:
+                return "area control is stale"
+            if not self.area_control["ready"] or self.area_control["stop"]:
+                return "area control blocks motion"
+        if self.store.active_critical_faults():
+            return "critical diagnostics are active"
+        if self.store.outbox_status()["capacity_warning"]:
+            return "robot event outbox is above the safe capacity threshold"
         if (
             self.pose is None
             or self.pose_received_at is None
@@ -240,6 +357,7 @@ class MissionManager(Node):
             item["events"] = self.store.events(item["task_id"], limit=50)
         payload = {"schema_version": 1, "online": True, "server_time": utc_now(),
                    "missions": self.store.missions(), "run": run,
+                   "event_sync": self.store.outbox_status(),
                    "history": history, "schedules": self.store.schedules(self.robot_id),
                    "schedule_runs": self.store.schedule_runs(self.robot_id, limit=500)}
         self.state_pub.publish(String(data=json.dumps(payload)))
@@ -345,29 +463,43 @@ class MissionManager(Node):
         )
         if block_reason:
             raise ValueError(block_reason)
-        self._release_motion()
         self.run = self.store.new_run(
-            str(uuid.uuid4()), mission, origin_request_id=origin_request_id
+            str(uuid.uuid4()), mission, origin_request_id=origin_request_id,
+            robot_pose=self.pose, record_start_event=True,
         )
+        self._release_motion()
         self.owned_goals.clear()
-        self._event("task started")
         self._begin_step()
         return self.run["task_id"]
 
     def on_command(self, message):
         request_id = None
         origin_request_id = None
+        reserved_request_id = None
         try:
             command = json.loads(message.data)
             if not isinstance(command, dict):
                 raise ValueError("command must be an object")
             request_id = command.get("request_id")
+            action = command.get("command")
+            if action != "query" and request_id is not None:
+                if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+                    raise ValueError("request_id is invalid")
+                is_new, prior_ack = self.store.reserve_command(request_id, command)
+                if not is_new:
+                    ack = prior_ack or {
+                        "request_id": request_id, "ok": False,
+                        "error": "command result is unknown after interruption; inspect robot state",
+                        "status": "unknown",
+                    }
+                    self.ack_pub.publish(String(data=json.dumps(ack)))
+                    return
+                reserved_request_id = request_id
             candidate_origin = command.get("origin_request_id")
             if isinstance(candidate_origin, str) and REQUEST_ID_RE.fullmatch(candidate_origin):
                 origin_request_id = candidate_origin
             self.active_request_id = origin_request_id
-            action = command.get("command")
-            if action in {"start", "resume", "retry", "skip"}:
+            if action in {"start", "resume", "retry", "skip", "release_hold"}:
                 block_reason = self.motion_guard_block_reason()
                 if block_reason:
                     raise ValueError(block_reason)
@@ -432,11 +564,15 @@ class MissionManager(Node):
                 ack["task_id"] = self.run["task_id"]
             if action == "schedule.save":
                 ack["schedule_id"] = command["_schedule_id"]
+            if reserved_request_id:
+                self.store.finish_command(reserved_request_id, ack)
             self.ack_pub.publish(String(data=json.dumps(ack)))
         except (ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError) as exc:
-            self.ack_pub.publish(String(data=json.dumps({"request_id": request_id,
-                                                        "origin_request_id": origin_request_id,
-                                                        "ok": False, "error": str(exc)})))
+            ack = {"request_id": request_id, "origin_request_id": origin_request_id,
+                   "ok": False, "error": str(exc)}
+            if reserved_request_id:
+                self.store.finish_command(reserved_request_id, ack)
+            self.ack_pub.publish(String(data=json.dumps(ack)))
         finally:
             self.active_request_id = None
 

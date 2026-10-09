@@ -10,6 +10,55 @@ from mission_manager.store import MissionStore
 
 
 class MissionStoreTest(unittest.TestCase):
+    def test_command_claim_replays_ack_and_conflicting_body_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "commands.sqlite3")
+            store = MissionStore(path)
+            command = {"command": "start", "mission_id": "mission-1", "request_id": "command-1"}
+            self.assertEqual(store.reserve_command("command-1", command), (True, None))
+            self.assertEqual(store.reserve_command("command-1", command), (False, None))
+            ack = {"request_id": "command-1", "ok": True, "task_id": "task-1"}
+            store.finish_command("command-1", ack)
+            store.close()
+            reopened = MissionStore(path)
+            self.assertEqual(reopened.reserve_command("command-1", command), (False, ack))
+            with self.assertRaisesRegex(ValueError, "different command"):
+                reopened.reserve_command("command-1", {**command, "mission_id": "mission-2"})
+            reopened.close()
+
+    def test_run_and_outbox_event_are_atomic_and_ack_is_persistent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "outbox.sqlite3")
+            store = MissionStore(path)
+            mission = store.save_mission({"id": "mission-1", "name": "Patrol", "steps": [],
+                                          "map_id": "map-1", "map_version_id": "map-v1"})
+            store.new_run("task-1", mission, origin_request_id="request-1", record_start_event=True)
+            pending = store.pending_events()
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(store.outbox_status()["pending_count"], 1)
+            self.assertEqual(pending[0]["correlation"]["task_id"], "task-1")
+            self.assertEqual(pending[0]["source_seq"], 1)
+            store.update_run("task-1", status="FAILED", reason="blocked",
+                             event_reason="blocked", event_request_id="request-1")
+            self.assertEqual([item["source_seq"] for item in store.pending_events()], [1, 2])
+            store.acknowledge_events(1)
+            store.close()
+            reopened = MissionStore(path)
+            self.assertEqual([item["source_seq"] for item in reopened.pending_events()], [2])
+            self.assertEqual(reopened.outbox_status()["latest_seq"], 2)
+            self.assertEqual(reopened.outbox_status()["oldest_pending_seq"], 2)
+            reopened.close()
+
+    def test_fault_events_record_raise_and_resolution_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = MissionStore(os.path.join(directory, "fault.sqlite3"))
+            self.assertIsNotNone(store.observe_fault("laser", 2, "offline"))
+            self.assertIsNone(store.observe_fault("laser", 2, "offline"))
+            self.assertIsNotNone(store.observe_fault("laser", 0, "online"))
+            self.assertEqual([event["type"] for event in store.pending_events()],
+                             ["fault.raised", "fault.resolved"])
+            store.close()
+
     def test_mission_database_path_honors_explicit_and_ros_home_settings(self):
         with patch.dict(os.environ, {
             "ROBOTPILOT_MISSION_DB": "~/robotpilot/mission.sqlite3",
@@ -92,7 +141,7 @@ class MissionStoreTest(unittest.TestCase):
             connection.close()
 
             store = MissionStore(path)
-            self.assertEqual(store.schema_version, 2)
+            self.assertEqual(store.schema_version, 3)
             self.assertIsNone(store.mission("legacy")["map_id"])
             self.assertIsNone(store.run("task")["map_version_id"])
             self.assertEqual(store.run("task")["status"], "PAUSED")
@@ -103,11 +152,11 @@ class MissionStoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "future.sqlite3")
             with sqlite3.connect(path) as db:
-                db.execute("PRAGMA user_version = 3")
+                db.execute("PRAGMA user_version = 4")
             with self.assertRaisesRegex(RuntimeError, "schema is newer"):
                 MissionStore(path)
             with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
 
     def test_schema_migration_rolls_back_after_ddl_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -172,7 +221,7 @@ class MissionStoreTest(unittest.TestCase):
                     PRAGMA user_version = 1;
                 """)
             store = MissionStore(path)
-            self.assertEqual(store.schema_version, 2)
+            self.assertEqual(store.schema_version, 3)
             self.assertEqual(store.run("task-1")["status"], "PAUSED")
             self.assertIsNone(store.run("task-1")["origin_request_id"])
             self.assertIsNone(store.events("task-1")[0]["request_id"])

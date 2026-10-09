@@ -33,12 +33,80 @@ class MissionNodeTest(unittest.TestCase):
         odometry = Odometry()
         odometry.pose.pose.orientation.w = 1.0
         node.on_odom(odometry)
+        node.on_battery_state(String(data=json.dumps({
+            "available": True, "low_battery": False, "charging": False,
+            "source": "sim", "simulation": True,
+        })))
 
     @staticmethod
     def current_map(node, map_id="grid-1", map_version_id="grid-1"):
         node.on_route_catalog(String(data=json.dumps({
             "active_files": {"map_id": map_id, "map_version_id": map_version_id},
         })))
+
+    def test_motion_guard_checks_battery_area_and_critical_faults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            try:
+                self.software_stop(node)
+                self.assertEqual(node.motion_guard_block_reason(), "")
+                node.on_battery_state(String(data=json.dumps({
+                    "available": True, "low_battery": True, "charging": False,
+                })))
+                self.assertIn("battery is low", node.motion_guard_block_reason())
+                node.on_battery_state(String(data=json.dumps({
+                    "available": True, "low_battery": False, "charging": True,
+                })))
+                self.assertEqual(node.motion_guard_block_reason(), "battery is charging or charge state is unknown")
+                self.software_stop(node)
+                node.battery_received_at = time.monotonic() - 6
+                self.assertIn("stale", node.motion_guard_block_reason())
+                self.software_stop(node)
+                node.on_area_control(String(data=json.dumps({"ready": True, "stop": True})))
+                self.assertEqual(node.motion_guard_block_reason(), "area control blocks motion")
+                node.on_area_control(String(data=json.dumps({"ready": True, "stop": False})))
+                node.store.observe_fault("motor", 2, "fault")
+                self.assertEqual(node.motion_guard_block_reason(), "critical diagnostics are active")
+                node.store.observe_fault("motor", 0, "ok")
+                self.assertEqual(node.motion_guard_block_reason(), "")
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+
+    def test_outbox_ack_cannot_advance_past_published_sequence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            node.outbox_pub = PublisherSpy()
+            try:
+                node.store.observe_fault("laser", 2, "offline")
+                node.on_outbox_ack(String(data=json.dumps({
+                    "schema_version": 1, "robot_id": node.robot_id, "through_seq": 999,
+                })))
+                self.assertEqual(node.store.outbox_status()["pending_count"], 1)
+                node.publish_outbox()
+                node.on_outbox_ack(String(data=json.dumps({
+                    "schema_version": 1, "robot_id": node.robot_id, "through_seq": 1,
+                })))
+                self.assertEqual(node.store.outbox_status()["pending_count"], 0)
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
 
     def test_autonomy_guard_requires_fresh_localization(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -51,6 +119,9 @@ class MissionNodeTest(unittest.TestCase):
                 node.on_software_stop_state(String(data=json.dumps({
                     "active": False, "result": "confirmed", "durable": True,
                 })))
+                node.on_battery_state(String(data=json.dumps({
+                    "available": True, "low_battery": False, "charging": False,
+                })))
                 self.assertEqual(
                     node.motion_guard_block_reason(),
                     "localization pose is unavailable or stale",
@@ -58,6 +129,9 @@ class MissionNodeTest(unittest.TestCase):
                 odometry = Odometry()
                 odometry.pose.pose.orientation.w = 1.0
                 node.on_odom(odometry)
+                node.on_battery_state(String(data=json.dumps({
+                    "available": True, "low_battery": False, "charging": False,
+                })))
                 self.assertEqual(node.motion_guard_block_reason(), "")
                 node.pose_received_at = time.monotonic() - 4
                 self.assertEqual(
@@ -105,6 +179,15 @@ class MissionNodeTest(unittest.TestCase):
                 self.assertEqual(
                     node.store.events(task_id)[0]["request_id"], "web-request-123456"
                 )
+                original_event_count = len(node.store.events(task_id))
+                command({
+                    "command": "start", "mission_id": "m",
+                    "request_id": "robot-command-123",
+                    "origin_request_id": "web-request-123456",
+                })
+                self.assertEqual(node.run["task_id"], task_id)
+                self.assertEqual(len(node.store.events(task_id)), original_event_count)
+                self.assertEqual(json.loads(node.ack_pub.messages[-1].data)["task_id"], task_id)
                 command({"command": "pause", "task_id": task_id})
                 self.assertEqual(node.run["status"], "PAUSED")
                 self.assertEqual(node.run["hold_active"], 1)
