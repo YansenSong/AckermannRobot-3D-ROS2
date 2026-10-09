@@ -1262,7 +1262,7 @@ export ANTHROPIC_API_KEY="sk-ant-your-key-here"
 cd ~/robotpilot-ui
 source /opt/ros/jazzy/setup.bash
 source ros2/install/setup.bash
-bash scripts/run_ui_backend.sh
+ros2 launch robotpilot_ui_package new_ui_launch.py
 ```
 
 If the key is missing, the panel shows a toast: `ANTHROPIC_API_KEY is not set
@@ -1666,7 +1666,7 @@ export ANTHROPIC_API_KEY="sk-ant-your-key-here"
 cd ~/robotpilot-ui
 source /opt/ros/jazzy/setup.bash
 source ros2/install/setup.bash
-bash scripts/run_ui_backend.sh
+ros2 launch robotpilot_ui_package new_ui_launch.py
 ```
 
 4. **Toast reports a Claude API error** — confirm `ANTHROPIC_API_KEY` is valid

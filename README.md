@@ -19,8 +19,12 @@ src/
 ├── bringup/                             # 系统启动编排（robot_bringup）
 ├── simulation/          # 仿真、模型和传感器
 └── extension/
-    ├── nav_status/                            # 导航状态监控
-    └── mission_manager/                       # 机器人侧任务管理
+    ├── nav_status/                         # 导航状态监控
+    ├── mission_manager/                    # 机器人侧任务管理
+    └── area_rules/                         # 区域规则
+
+third_party/RobotPilot/                         # 机器人网页与后端
+third_party/pcd2pgm/                            # PCD 转 2D 地图工具
 ```
 
 ## 1. 编译
@@ -119,6 +123,31 @@ NeuPAN 导航栈的主要链路为：
 其中 `src/planning/smac_neupan_bridge` 负责接收目标点、调用
 `/compute_path_to_pose`、发布 `/plan_path` 和全局路径剩余距离；它不是
 Smac 规划器本身，也不负责局部控制。
+
+## 5. RobotPilot 网页
+
+首次使用先安装前端依赖，并按第 1 节编译 ROS 工作区：
+
+```bash
+cd third_party/RobotPilot/web
+npm ci
+cd ../../..
+bash scripts/run_robotpilot.sh
+```
+
+打开 `http://localhost:3000/`。脚本同时启动前端和 ROS 后端（`127.0.0.1:5050`），按 `Ctrl+C` 一起停止。它默认面向本机仿真；建图和导航仍需分别启动。更多说明见 [RobotPilot README](third_party/RobotPilot/README.md)。
+
+## 脚本速查
+
+| 脚本 | 用途 |
+|---|---|
+| `mapping_mini.sh` | 启动 mini.world、LIO-SAM 建图和键盘控制 |
+| `pcd_to_map.sh maps/<地图名>` | 将 `GlobalMap.pcd` 转为 `map.pgm`、`map.yaml` |
+| `nav_liorf_neupan.sh maps/<地图名>` | 启动仿真导航主体：LIORF 定位和 Smac 规划 |
+| `run_neupan.sh` | 在另一个终端启动 NeuPAN 局部规划 |
+| `run_robotpilot.sh` | 同时启动 RobotPilot 前端和后端 |
+
+以上脚本均从项目根目录以 `bash scripts/<脚本名>` 运行。
 
 ## 单独启动仿真
 

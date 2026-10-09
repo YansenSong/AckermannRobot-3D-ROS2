@@ -43,10 +43,10 @@ bash scripts/sync_frontend_to_ros.sh
 source /opt/ros/jazzy/setup.bash
 bash scripts/build_ros.sh
 source ros2/install/setup.bash
-bash scripts/run_ui_backend.sh
+ros2 launch robotpilot_ui_package new_ui_launch.py
 ```
 
-打开 `http://127.0.0.1:5050/`。根目录 `scripts/run_ui_backend.sh` 负责加载 ROS 与本工作区并启动 Flask launch。UI launch 会启动 Flask 和面向浏览器的 ROS 节点；
+打开 `http://127.0.0.1:5050/`。上述命令直接启动已构建的 UI 后端；根目录的 `scripts/run_robotpilot.sh` 会同时启动开发版前端和后端。UI launch 会启动 Flask 和面向浏览器的 ROS 节点；
 如果已安装相应软件包，还会启动 `rosbridge_server`、`rosapi` 和
 `web_video_server`。它不会启动机器人驱动、Nav2、定位组件、传感器或仿真器；
 如需实时数据，请另行启动兼容的机器人或仿真器 ROS 工作区。
