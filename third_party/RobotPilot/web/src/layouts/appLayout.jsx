@@ -4,7 +4,6 @@ import Header from "../components/Header";
 import Logs from "../components/Logs";
 import NotificationsWatcher from "../components/NotificationsWatcher";
 import EventRecorder from "../components/EventRecorder";
-import SchedulerRunner from "../components/SchedulerRunner";
 import MissionClient from "../components/MissionClient";
 import StatusBar from "../components/StatusBar";
 import AuthModeBanner from "../components/AuthModeBanner";
@@ -28,7 +27,6 @@ const AppLayout = () => {
       <StatusBar />
       <NotificationsWatcher />
       <EventRecorder />
-      <SchedulerRunner />
       <MissionClient />
       <main
         id="main-content"

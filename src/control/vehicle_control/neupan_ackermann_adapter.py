@@ -3,6 +3,7 @@
 """Convert NeuPAN Ackermann steering commands to body yaw-rate commands."""
 
 import math
+import signal
 
 import rclpy
 from geometry_msgs.msg import Twist
@@ -74,6 +75,7 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         if node is not None:
             node.destroy_node()
         if rclpy.ok():

@@ -47,23 +47,53 @@ const EventRecorder = () => {
 
     sub(AppConfig.DOCK_TRIGGER_STATUS_TOPIC, "std_msgs/String", (msg) => {
       if (msg.data === "docked") {
-        addEvent({ type: "docking", severity: "success", message: "Docking complete", dedupeKey: "dock-docked" });
+        addEvent({
+          type: "docking",
+          severity: "success",
+          message: "Docking complete",
+          dedupeKey: "dock-docked",
+        });
       } else if (msg.data === "failed") {
-        addEvent({ type: "docking", severity: "error", message: "Docking failed", dedupeKey: "dock-failed" });
+        addEvent({
+          type: "docking",
+          severity: "error",
+          message: "Docking failed",
+          dedupeKey: "dock-failed",
+        });
       } else if (msg.data === "undocked") {
-        addEvent({ type: "docking", severity: "info", message: "Undocked", dedupeKey: "dock-undocked" });
+        addEvent({
+          type: "docking",
+          severity: "info",
+          message: "Undocked",
+          dedupeKey: "dock-undocked",
+        });
       }
     });
 
-    sub(AppConfig.BATTERY_TOPIC, "std_msgs/Float32", ({ data }) => {
-      if (data <= LOW_BATTERY && lowBatteryArmedRef.current) {
+    sub(AppConfig.BATTERY_STATE_TOPIC, "std_msgs/String", ({ data }) => {
+      let state;
+      try {
+        state = JSON.parse(data);
+      } catch {
+        return;
+      }
+      if (
+        !state?.available ||
+        state.stale ||
+        !Number.isFinite(Number(state.percent))
+      )
+        return;
+      const percent = Number(state.percent);
+      if (percent <= LOW_BATTERY && lowBatteryArmedRef.current) {
         lowBatteryArmedRef.current = false;
         addEvent({
           type: "battery",
           severity: "warning",
-          message: `Battery low: ${Math.round(data)}%`,
+          message: `${
+            state.simulated ? "Simulated battery low" : "Battery low"
+          }: ${Math.round(percent)}%`,
         });
-      } else if (data > LOW_BATTERY + 5) {
+      } else if (percent > LOW_BATTERY + 5) {
         lowBatteryArmedRef.current = true;
       }
     });

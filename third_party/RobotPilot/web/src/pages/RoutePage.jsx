@@ -3,6 +3,7 @@ import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 import { useRos } from "../app/App";
+import { useRoleAccess } from "../shared/auth/roleAccess";
 import { AppConfig } from "../shared/constants/index";
 import { useT } from "../shared/i18n/i18n";
 import TimeModal from "../components/modal/TimeModal";
@@ -92,6 +93,7 @@ const findMapArray = (structure, activeFiles) => {
 const RoutePage = () => {
   const { t } = useT();
   const ros = useRos();
+  const routeAccess = useRoleAccess("Engineer");
   // eslint-disable-next-line no-unused-vars
   const [selectedPointType, setSelectedPointType] = useState(null);
   const [pointsSettable, setPointsSettable] = useState(false);
@@ -266,9 +268,15 @@ const RoutePage = () => {
   }, [onMapClickHandler, ros]);
 
   const onOperationTopicPublish = (message) => {
+    if (!routeAccess.allowed) {
+      toast.warn(t(routeAccess.reason));
+      return false;
+    }
+    if (!uiOperationTopic.current) return false;
     uiOperationTopic.current.publish(
       new window.ROSLIB.Message({ data: message }),
     );
+    return true;
   };
 
   const selectRouteForEditing = (route) => {
@@ -285,6 +293,10 @@ const RoutePage = () => {
   };
 
   const publishEditedWaypoints = (points) => {
+    if (!routeAccess.allowed) {
+      toast.warn(t(routeAccess.reason));
+      return;
+    }
     const topic = uiOperationTopic.current;
     if (!topic) return;
     const waypoints = points.map(({ x, y, qx, qy, qz, qw, hours, minutes }) => [
@@ -369,6 +381,10 @@ const RoutePage = () => {
     setOpenTimeModal(false);
 
     if (data) {
+      if (!routeAccess.allowed) {
+        toast.warn(t(routeAccess.reason));
+        return;
+      }
       window.NAV2D.sendPointToRobot(ros, data);
     } else {
       const markerOnMap = window.NAV2D.orientatedPointItem;
@@ -479,6 +495,10 @@ const RoutePage = () => {
   };
 
   const onPlanRouteClick = async () => {
+    if (!routeAccess.allowed) {
+      toast.warn(t(routeAccess.reason));
+      return;
+    }
     if (!ros) {
       toast.error(t("Robot connection is offline!"));
       return;
@@ -502,7 +522,8 @@ const RoutePage = () => {
 
     const planSegment = (start, goal, segmentNumber) =>
       new Promise((resolve, reject) => {
-        const id = window.crypto?.randomUUID?.() || `${Date.now()}-${segmentNumber}`;
+        const id =
+          window.crypto?.randomUUID?.() || `${Date.now()}-${segmentNumber}`;
         const responseTopic = new window.ROSLIB.Topic({
           ros,
           name: AppConfig.ROUTE_PLAN_RESPONSE_TOPIC,
@@ -519,7 +540,14 @@ const RoutePage = () => {
         };
         const timeout = window.setTimeout(() => {
           cleanup();
-          reject(new Error(t("Global planner request failed for segment {segment}.").replace("{segment}", segmentNumber)));
+          reject(
+            new Error(
+              t("Global planner request failed for segment {segment}.").replace(
+                "{segment}",
+                segmentNumber,
+              ),
+            ),
+          );
         }, 45000);
         responseTopic.subscribe((message) => {
           let result;
@@ -538,9 +566,11 @@ const RoutePage = () => {
             reject(new Error(t("Couldn't find a route to that point.")));
           }
         });
-        requestTopic.publish(new window.ROSLIB.Message({
-          data: JSON.stringify({ id, start, goal }),
-        }));
+        requestTopic.publish(
+          new window.ROSLIB.Message({
+            data: JSON.stringify({ id, start, goal }),
+          }),
+        );
       });
 
     setPlanningRoute(true);
@@ -739,7 +769,7 @@ const RoutePage = () => {
       <div className="sectionHeight flex flex-col gap-5 py-4 sm:gap-6 sm:py-6 xl:h-[calc(100vh-145px)] xl:min-h-0">
         <SectionHeader
           eyebrow="Route authoring"
-          title="Plan reusable robot routes"
+          title="Task planning"
           description="Create and manage reusable routes for the map currently loaded in the Ackermann simulation."
           action={
             <StatusBadge
@@ -749,14 +779,15 @@ const RoutePage = () => {
             />
           }
         />
+        {!routeAccess.allowed && (
+          <p className="rounded-lg border border-statusYellow/40 p-3 text-xs text-statusYellow">
+            {t(routeAccess.reason)}.{" "}
+            {t("Route authoring requires Engineer permission.")}
+          </p>
+        )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {[
-            [
-              "Group",
-              selectedFile.group,
-              "Routes are stored under the active simulation map",
-            ],
             ["Map", selectedFile.map],
             ["Current route", selectedFile.route],
           ].map(([label, value, caption]) => (
@@ -805,7 +836,11 @@ const RoutePage = () => {
                 </p>
                 <Button
                   onBtnClick={onNewRouteClick}
-                  type={pointsSettable || !hasActiveMap ? "disabled" : "orange"}
+                  type={
+                    !routeAccess.allowed || pointsSettable || !hasActiveMap
+                      ? "disabled"
+                      : "orange"
+                  }
                 >
                   <span className="iconPlus" aria-hidden="true" />
                   <span>{t("Create")}</span>
@@ -819,15 +854,24 @@ const RoutePage = () => {
                         ? ""
                         : selectedFile.route
                     }
-                    onChange={(event) => selectRouteForEditing(event.target.value)}
-                    disabled={pointsSettable || filesData.length === 0 || !hasActiveMap}
+                    onChange={(event) =>
+                      selectRouteForEditing(event.target.value)
+                    }
+                    disabled={
+                      !routeAccess.allowed ||
+                      pointsSettable ||
+                      filesData.length === 0 ||
+                      !hasActiveMap
+                    }
                     className="min-h-10 w-full rounded-lg border border-borderSubtle bg-bgCard px-3 text-sm text-textWhiteHover outline-none focus:border-themeBlue disabled:opacity-50"
                   >
                     <option value="" disabled hidden>
                       {t("Select a saved route…")}
                     </option>
                     {filesData.map((route) => (
-                      <option key={route} value={route}>{route}</option>
+                      <option key={route} value={route}>
+                        {route}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -840,17 +884,36 @@ const RoutePage = () => {
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     onBtnClick={onEditRouteClick}
-                    type={!pointsSettable && selectedFile.route === "Null" ? "disabled" : ""}
+                    type={
+                      !routeAccess.allowed ||
+                      (!pointsSettable && selectedFile.route === "Null")
+                        ? "disabled"
+                        : ""
+                    }
                   >
                     <span className="iconMap" aria-hidden="true" />
-                    <span>{t(pointsSettable ? "Cancel edit" : "Edit route")}</span>
+                    <span>
+                      {t(pointsSettable ? "Cancel edit" : "Edit route")}
+                    </span>
                   </Button>
-                  <Button onBtnClick={onSaveRouteClick} type={pointsSettable ? "success" : "disabled"}>
+                  <Button
+                    onBtnClick={onSaveRouteClick}
+                    type={
+                      routeAccess.allowed && pointsSettable
+                        ? "success"
+                        : "disabled"
+                    }
+                  >
                     <span className="iconSave" aria-hidden="true" />
                     <span>{t("Save")}</span>
                   </Button>
                 </div>
-                <Button onBtnClick={onClearRouteClick} type={!pointsSettable ? "disabled" : ""}>
+                <Button
+                  onBtnClick={onClearRouteClick}
+                  type={
+                    !routeAccess.allowed || !pointsSettable ? "disabled" : ""
+                  }
+                >
                   <span className="iconTrash" aria-hidden="true" />
                   <span>{t("Clear waypoints")}</span>
                 </Button>
@@ -862,10 +925,19 @@ const RoutePage = () => {
                 </p>
                 <Button
                   onBtnClick={onPlanRouteClick}
-                  type={planningRoute || !hasActiveMap || routeWaypoints.length === 0 ? "disabled" : ""}
+                  type={
+                    !routeAccess.allowed ||
+                    planningRoute ||
+                    !hasActiveMap ||
+                    routeWaypoints.length === 0
+                      ? "disabled"
+                      : ""
+                  }
                 >
                   <span className="iconMap" aria-hidden="true" />
-                  <span>{t(planningRoute ? "Planning route…" : "Auto-plan")}</span>
+                  <span>
+                    {t(planningRoute ? "Planning route…" : "Auto-plan")}
+                  </span>
                 </Button>
               </div>
 
@@ -876,14 +948,26 @@ const RoutePage = () => {
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     onBtnClick={onRenameRouteClick}
-                    type={pointsSettable || selectedFile.route === "Null" ? "disabled" : ""}
+                    type={
+                      !routeAccess.allowed ||
+                      pointsSettable ||
+                      selectedFile.route === "Null"
+                        ? "disabled"
+                        : ""
+                    }
                   >
                     <span className="iconMap" aria-hidden="true" />
                     <span>{t("Rename")}</span>
                   </Button>
                   <Button
                     onBtnClick={onDeleteRouteClick}
-                    type={pointsSettable || selectedFile.route === "Null" ? "disabled" : "danger"}
+                    type={
+                      !routeAccess.allowed ||
+                      pointsSettable ||
+                      selectedFile.route === "Null"
+                        ? "disabled"
+                        : "danger"
+                    }
                   >
                     <span className="iconTrash" aria-hidden="true" />
                     <span>{t("Delete")}</span>

@@ -1,8 +1,15 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useContext,
+} from "react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-import { useRos, useRuntimeConfig } from "../app/App";
+import { AuthContext, useRos, useRosStatus, useRuntimeConfig } from "../app/App";
+import { useRoleAccess } from "../shared/auth/roleAccess";
 import { AppConfig } from "../shared/constants";
 
 import Map from "../components/Map";
@@ -19,23 +26,58 @@ import useKeepoutZones from "../shared/hooks/useKeepoutZones";
 import { addEvent } from "../shared/events/eventLog";
 import { INSPECTION_PROFILE } from "../shared/robot/robotContract";
 import { useT, T } from "../shared/i18n/i18n";
+import useSoftwareStop from "../shared/hooks/useSoftwareStop";
+import useMissionRun from "../shared/hooks/useMissionRun";
+import { startOneOffMission } from "../shared/missions/taskApi";
 
 const INITIAL_POSE_COV = [
   0.25, 0, 0, 0, 0, 0, 0, 0.25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0685,
 ];
 
-const NAVIGATION_STATE = {
-  PLANNING: 1,
-  MOVING: 2,
-  ARRIVED: 3,
-  FAILED: 4,
-};
-
 const MapPage = () => {
   const ros = useRos();
+  const rosStatus = useRosStatus();
   const { config } = useRuntimeConfig();
+  const { robotId, robotMode } = useContext(AuthContext);
+  const activeMission = useMissionRun();
+  const missionIsActive = ["running", "paused"].includes(activeMission?.status);
   const { t } = useT();
+  const navigationAccess = useRoleAccess("Operator");
+  const localizationAccess = useRoleAccess("Engineer");
+  const waypointAccess = useRoleAccess("Engineer");
+  const manualAccess = useRoleAccess("Engineer");
+  const navigationAccessRef = useRef(navigationAccess);
+  navigationAccessRef.current = navigationAccess;
+  const localizationAccessRef = useRef(localizationAccess);
+  localizationAccessRef.current = localizationAccess;
+  const softwareStop = useSoftwareStop();
+  const manualDisabledReason =
+    robotMode !== "simulation"
+      ? t("Manual control is available in simulation mode only.")
+      : rosStatus !== "connected"
+        ? t("Robot connection is offline!")
+        : !manualAccess.allowed
+          ? t(manualAccess.reason)
+          : !softwareStop.stateFresh || softwareStop.robotState?.active !== false
+            ? t("Software stop state is unknown or active.")
+            : ["pending", "unknown"].includes(softwareStop.requestState?.status)
+              ? t("Software stop request is pending.")
+              : missionIsActive
+                ? t("Stop the active task before manual control.")
+                : "";
+  const manualEnabled = !INSPECTION_PROFILE && !manualDisabledReason;
+  const softwareStopRef = useRef(softwareStop);
+  softwareStopRef.current = softwareStop;
+  const navigationSafetyReady = () => {
+    const state = softwareStopRef.current;
+    return (
+      state.stateFresh &&
+      navigationAccessRef.current.allowed &&
+      !state.robotState?.active &&
+      !["pending", "unknown"].includes(state.requestState?.status)
+    );
+  };
   const mapRef = useRef(null);
 
   // mode: null | 'goal' | 'pose' | 'waypoint'
@@ -57,28 +99,39 @@ const MapPage = () => {
     setWaypointQueueState(next);
   };
 
-  const [queueExecuting, setQueueExecuting] = useState(false);
   const [activeWaypointIndex, setActiveWaypointIndex] = useState(-1);
   const [completedWaypointCount, setCompletedWaypointCount] = useState(0);
-  const queueExecutingRef = useRef(false);
-  const queueIdxRef = useRef(0);
-  const queueGoalActiveRef = useRef(false);
-  const queueGoalSentAtRef = useRef(0);
-  const queueNearGoalSinceRef = useRef(0);
-  const queueAdvanceTimerRef = useRef(null);
-  const queueVelocityRef = useRef(Number.POSITIVE_INFINITY);
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState("");
   const [routeLoading, setRouteLoading] = useState(false);
-  const routeContextRef = useRef({ group: "", map: "" });
+  const routeContextRef = useRef({
+    group: "",
+    map: "",
+    mapId: "",
+    versionId: "",
+  });
   const selectedRouteRef = useRef(selectedRoute);
   selectedRouteRef.current = selectedRoute;
   const routeOperationTopicRef = useRef(null);
+  const runRouteMissionRef = useRef(null);
   const pendingRouteLoadRef = useRef(false);
   const pendingRouteTimerRef = useRef(null);
   const previewedRouteRef = useRef("");
 
-  const { waypoints, addWaypoint, removeWaypoint } = useSavedWaypoints();
+  const {
+    waypoints,
+    addWaypoint,
+    removeWaypoint,
+    updateWaypoint,
+    mapId: waypointMapId,
+    mapVersionId: waypointMapVersionId,
+    loading: waypointsLoading,
+    error: waypointsError,
+    observedAt: waypointsObservedAt,
+    stale: waypointsStale,
+    legacyWaypoints,
+    importLegacyWaypoints,
+  } = useSavedWaypoints();
   useKeepoutZones();
   const waypointsRef = useRef(waypoints);
   useEffect(() => {
@@ -93,20 +146,12 @@ const MapPage = () => {
     });
   }, [waypointQueue, activeWaypointIndex, completedWaypointCount]);
 
-  const goalPoseTopic = useRef(null);
   const initialPoseTopic = useRef(null);
-  const stopTopic = useRef(null);
-  const cmdVelTopic = useRef(null);
+  const navCancelService = useRef(null);
   const pendingInitialPoseRef = useRef(false);
 
   useEffect(() => {
     if (!ros || !window.ROSLIB) return;
-
-    goalPoseTopic.current = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.GOAL_POSE_TOPIC,
-      messageType: "geometry_msgs/PoseStamped",
-    });
 
     initialPoseTopic.current = new window.ROSLIB.Topic({
       ros,
@@ -114,16 +159,10 @@ const MapPage = () => {
       messageType: "geometry_msgs/PoseWithCovarianceStamped",
     });
 
-    stopTopic.current = new window.ROSLIB.Topic({
+    navCancelService.current = new window.ROSLIB.Service({
       ros,
-      name: AppConfig.STOP_TOPIC,
-      messageType: "std_msgs/Bool",
-    });
-
-    cmdVelTopic.current = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.CMD_VEL_TOPIC,
-      messageType: "geometry_msgs/Twist",
+      name: AppConfig.NAV_CANCEL_GOAL_SERVICE,
+      serviceType: "action_msgs/CancelGoal",
     });
 
     const localizationTopic = new window.ROSLIB.Topic({
@@ -140,9 +179,8 @@ const MapPage = () => {
     return () => localizationTopic.unsubscribe();
   }, [ros]);
 
-  // Route files are authored on the Routes page, then loaded here into the
-  // same queue used by hand-placed waypoints. The route store scopes its
-  // catalog to the occupancy map currently loaded in the simulation.
+  // Route files are authored on the Routes page, then loaded here for preview.
+  // Execution is translated into a map-bound MissionManager task.
   useEffect(() => {
     if (!ros || !window.ROSLIB) return;
 
@@ -174,10 +212,15 @@ const MapPage = () => {
         const active = response.active_files || {};
         const mapChanged =
           routeContextRef.current.group !== (active.group || "") ||
-          routeContextRef.current.map !== (active.map || "");
+          routeContextRef.current.map !== (active.map || "") ||
+          routeContextRef.current.mapId !== (active.map_id || "") ||
+          routeContextRef.current.versionId !==
+            (active.map_version_id || active.map_id || "");
         routeContextRef.current = {
           group: active.group || "",
           map: active.map || "",
+          mapId: active.map_id || "",
+          versionId: active.map_version_id || active.map_id || "",
         };
         const options = [];
         for (const groupEntry of response.structure || []) {
@@ -199,6 +242,7 @@ const MapPage = () => {
           setWaypointQueue([]);
           setActiveWaypointIndex(-1);
           setCompletedWaypointCount(0);
+          window.NAV2D?.clearGoalPose?.();
         }
         setSelectedRoute((current) =>
           !mapChanged && options.some((route) => route.value === current)
@@ -242,16 +286,10 @@ const MapPage = () => {
 
       setWaypointQueue(route);
       previewedRouteRef.current = selectedRouteRef.current;
-      queueIdxRef.current = 0;
-      queueExecutingRef.current = shouldExecute;
-      queueGoalActiveRef.current = false;
-      queueNearGoalSinceRef.current = 0;
-      setActiveWaypointIndex(shouldExecute ? 0 : -1);
+      setActiveWaypointIndex(-1);
       setCompletedWaypointCount(0);
-      setQueueExecuting(shouldExecute);
       if (shouldExecute) {
-        publishGoal(route[0]);
-        toast.info(`${t("Executing route")}: ${selectedRouteRef.current} (${route.length})`);
+        runRouteMissionRef.current?.(route, selectedRouteRef.current);
       }
     });
 
@@ -271,193 +309,126 @@ const MapPage = () => {
     };
   }, [ros, t]);
 
-  const finishQueueWaypoint = () => {
-    if (!queueExecutingRef.current || queueGoalActiveRef.current === false)
-      return;
-    queueGoalActiveRef.current = false;
-    const current = waypointQueueRef.current[queueIdxRef.current];
-    setCompletedWaypointCount(queueIdxRef.current + 1);
-    setActiveWaypointIndex(-1);
-    const dwellMs = Math.max(0, Number(current?.dwellSeconds) || 0) * 1000;
-    if (queueAdvanceTimerRef.current)
-      window.clearTimeout(queueAdvanceTimerRef.current);
-    queueAdvanceTimerRef.current = window.setTimeout(() => {
-      queueAdvanceTimerRef.current = null;
-      if (!queueExecutingRef.current) return;
-      const next = queueIdxRef.current + 1;
-      if (next < waypointQueueRef.current.length) {
-        queueIdxRef.current = next;
-        queueNearGoalSinceRef.current = 0;
-        setActiveWaypointIndex(next);
-        publishGoal(waypointQueueRef.current[next]);
-        toast.info(
-          `${t("Waypoint")} ${next + 1} / ${waypointQueueRef.current.length}`,
+  const startManualSteps = useCallback(
+    async (steps, name) => {
+      if (INSPECTION_PROFILE) return;
+      if (missionIsActive) {
+        toast.warn(t("Another task is already active."));
+        return false;
+      }
+      if (!navigationSafetyReady()) {
+        setActiveWaypointIndex(-1);
+        toast.warn(
+          t(
+            "Cannot send navigation goal while software stop state is unknown or active",
+          ),
         );
-      } else {
-        queueExecutingRef.current = false;
-        setQueueExecuting(false);
-        setActiveWaypointIndex(-1);
-        setCompletedWaypointCount(waypointQueueRef.current.length);
-        toast.success(t("All waypoints complete!"));
+        return false;
       }
-    }, dwellMs);
-  };
+      try {
+        const result = await startOneOffMission({
+          robotId,
+          mapId: waypointMapId,
+          mapVersionId: waypointMapVersionId,
+          name,
+          steps,
+        });
+        toast.info(
+          `${t("Task accepted")}: ${result.task_id || result.command_id}`,
+        );
+        return true;
+      } catch (error) {
+        toast.error(error.message || t("Task could not be started"));
+        return false;
+      }
+    },
+    [missionIsActive, robotId, waypointMapId, waypointMapVersionId, t],
+  );
 
-  // Advance the queue from this project's navigation-state topic. Goals from
-  // this page use /goal_pose and are tracked by nav_status, not by the Nav2
-  // action status relay.
-  useEffect(() => {
-    if (!ros || !window.ROSLIB) return;
+  const toPoseStep = (pose, waypointName = "") => ({
+    type: "waypoint",
+    waypointName,
+    pose: {
+      x: Number(pose.position.x),
+      y: Number(pose.position.y),
+      z: Number(pose.orientation.z) || 0,
+      w: Number(pose.orientation.w ?? 1),
+    },
+  });
 
-    const statusTopic = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.NAVIGATION_STATE_TOPIC,
-      messageType: AppConfig.NAVIGATION_STATE_TYPE,
-    });
-
-    statusTopic.subscribe((msg) => {
-      if (!queueExecutingRef.current) return;
-
-      if (
-        msg.state === NAVIGATION_STATE.PLANNING ||
-        msg.state === NAVIGATION_STATE.MOVING
-      ) {
-        queueGoalActiveRef.current = true;
+  const goToWaypoint = useCallback(
+    (wp) => {
+      if (waypointsStale) {
+        toast.warn(
+          "Robot waypoint snapshot is stale; reconnect before navigation.",
+        );
         return;
       }
-
-      // Ignore stale ARRIVED heartbeats until the current goal has entered
-      // PLANNING or MOVING.
-      if (
-        msg.state === NAVIGATION_STATE.ARRIVED &&
-        queueGoalActiveRef.current
-      ) {
-        finishQueueWaypoint();
-      } else if (
-        msg.state === NAVIGATION_STATE.FAILED &&
-        queueGoalActiveRef.current
-      ) {
-        queueGoalActiveRef.current = false;
-        queueExecutingRef.current = false;
-        setQueueExecuting(false);
-        setActiveWaypointIndex(-1);
-        toast.warn(t("Queue stopped: goal was canceled or failed"));
-      }
-    });
-
-    return () => statusTopic.unsubscribe();
-  }, [ros]);
-
-  // The status topic is the primary completion signal. This odometry fallback
-  // advances a route if the UI bridge misses ARRIVED, but only after the robot
-  // remains stopped close to the active waypoint.
-  useEffect(() => {
-    if (!ros || !window.ROSLIB) return;
-    const odomTopic = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.ROBOT_POSE_TOPIC,
-      messageType: "nav_msgs/Odometry",
-    });
-    odomTopic.subscribe((msg) => {
-      const twist = msg?.twist?.twist;
-      if (!twist) return;
-      queueVelocityRef.current = Math.hypot(
-        twist.linear.x || 0,
-        twist.linear.y || 0,
-      );
-    });
-    const timer = window.setInterval(() => {
-      if (
-        !queueExecutingRef.current ||
-        queueAdvanceTimerRef.current ||
-        !queueGoalSentAtRef.current
-      )
-        return;
-      const goal = waypointQueueRef.current[queueIdxRef.current];
-      const pose = window.NAV2D?.currentPose;
-      if (!goal?.position || !pose?.position) return;
-      const distance = Math.hypot(
-        goal.position.x - pose.position.x,
-        goal.position.y - pose.position.y,
-      );
-      if (distance <= 0.35 && queueVelocityRef.current <= 0.08) {
-        if (!queueNearGoalSinceRef.current)
-          queueNearGoalSinceRef.current = Date.now();
-        const goalSentLongEnoughAgo =
-          Date.now() - queueGoalSentAtRef.current >= 5000;
-        if (
-          Date.now() - queueNearGoalSinceRef.current >= 1000 &&
-          goalSentLongEnoughAgo
-        ) {
-          queueGoalActiveRef.current = true;
-          finishQueueWaypoint();
-        }
-      } else {
-        queueNearGoalSinceRef.current = 0;
-      }
-    }, 100);
-    return () => {
-      odomTopic.unsubscribe();
-      window.clearInterval(timer);
-    };
-  }, [ros]);
-
-  const publishGoal = (pose) => {
-    if (INSPECTION_PROFILE) return;
-    if (!goalPoseTopic.current) return;
-    stopTopic.current?.publish(new window.ROSLIB.Message({ data: false }));
-    queueGoalSentAtRef.current = Date.now();
-    queueNearGoalSinceRef.current = 0;
-    goalPoseTopic.current.publish(
-      new window.ROSLIB.Message({
-        header: { frame_id: "map", stamp: { sec: 0, nanosec: 0 } },
-        pose: {
-          position: { x: pose.position.x, y: pose.position.y, z: 0 },
-          orientation: {
-            x: 0,
-            y: 0,
-            z: pose.orientation.z,
-            w: pose.orientation.w,
+      const yaw = Number(wp.yaw ?? wp.z) || 0;
+      startManualSteps(
+        [
+          {
+            type: "waypoint",
+            waypointId: String(wp.waypoint_id || wp.id),
+            waypointName: wp.name,
+            pose: {
+              x: Number(wp.x),
+              y: Number(wp.y),
+              z: Math.sin(yaw / 2),
+              w: Math.cos(yaw / 2),
+            },
           },
-        },
-      }),
-    );
-    window.NAV2D?.setGoalPose?.(pose);
-  };
+        ],
+        `${t("Navigate to")}: ${wp.name}`,
+      );
+    },
+    [startManualSteps, t, waypointsStale],
+  );
 
-  const goToWaypoint = useCallback((wp) => {
-    publishGoal({
-      position: { x: wp.x, y: wp.y, z: 0 },
-      orientation: { x: 0, y: 0, z: wp.z, w: wp.w },
-    });
-    toast.success(`${t("Navigating to")} "${wp.name}"`);
-  }, []);
+  // Map context actions are persisted as one-off MissionManager tasks.
+  const sendGoalAt = useCallback(
+    (pose) => {
+      startManualSteps([toPoseStep(pose)], t("Single navigation"));
+    },
+    [startManualSteps, t],
+  );
 
-  // The three map right-click context-menu actions (Map.jsx's onContext*
-  // props) — each reuses the exact same publish/topic logic as the
-  // corresponding mode-button flow above, just without requiring a mode to
-  // be active first or a heading drag (orientation defaults to identity).
-  const sendGoalAt = (pose) => {
-    publishGoal(pose);
-    toast.success(
-      `${t("Goal")}: (${pose.position.x.toFixed(2)}, ${pose.position.y.toFixed(
-        2,
-      )}) m`,
-    );
-  };
+  const runRouteMission = useCallback(
+    (route, name = t("Manual route")) => {
+      if (!route.length) return false;
+      const steps = [];
+      route.forEach((pose, index) => {
+        steps.push(toPoseStep(pose, `${name} ${index + 1}`));
+        if (Number(pose.dwellSeconds) > 0) {
+          steps.push({ type: "wait", seconds: Number(pose.dwellSeconds) });
+        }
+      });
+      return startManualSteps(steps, `${t("Manual route")}: ${name}`);
+    },
+    [startManualSteps, t],
+  );
+  runRouteMissionRef.current = runRouteMission;
 
-  const saveWaypointAt = (name, pose) => {
-    addWaypoint(name, {
-      x: pose.position.x,
-      y: pose.position.y,
-      z: pose.orientation.z,
-      w: pose.orientation.w,
-    });
-    toast.success(`${t("Saved")} "${name}"`);
+  const saveWaypointAt = async (name, pose, pointType = "inspection") => {
+    if (!waypointAccess.allowed) {
+      toast.warn(t(waypointAccess.reason));
+      return false;
+    }
+    try {
+      await addWaypoint(name, pose, pointType);
+      toast.success(`${t("Saved on robot")} "${name}"`);
+    } catch (error) {
+      toast.error(error.message || t("Unable to save waypoint"));
+      return false;
+    }
   };
 
   const setInitialPoseAt = (pose) => {
     if (INSPECTION_PROFILE) return;
+    if (!localizationAccess.allowed) {
+      toast.warn(t(localizationAccess.reason));
+      return;
+    }
     if (!initialPoseTopic.current) return;
     initialPoseTopic.current.publish(
       new window.ROSLIB.Message({
@@ -500,6 +471,14 @@ const MapPage = () => {
     };
   }, [goToWaypoint]);
 
+  const deactivateMode = useCallback(() => {
+    if (window.NAV2D) {
+      window.NAV2D.arePointsSettable = false;
+      window.NAV2D._poseCallback = null;
+    }
+    setMode(null);
+  }, []);
+
   // Install the direct NAV2D callback — fires synchronously from stagemouseup,
   // no DOM bubbling or setTimeout needed.
   const installCallback = useCallback(() => {
@@ -508,13 +487,13 @@ const MapPage = () => {
     window.NAV2D._poseCallback = (pose) => {
       const m = modeRef.current;
       if (m === "goal") {
-        publishGoal(pose);
-        toast.success(
-          `${t("Goal")}: (${pose.position.x.toFixed(
-            2,
-          )}, ${pose.position.y.toFixed(2)}) m`,
-        );
+        sendGoalAt(pose);
       } else if (m === "pose") {
+        if (!localizationAccessRef.current.allowed) {
+          toast.warn(t(localizationAccessRef.current.reason));
+          deactivateMode();
+          return;
+        }
         if (!initialPoseTopic.current) return;
         initialPoseTopic.current.publish(
           new window.ROSLIB.Message({
@@ -549,123 +528,83 @@ const MapPage = () => {
         toast.info(`${t("Waypoint")} ${idx + 1} ${t("added")}`);
       }
     };
-  }, []);
+  }, [deactivateMode, sendGoalAt, t]);
 
   const activateMode = useCallback(
     (m) => {
       if (INSPECTION_PROFILE) return;
+      const access = m === "pose" ? localizationAccess : navigationAccess;
+      if (!access.allowed) {
+        toast.warn(t(access.reason));
+        return;
+      }
       if (!window.NAV2D) return;
       window.NAV2D.arePointsSettable = true;
       installCallback();
       setMode(m);
     },
-    [installCallback],
+    [installCallback, localizationAccess, navigationAccess, t],
   );
-
-  const deactivateMode = useCallback(() => {
-    if (window.NAV2D) {
-      window.NAV2D.arePointsSettable = false;
-      window.NAV2D._poseCallback = null;
-    }
-    setMode(null);
-  }, []);
 
   // Re-install callback whenever mode changes so the closure always has the right mode
   useEffect(() => {
-    if (["goal", "pose", "waypoint"].includes(modeRef.current)) installCallback();
+    if (["goal", "pose", "waypoint"].includes(modeRef.current))
+      installCallback();
   }, [mode, installCallback]);
 
   const cancelGoal = useCallback(() => {
-    stopTopic.current?.publish(new window.ROSLIB.Message({ data: true }));
-    const currentPose = window.NAV2D?.currentPose;
-    if (currentPose && goalPoseTopic.current) {
-      goalPoseTopic.current.publish(
-        new window.ROSLIB.Message({
-          header: { frame_id: "map", stamp: { sec: 0, nanosec: 0 } },
-          pose: {
-            position: {
-              x: currentPose.position.x,
-              y: currentPose.position.y,
-              z: currentPose.position.z || 0,
-            },
-            orientation: {
-              x: currentPose.orientation.x || 0,
-              y: currentPose.orientation.y || 0,
-              z: currentPose.orientation.z,
-              w: currentPose.orientation.w,
-            },
-          },
-        }),
-      );
-    }
+    navCancelService.current?.callService(
+      new window.ROSLIB.ServiceRequest({
+        goal_info: {
+          goal_id: { uuid: new Array(16).fill(0) },
+          stamp: { sec: 0, nanosec: 0 },
+        },
+      }),
+      () => {},
+      () => {},
+    );
     window.NAV2D?.clearGoalPose?.();
   }, []);
 
   const emergencyStop = useCallback(() => {
-    queueExecutingRef.current = false;
-    queueGoalActiveRef.current = false;
-    if (queueAdvanceTimerRef.current)
-      window.clearTimeout(queueAdvanceTimerRef.current);
-    setQueueExecuting(false);
     setWaypointQueue([]);
     setActiveWaypointIndex(-1);
     setCompletedWaypointCount(0);
-    if (cmdVelTopic.current) {
-      cmdVelTopic.current.publish(
-        new window.ROSLIB.Message({
-          linear: { x: 0, y: 0, z: 0 },
-          angular: { x: 0, y: 0, z: 0 },
-        }),
-      );
-    }
+    softwareStop.requestStop();
     cancelGoal();
     addEvent({
       type: "safety",
-      severity: "error",
-      message: "Emergency stop — robot halted",
+      severity: "warning",
+      message:
+        "Software stop requested (map page); awaiting robot confirmation",
     });
-    toast.warn("Emergency stop — robot halted");
-  }, [cancelGoal]);
+    toast.warn(t("Software stop requested; waiting for robot confirmation"));
+  }, [cancelGoal, softwareStop, t]);
 
   const sendHome = useCallback(() => {
     if (INSPECTION_PROFILE) return;
-    if (!goalPoseTopic.current) return;
-    stopTopic.current?.publish(new window.ROSLIB.Message({ data: false }));
-    goalPoseTopic.current.publish(
-      new window.ROSLIB.Message({
-        header: { frame_id: "map", stamp: { sec: 0, nanosec: 0 } },
-        pose: {
-          position: { x: 0, y: 0, z: 0 },
-          orientation: { x: 0, y: 0, z: 0, w: 1 },
-        },
-      }),
-    );
-    window.NAV2D?.setGoalPose?.({
-      position: { x: 0, y: 0, z: 0 },
-      orientation: { x: 0, y: 0, z: 0, w: 1 },
-    });
-    toast.info(t("Navigating to home position (0, 0) m"));
-  }, []);
+    if (!navigationSafetyReady()) {
+      toast.warn(
+        t(
+          "Cannot send navigation goal while software stop state is unknown or active",
+        ),
+      );
+      return;
+    }
+    startManualSteps([{ type: "home" }], t("Navigate home"));
+  }, [startManualSteps, t]);
 
   const executeQueue = useCallback(() => {
     if (INSPECTION_PROFILE) return;
     if (!waypointQueueRef.current.length) return;
-    queueIdxRef.current = 0;
-    queueExecutingRef.current = true;
-    queueGoalActiveRef.current = false;
-    setActiveWaypointIndex(0);
-    setCompletedWaypointCount(0);
-    if (queueAdvanceTimerRef.current)
-      window.clearTimeout(queueAdvanceTimerRef.current);
-    setQueueExecuting(true);
-    publishGoal(waypointQueueRef.current[0]);
-    toast.info(
-      `${t("Executing")} ${waypointQueueRef.current.length} ${t("waypoints")}`,
+    runRouteMission(
+      waypointQueueRef.current,
+      previewedRouteRef.current || t("Manual route"),
     );
-  }, []);
+  }, [runRouteMission, t]);
 
   const loadSelectedRoute = (route, execute = false) => {
-    if (INSPECTION_PROFILE || queueExecutingRef.current || routeLoading) return;
+    if (INSPECTION_PROFILE || missionIsActive || routeLoading) return;
     if (!route) {
       toast.warn(t("Select a saved route first."));
       return;
@@ -701,24 +640,15 @@ const MapPage = () => {
   };
 
   const executeSelectedRoute = () => {
-    if (previewedRouteRef.current === selectedRoute && waypointQueueRef.current.length) {
+    if (
+      previewedRouteRef.current === selectedRoute &&
+      waypointQueueRef.current.length
+    ) {
       executeQueue();
       return;
     }
     loadSelectedRoute(selectedRoute, true);
   };
-
-  const stopQueue = useCallback(() => {
-    queueExecutingRef.current = false;
-    queueGoalActiveRef.current = false;
-    if (queueAdvanceTimerRef.current)
-      window.clearTimeout(queueAdvanceTimerRef.current);
-    queueAdvanceTimerRef.current = null;
-    setQueueExecuting(false);
-    setActiveWaypointIndex(-1);
-    cancelGoal();
-    toast.info(t("Queue stopped"));
-  }, [cancelGoal]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -732,9 +662,12 @@ const MapPage = () => {
 
   const modeBtn = (label, shortLabel, m, activeLabel, shortActiveLabel) => {
     const active = mode === m;
+    const access = m === "pose" ? localizationAccess : navigationAccess;
     return (
       <button
         onClick={() => (active ? deactivateMode() : activateMode(m))}
+        disabled={!access.allowed}
+        title={access.allowed ? undefined : t(access.reason)}
         className={`flex min-h-[52px] w-full items-center justify-center rounded-xl border px-2 py-2 text-center font-[RobotoMono] text-[10px] font-semibold leading-tight transition-colors sm:px-3 sm:text-sm ${
           active
             ? "border-themeBlue bg-themeBlue text-white"
@@ -772,7 +705,7 @@ const MapPage = () => {
             INSPECTION_PROFILE
               ? "xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]"
               : "xl:grid-cols-[minmax(190px,0.32fr)_minmax(0,1.35fr)_minmax(320px,1fr)]"
-          }`}
+          } disabled:cursor-not-allowed disabled:opacity-40`}
         >
           {!INSPECTION_PROFILE && (
             <div className="order-3 flex min-w-0 flex-col gap-3 xl:order-1">
@@ -826,10 +759,19 @@ const MapPage = () => {
               {t("Manual")}
             </p>
             {!INSPECTION_PROFILE ? (
-              <Joystick maxSpeed={config.maxLinearSpeed} compact />
+              <Joystick
+                maxSpeed={config.maxLinearSpeed}
+                compact
+                enabled={manualEnabled}
+              />
             ) : (
               <p className="text-center text-xs text-themeTextGray">
                 {t("Manual control interface not configured")}
+              </p>
+            )}
+            {!INSPECTION_PROFILE && !manualEnabled && (
+              <p className="text-center text-xs text-themeTextGray">
+                {manualDisabledReason}
               </p>
             )}
             <button
@@ -852,6 +794,14 @@ const MapPage = () => {
               onAdd={saveWaypointAt}
               onGo={INSPECTION_PROFILE ? undefined : goToWaypoint}
               onRemove={removeWaypoint}
+              onUpdate={updateWaypoint}
+              mapId={waypointMapId}
+              loading={waypointsLoading}
+              error={waypointsError}
+              observedAt={waypointsObservedAt}
+              stale={waypointsStale}
+              legacyWaypoints={legacyWaypoints}
+              onImportLegacy={importLegacyWaypoints}
             />
           </div>
 
@@ -874,7 +824,7 @@ const MapPage = () => {
                     loadSelectedRoute(route);
                   }}
                   disabled={
-                    routeLoading || queueExecuting || !savedRoutes.length
+                    routeLoading || missionIsActive || !savedRoutes.length
                   }
                   className="min-h-10 w-full min-w-0 rounded-lg border border-borderSubtle bg-bgCard px-3 text-sm text-textWhiteHover outline-none focus:border-themeBlue disabled:opacity-50"
                 >
@@ -898,7 +848,7 @@ const MapPage = () => {
                 disabled={
                   !selectedRoute ||
                   routeLoading ||
-                  queueExecuting ||
+                  missionIsActive ||
                   !savedRoutes.length
                 }
                 className="min-h-10 w-full rounded-lg border border-themeBlue bg-themeBlue/10 px-4 text-xs font-semibold text-themeBlue transition-colors hover:bg-themeBlue hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -916,7 +866,6 @@ const MapPage = () => {
                         setWaypointQueue([]);
                         setActiveWaypointIndex(-1);
                         setCompletedWaypointCount(0);
-                        stopQueue();
                       }}
                       className="text-xs text-statusRed hover:underline"
                     >
@@ -928,21 +877,21 @@ const MapPage = () => {
                       <span
                         key={i}
                         className={`rounded border px-2 py-0.5 text-xs ${
-                          queueExecuting && i === activeWaypointIndex
+                          missionIsActive && i === activeMission?.stepIndex
                             ? "border-themeBlue bg-themeBlue/20 text-themeBlue"
                             : "border-borderSubtle text-themeTextGray"
                         }`}
                       >
-                        {i + 1}: ({wp.position.x.toFixed(1)}, {wp.position.y.toFixed(1)}) m
+                        {i + 1}: ({wp.position.x.toFixed(1)},{" "}
+                        {wp.position.y.toFixed(1)}) m
                       </span>
                     ))}
                   </div>
-                  {queueExecuting ? (
-                    <button onClick={stopQueue} className="w-full rounded-lg border border-statusRed bg-bgCard py-1.5 text-xs font-semibold text-statusRed hover:bg-statusRed hover:text-white">
-                      <T>{"Stop Queue"}</T>
-                    </button>
-                  ) : (
-                    <button onClick={executeQueue} className="w-full rounded-lg border border-themeBlue bg-themeBlue/10 py-1.5 text-xs font-semibold text-themeBlue hover:bg-themeBlue hover:text-white">
+                  {!missionIsActive && (
+                    <button
+                      onClick={executeQueue}
+                      className="w-full rounded-lg border border-themeBlue bg-themeBlue/10 py-1.5 text-xs font-semibold text-themeBlue hover:bg-themeBlue hover:text-white"
+                    >
                       <T>{"Execute Queue"}</T>
                     </button>
                   )}
@@ -1007,7 +956,6 @@ const MapPage = () => {
                 {!mode && t("Select a mode above to interact with the map.")}
               </p>
             </div>
-
           </section>
         )}
       </div>

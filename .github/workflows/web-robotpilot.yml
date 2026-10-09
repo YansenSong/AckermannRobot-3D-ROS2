@@ -1,0 +1,70 @@
+name: Web and robot platform checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: third_party/RobotPilot/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: third_party/RobotPilot/web/package-lock.json
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run build
+      - name: Sync Vite build into Flask package
+        run: bash ../scripts/sync_frontend_to_ros.sh
+      - name: Check committed Flask bundle matches Vite build
+        run: |
+          git -C ../../.. diff --exit-code -- third_party/RobotPilot/ros2/src/robotpilot_ui_package/robotpilot_ui_package/static/app
+          test -z "$(git -C ../../.. ls-files --others --exclude-standard -- third_party/RobotPilot/ros2/src/robotpilot_ui_package/robotpilot_ui_package/static/app)"
+      - run: npx prettier --check src/app/App.jsx src/pages/BmsPage.jsx src/pages/HealthPage.jsx src/pages/InfoPage.jsx src/pages/MapsPage.jsx src/pages/registry.js src/pages/registry.test.js src/shared/api/apiFetch.js src/shared/api/apiFetch.test.js src/shared/constants/index.js src/shared/connection/reconnectDelay.js src/shared/connection/reconnectDelay.test.js src/shared/hooks/useBatteryState.js src/shared/hooks/useBatteryState.test.js src/shared/i18n/i18n.js
+
+  ros-python:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:jammy
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: humble
+      - name: Install ROS dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pytest
+          rosdep update
+          rosdep install --from-paths src \
+            third_party/RobotPilot/ros2/src/robotpilot_ui_msgs \
+            third_party/RobotPilot/ros2/src/robotpilot_ui_package \
+            --ignore-src -r -y
+      - name: Build touched ROS packages
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --base-paths src \
+            third_party/RobotPilot/ros2/src/robotpilot_ui_msgs \
+            third_party/RobotPilot/ros2/src/robotpilot_ui_package \
+            --packages-up-to mission_manager area_rules robotpilot_ui_package
+      - name: Run Python and ROS state tests
+        run: |
+          source /opt/ros/humble/setup.bash
+          source install/setup.bash
+          bash -n scripts/robotpilot_platform_backup.sh
+          python3 -m pytest -q \
+            src/extension/mission_manager/test \
+            src/extension/area_rules/test \
+            src/control/vehicle_control/test/test_cmd_vel_mux_hold.py \
+            third_party/RobotPilot/ros2/src/robotpilot_ui_package/test

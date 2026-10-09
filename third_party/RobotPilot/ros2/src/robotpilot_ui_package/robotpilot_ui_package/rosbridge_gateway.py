@@ -18,6 +18,7 @@ READ_REQUEST_TOPICS = {
 OPERATOR_TOPICS = {
     "/mission/command", "/goal_pose", "/stop", "/dock_trigger", "/undock_robot",
 }
+SOFTWARE_STOP_REQUEST_TOPIC = "/safety/software_stop/request"
 ENGINEER_TOPICS = {
     "/initialpose", "/ui_operation", "/periphery_operation",
     "/ackermann/routes/plan_request", "/ackermann/routes/operation",
@@ -40,6 +41,19 @@ def required_role(message):
         return "Viewer"
     if operation in ("advertise", "unadvertise", "publish"):
         topic = message.get("topic")
+        if topic == SOFTWARE_STOP_REQUEST_TOPIC and operation in ("advertise", "unadvertise"):
+            return "Viewer"
+        if topic == SOFTWARE_STOP_REQUEST_TOPIC:
+            try:
+                payload = message.get("msg", {}).get("data", "")
+                action = json.loads(payload).get("action")
+            except (AttributeError, TypeError, json.JSONDecodeError):
+                return None
+            return {
+                "get_state": "Viewer",
+                "request_stop": "Operator",
+                "request_release": "Engineer",
+            }.get(action)
         if topic in READ_REQUEST_TOPICS:
             return "Viewer"
         if topic in OPERATOR_TOPICS:
@@ -115,6 +129,11 @@ async def serve_client(client, store, allowed_origins, upstream_url):
                         continue
                     if message.get("op") in ("publish", "call_service"):
                         resource = message.get("topic", message.get("service", ""))
+                        if message.get("op") == "publish" and resource == SOFTWARE_STOP_REQUEST_TOPIC:
+                            payload = json.loads(message["msg"]["data"])
+                            payload["source"] = f"web:{identity['username']}"
+                            message["msg"]["data"] = json.dumps(payload, sort_keys=True)
+                            raw = json.dumps(message)
                         store.audit_ros(identity, message["op"], resource, "allowed")
                     await upstream.send(raw)
 

@@ -32,7 +32,7 @@ const ConsolePage = () => {
         <p className="dashboard-card px-4 py-2 font-[RobotoMono] text-xs text-themeTextGray">
           <T>
             {
-              "Not connected to the robot — logs and topic echo will start streaming once the connection is live. Check the host/port on the Config page."
+              "Not connected to the robot — logs and topic echo will start streaming once the connection is live. Check the robot network and UI backend."
             }
           </T>{" "}
         </p>

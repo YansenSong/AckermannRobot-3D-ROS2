@@ -6,6 +6,8 @@
   /dock_robot/_action/status         -> /ui/dock_robot/status
   /undock_robot/_action/status       -> /ui/undock_robot/status
 """
+import signal
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
@@ -85,8 +87,10 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

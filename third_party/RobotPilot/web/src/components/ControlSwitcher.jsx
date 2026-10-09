@@ -3,9 +3,11 @@ import React, { useState, useRef, useEffect } from "react";
 import { useRos } from "../app/App";
 
 import Switcher from "../shared/ui/Switcher";
+import { useRoleAccess } from "../shared/auth/roleAccess";
 
 const ControlSwitcher = ({ text, activeValue, disabledValue, topicName }) => {
   const ros = useRos();
+  const controlAccess = useRoleAccess("Engineer");
 
   const [switcherValue, setSwitcherValue] = useState(false);
   const peripheryOperation = useRef(null);
@@ -20,6 +22,7 @@ const ControlSwitcher = ({ text, activeValue, disabledValue, topicName }) => {
   }, [ros, topicName]);
 
   const onSwitcherChange = (value) => {
+    if (!controlAccess.allowed) return;
     setSwitcherValue(value);
     if (!peripheryOperation.current) return;
     if (value) {
@@ -35,7 +38,11 @@ const ControlSwitcher = ({ text, activeValue, disabledValue, topicName }) => {
   return (
     <div className="flex items-center justify-between gap-5">
       <span>{text}</span>
-      <Switcher onChange={onSwitcherChange} switcherValue={switcherValue} />
+      <Switcher
+        onChange={onSwitcherChange}
+        switcherValue={switcherValue}
+        disabled={!controlAccess.allowed}
+      />
     </div>
   );
 };

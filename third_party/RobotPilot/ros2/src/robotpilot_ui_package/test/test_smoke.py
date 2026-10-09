@@ -1,5 +1,7 @@
 import unittest
 import tempfile
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -8,6 +10,29 @@ class PackageSmokeTest(unittest.TestCase):
         import robotpilot_ui_package.flask_app  # noqa: F401
         import robotpilot_ui_package.map_relay  # noqa: F401
         import robotpilot_ui_package.nav_relays  # noqa: F401
+        import robotpilot_ui_package.route_store  # noqa: F401
+        import robotpilot_ui_package.folders_handler  # noqa: F401
+
+    def test_ui_launch_starts_map_handler_without_route_ownership_or_browser(self):
+        from launch_ros.actions import Node
+
+        launch_file = Path(__file__).parents[1] / "launch" / "new_ui_launch.py"
+        spec = spec_from_file_location("robotpilot_ui_new_launch", launch_file)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+        description = module.generate_launch_description()
+        nodes = [action for action in description.entities if isinstance(action, Node)]
+
+        self.assertTrue(any(node.node_executable == "route_store" for node in nodes))
+        handler = next(node for node in nodes if node.node_executable == "handler")
+        parameters = {
+            key[0].text: value
+            for key, value in handler._Node__parameters[0].items()
+        }
+        self.assertEqual(
+            parameters,
+            {"map_management_only": True, "open_browser": False},
+        )
 
 
 class FlaskApiTest(unittest.TestCase):

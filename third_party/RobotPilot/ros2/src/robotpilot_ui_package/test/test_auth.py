@@ -1,10 +1,14 @@
+import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from flask import Flask, jsonify
+from flask import Flask, g, jsonify
 
-from robotpilot_ui_package.auth import AuthStore, install_auth, require_role
+from robotpilot_ui_package.auth import (
+    AuthStore, install_auth, require_role, validate_auth_transport, validate_bind_host,
+)
 
 
 class AuthTest(unittest.TestCase):
@@ -16,7 +20,7 @@ class AuthTest(unittest.TestCase):
         @self.app.get("/api/v1/robots/<robot_id>/status")
         @require_role("Viewer")
         def status(robot_id):
-            return jsonify({"robot_id": robot_id})
+            return jsonify({"robot_id": robot_id, "request_id": g.request_id})
 
         @self.app.post("/api/v1/robots/<robot_id>/tasks")
         @require_role("Operator")
@@ -68,6 +72,58 @@ class AuthTest(unittest.TestCase):
         self.assertEqual(app.test_client().get("/api/v1/auth/me").json["role"], "Admin")
         with self.assertRaises(RuntimeError):
             install_auth(Flask("external-test"), "external", self.db_path, "robot-001")
+
+    def test_request_id_accepts_safe_header_and_replaces_invalid_value(self):
+        app = Flask("request-id-test")
+
+        @app.get("/api/request-id")
+        def request_id():
+            return jsonify({"request_id": g.request_id})
+
+        install_auth(app, "open", self.db_path, "robot-001")
+        client = app.test_client()
+        accepted = client.get("/api/request-id", headers={"X-Request-ID": "trace-12345678"})
+        self.assertEqual(accepted.json["request_id"], "trace-12345678")
+        replaced = client.get("/api/request-id", headers={"X-Request-ID": "trace-请求"})
+        self.assertRegex(replaced.json["request_id"], r"^[0-9a-f-]{36}$")
+
+    def test_open_mode_only_binds_loopback(self):
+        for host in ("127.0.0.1", "::1", "localhost"):
+            validate_bind_host("open", host)
+        with self.assertRaisesRegex(RuntimeError, "requires a loopback"):
+            validate_bind_host("open", "0.0.0.0")
+        validate_bind_host("local", "0.0.0.0")
+
+    def test_local_auth_requires_tls_for_secure_session_cookie(self):
+        with self.assertRaisesRegex(RuntimeError, "requires a configured TLS"):
+            validate_auth_transport("local", False)
+        validate_auth_transport("local", True)
+        validate_auth_transport("open", False)
+
+    def test_auth_database_schema_version_is_recorded_and_future_schema_rejected(self):
+        with sqlite3.connect(self.db_path) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+        future_path = str(Path(self.directory.name) / "future-auth.sqlite3")
+        with sqlite3.connect(future_path) as db:
+            db.execute("PRAGMA user_version = 2")
+        os.chmod(future_path, 0o644)
+        with self.assertRaisesRegex(RuntimeError, "schema is newer"):
+            AuthStore(future_path)
+        self.assertEqual(Path(future_path).stat().st_mode & 0o777, 0o644)
+
+    def test_auth_schema_migration_rolls_back_after_ddl_error(self):
+        broken_path = str(Path(self.directory.name) / "broken-auth.sqlite3")
+        with sqlite3.connect(broken_path) as db:
+            db.execute("CREATE TABLE ros_audit_entries (id INTEGER PRIMARY KEY)")
+        with self.assertRaises(sqlite3.OperationalError):
+            AuthStore(broken_path)
+        with sqlite3.connect(broken_path) as db:
+            tables = {
+                row[0]
+                for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            self.assertNotIn("users", tables)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 0)
 
 
 if __name__ == "__main__":

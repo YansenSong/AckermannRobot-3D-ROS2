@@ -36,8 +36,23 @@ def generate_launch_description():
     # resolve to the install directory instead of here, where .env actually is.
     package_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     flask_env = _load_env_file(os.path.join(package_root, ".env"))
+    log_env = {
+        key: value for key, value in flask_env.items()
+        if key in ("ROBOTPILOT_LOG_ROOT", "OPENAMR_LOG_ROOT")
+    }
 
     actions = []
+
+    actions.append(
+        Node(
+            package="robotpilot_ui_package",
+            executable="daily_log_collector",
+            name="daily_log_collector",
+            namespace="ui",
+            output="screen",
+            additional_env=log_env,
+        )
+    )
 
     if not flask_env and not os.environ.get("ANTHROPIC_API_KEY"):
         actions.append(
@@ -78,6 +93,47 @@ def generate_launch_description():
             name="nav_relays",
             namespace="ui",
             output="screen",
+        )
+    )
+
+    # Real battery serial telemetry is never inferred. Simulation must opt in
+    # explicitly with BATTERY_SOURCE=sim; otherwise the source starts disabled.
+    actions.append(
+        Node(
+            package="robotpilot_ui_package",
+            executable="battery_monitor",
+            name="battery_monitor",
+            output="screen",
+            parameters=[{
+                "battery_source": os.environ.get("BATTERY_SOURCE", "disabled").strip().lower(),
+            }],
+        )
+    )
+
+    # Publishes the active 2D map identity and serves persistent waypoint/route
+    # data consumed by Platform API readiness checks and mission creation.
+    actions.append(
+        Node(
+            package="robotpilot_ui_package",
+            executable="route_store",
+            name="route_store",
+            output="screen",
+        )
+    )
+
+    # MapsPage still uses the folder-handler protocol for map catalog reads
+    # and map saving. RouteStore owns route CRUD and waypoint persistence, so
+    # keep the legacy handler in map-management-only mode.
+    actions.append(
+        Node(
+            package="robotpilot_ui_package",
+            executable="handler",
+            name="ui_folders",
+            output="screen",
+            parameters=[{
+                "map_management_only": True,
+                "open_browser": False,
+            }],
         )
     )
 

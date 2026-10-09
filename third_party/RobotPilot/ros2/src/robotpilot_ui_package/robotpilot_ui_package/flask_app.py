@@ -18,9 +18,15 @@ from ament_index_python.packages import get_package_share_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from .auth import install_auth, require_role
-from .platform_api import PlatformStore, RobotBridge, register_platform_api
+from .auth import install_auth, require_role, validate_auth_transport, validate_bind_host
+from .platform_api import (
+    PlatformStore,
+    RobotBridge,
+    audit_api_response,
+    register_platform_api,
+)
 from .data_paths import data_directory, setting
+from .recording_maintenance import prune_finished_recordings
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -89,6 +95,8 @@ TOPIC_NAME_RE = re.compile(r"^/[A-Za-z0-9_/]{1,255}$")
 # 此问题已标记但尚未解决；参见下方的 _reconcile_recordings_on_startup。
 _recording = {"proc": None, "id": None, "name": None, "started_at": None, "topics": None}
 _replay = {"proc": None, "id": None, "started_at": None, "paused": False, "rate": 1.0}
+RECORDING_RETENTION_DAYS = 0
+_last_recording_prune = 0.0
 DEFAULT_BLOCK_LOCATIONS = {
     "Home": {"x": 0, "y": 0, "yaw": 0},
     "Charging Station": {"x": 0.5, "y": 0, "yaw": 0},
@@ -452,6 +460,50 @@ def _reconcile_recordings_on_startup():
 _reconcile_recordings_on_startup()
 
 
+def _configure_recording_retention():
+    global RECORDING_RETENTION_DAYS
+    raw_value = setting("RECORDING_RETENTION_DAYS", "0").strip()
+    try:
+        retention_days = int(raw_value)
+        if retention_days < 0:
+            raise ValueError("must be zero or a positive number of days")
+    except ValueError as error:
+        app.logger.error(
+            "Invalid ROBOTPILOT_RECORDING_RETENTION_DAYS=%r: %s; "
+            "pruning disabled",
+            raw_value,
+            error,
+        )
+        retention_days = 0
+    RECORDING_RETENTION_DAYS = retention_days
+    _prune_recordings_if_due(force=True)
+
+
+def _prune_recordings_if_due(force=False):
+    global _last_recording_prune
+    if RECORDING_RETENTION_DAYS <= 0:
+        return []
+    now_monotonic = time.monotonic()
+    if not force and now_monotonic - _last_recording_prune < 3600:
+        return []
+    _last_recording_prune = now_monotonic
+    try:
+        removed = prune_finished_recordings(
+            RECORDINGS_DIR,
+            RECORDINGS_INDEX_FILE,
+            RECORDING_RETENTION_DAYS,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        app.logger.error("Rosbag retention cleanup failed: %s", error)
+        return []
+    if removed:
+        app.logger.info("Removed %d expired Rosbag recording(s)", len(removed))
+    return removed
+
+
+_configure_recording_retention()
+
+
 def read_program_file(path: str):
     with open(path, "r", encoding="utf-8") as program_file:
         return json.load(program_file)
@@ -520,15 +572,20 @@ def add_api_headers(response):
         response.headers["X-Request-Id"] = getattr(g, "request_id", "")
         if PLATFORM_STORE is not None and request.method not in ("GET", "HEAD", "OPTIONS"):
             identity = getattr(g, "identity", {})
-            PLATFORM_STORE.audit(
-                getattr(g, "request_id", ""), identity.get("username", "anonymous"),
-                identity.get("robot_id"), request.method, request.path, response.status_code,
+            response = audit_api_response(
+                response,
+                PLATFORM_STORE,
+                getattr(g, "request_id", ""),
+                identity,
+                request.method,
+                request.path,
+                app.logger,
             )
     if request.headers.get("Origin") in ("http://localhost:3000", "http://127.0.0.1:3000"):
         response.headers["Access-Control-Allow-Origin"] = request.headers["Origin"]
         response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Idempotency-Key"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Idempotency-Key, X-Request-ID"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
     return response
 
@@ -552,9 +609,14 @@ def handle_http_error(error):
 @app.route("/api/auth/status", methods=["GET"])
 def auth_status():
     remote_addr = request.remote_addr
+    robot_mode = os.environ.get("ROBOT_MODE", "unknown").strip().lower()
+    if robot_mode not in ("simulation", "hardware"):
+        robot_mode = "unknown"
     return jsonify(
         {
             "mode": AUTH_MODE,
+            "robot_mode": robot_mode,
+            "robot_id": ROBOT_ID,
             "requestedMode": REQUESTED_AUTH_MODE,
             "implemented": REQUESTED_AUTH_MODE in IMPLEMENTED_AUTH_MODES,
             "warning": AUTH_MODE_WARNING,
@@ -837,6 +899,7 @@ def _finalize_recording(interrupted=False):
 
 @app.route("/api/recordings", methods=["GET"])
 def list_recordings():
+    _prune_recordings_if_due()
     # Reap a recording that exited on its own (e.g. hit a size/duration
     # limit) since the last time anyone asked.
     if _recording["id"] and not _recording_alive():
@@ -1125,11 +1188,8 @@ class ParamFlask(Node):
         self.declare_parameter("portApp", 5050)
 
 
-# Optional HTTPS support, mainly so the microphone works on browsers other
-# than localhost (Chrome/Safari refuse getUserMedia/SpeechRecognition on
-# plain HTTP LAN origins). Point these at an mkcert-issued cert/key to enable
-# it; if either file is missing, the server falls back to plain HTTP exactly
-# as before.
+# Optional for loopback open development; required by AUTH_MODE=local because
+# its session cookie is Secure. Set both paths to enable HTTPS.
 SSL_CERT_FILE = setting("UI_SSL_CERT", os.path.join(DATA_DIR, "certs", "cert.pem"))
 SSL_KEY_FILE = setting("UI_SSL_KEY", os.path.join(DATA_DIR, "certs", "key.pem"))
 
@@ -1138,33 +1198,42 @@ def main():
     global PLATFORM_BRIDGE, PLATFORM_STORE
     rclpy.init()
     node = ParamFlask()
-    PLATFORM_STORE = PlatformStore(PLATFORM_DB_PATH)
-    PLATFORM_BRIDGE = RobotBridge(PLATFORM_STORE, ROBOT_ID)
-    executor = MultiThreadedExecutor(num_threads=2)
-    executor.add_node(PLATFORM_BRIDGE)
-    ros_thread = threading.Thread(target=executor.spin, daemon=True)
-    ros_thread.start()
-
-    host = node.get_parameter("appAddress").get_parameter_value().string_value
-    port = node.get_parameter("portApp").get_parameter_value().integer_value
-    if AUTH_MODE == "open" and host not in ("127.0.0.1", "::1", "localhost"):
-        raise RuntimeError("AUTH_MODE=open requires a loopback appAddress")
-
-    ssl_context = None
-    if os.path.exists(SSL_CERT_FILE) and os.path.exists(SSL_KEY_FILE):
-        ssl_context = (SSL_CERT_FILE, SSL_KEY_FILE)
-        node.get_logger().info(f"Serving HTTPS using {SSL_CERT_FILE}")
-
-    # threaded=True so one slow/stuck connection (e.g. a browser probing with
-    # a plain-HTTP request against the HTTPS port, or a stalled TLS
-    # handshake) can't block every other client on this single process.
+    executor = None
     try:
+        host = node.get_parameter("appAddress").get_parameter_value().string_value
+        port = node.get_parameter("portApp").get_parameter_value().integer_value
+        validate_bind_host(AUTH_MODE, host)
+
+        ssl_context = None
+        if os.path.exists(SSL_CERT_FILE) and os.path.exists(SSL_KEY_FILE):
+            ssl_context = (SSL_CERT_FILE, SSL_KEY_FILE)
+            node.get_logger().info(f"Serving HTTPS using {SSL_CERT_FILE}")
+        validate_auth_transport(AUTH_MODE, ssl_context is not None)
+
+        PLATFORM_STORE = PlatformStore(PLATFORM_DB_PATH)
+        PLATFORM_BRIDGE = RobotBridge(PLATFORM_STORE, ROBOT_ID)
+        active_platform_config = PLATFORM_STORE.config()
+        if active_platform_config:
+            PLATFORM_BRIDGE.set_battery_config(active_platform_config)
+        executor = MultiThreadedExecutor(num_threads=2)
+        executor.add_node(PLATFORM_BRIDGE)
+        ros_thread = threading.Thread(target=executor.spin, daemon=True)
+        ros_thread.start()
+
+        # threaded=True so one slow/stuck connection (e.g. a browser probing
+        # with HTTP against the HTTPS port, or a stalled TLS handshake) cannot
+        # block every other client on this single process.
         app.run(host=host, port=port, debug=False, ssl_context=ssl_context, threaded=True)
     finally:
-        executor.shutdown()
-        PLATFORM_BRIDGE.destroy_node()
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        if executor is not None:
+            executor.shutdown()
+        if PLATFORM_BRIDGE is not None:
+            PLATFORM_BRIDGE.destroy_node()
+            PLATFORM_BRIDGE = None
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

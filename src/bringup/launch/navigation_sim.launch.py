@@ -18,6 +18,11 @@ def generate_launch_description():
         DeclareLaunchArgument('map_pgm'),
         DeclareLaunchArgument('globalmap_pcd'),
         DeclareLaunchArgument(
+            'gazebo_gui',
+            default_value='true',
+            description='Start Gazebo classic with its graphical client',
+        ),
+        DeclareLaunchArgument(
             'params_file',
             default_value=os.path.join(
                 get_package_share_directory('robot_bringup'),
@@ -31,6 +36,7 @@ def generate_launch_description():
         launch_arguments={
             'publish_ekf_tf': 'false',
             'use_rviz': 'false',
+            'gui': LaunchConfiguration('gazebo_gui'),
         }.items(),
     )
 

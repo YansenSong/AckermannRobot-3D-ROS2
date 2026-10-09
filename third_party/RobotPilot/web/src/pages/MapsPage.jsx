@@ -12,6 +12,7 @@ import {
   StatusBadge,
 } from "../shared/ui/Dashboard";
 import { useT } from "../shared/i18n/i18n";
+import { useRoleAccess } from "../shared/auth/roleAccess";
 
 // 传输时用下划线代替空格；UI 中显示为空格。
 const toWire = (s) =>
@@ -38,20 +39,27 @@ const parseStructure = (structure) =>
 const inputClass =
   "rounded-lg border border-borderSubtle bg-bgCard px-3 py-2 text-sm text-textWhiteHover outline-none focus:border-themeBlue";
 
+const matchesActiveMap = (active, selection) =>
+  selection?.source === "project"
+    ? active.projectMap === selection.map
+    : !active.projectMap &&
+      active.group === selection?.group &&
+      active.map === selection?.map;
+
 /**
  * 地图管理：保存当前地图、切换已保存地图、重命名和删除地图，并将地图整理到分组中。通过 /ui_operation 与现有
  * folders_handler 后端通信（使用与 Routes 页面相同的命令协议），并从 /nav_data_resp 读取目录。
  */
 const MapsPage = () => {
   const { t } = useT();
+  const mapAccess = useRoleAccess("Engineer");
   const ros = useRos();
   const rosStatus = useRosStatus();
   const connected = rosStatus === "connected";
 
   const [groups, setGroups] = useState([]);
-  const [active, setActive] = useState({ group: "", map: "" });
-  const [saveForm, setSaveForm] = useState({ group: "", name: "" });
-  const [newGroup, setNewGroup] = useState("");
+  const [projectMaps, setProjectMaps] = useState([]);
+  const [active, setActive] = useState({ group: "", map: "", projectMap: "" });
   const [renaming, setRenaming] = useState(null); // {group, map, value}
   const [editingMap, setEditingMap] = useState(null);
   const [pendingEdit, setPendingEdit] = useState(null);
@@ -84,9 +92,11 @@ const MapsPage = () => {
         const obj = JSON.parse(data.data);
         if (obj.catalog_source !== "maps") return;
         setGroups(parseStructure(obj.structure));
+        setProjectMaps(Array.isArray(obj.project_maps) ? obj.project_maps : []);
         setActive({
           group: toDisplay(obj.active_files?.group),
           map: toDisplay(obj.active_files?.map),
+          projectMap: obj.active_files?.project_map || "",
         });
       } catch {
         // nav_data 格式错误，忽略此消息。
@@ -106,11 +116,21 @@ const MapsPage = () => {
     });
     const handler = (message) => {
       const text = String(message?.data || "");
-      if (text.startsWith('Map saved "') && text.endsWith('"')) {
-        const name = text.slice('Map saved "'.length, -1);
-        toast.success(t('Saved "{name}"').replace("{name}", toDisplay(name)));
-        setSaveForm((form) => ({ ...form, name: "" }));
-      } else if (text.startsWith("Map save failed:")) {
+      if (text.startsWith('Map loaded "')) {
+        toast.success(text);
+      } else if (
+        text.startsWith('Created group "') ||
+        text.startsWith('Renamed map "')
+      ) {
+        toast.success(text);
+      } else if (
+        text.startsWith("Map switch failed:") ||
+        text.startsWith("Map switch rejected:") ||
+        text.startsWith("MapServer loaded the 2D map, but saving or refreshing") ||
+        text.startsWith("Map rename failed:") ||
+        text.startsWith("Group creation failed:") ||
+        text.startsWith("Group rename failed:")
+      ) {
         toast.error(text);
       } else if (text.startsWith('Deleted map "') && text.endsWith('"')) {
         const name = text.slice('Deleted map "'.length, -1);
@@ -131,42 +151,57 @@ const MapsPage = () => {
 
   const refresh = () => reqRef.current?.publish();
 
-  const sendCmd = (path, data) => {
-    if (!opRef.current) return;
-    const wired = data
+  const sendCmd = (path, data, preserveNames = false) => {
+    if (!mapAccess.allowed) {
+      toast.warn(t(mapAccess.reason));
+      return false;
+    }
+    if (!opRef.current) return false;
+    const wired = data && !preserveNames
       ? Object.fromEntries(
           Object.entries(data).map(([k, v]) => [
             k,
             typeof v === "string" ? toWire(v) : v,
           ]),
         )
-      : null;
+      : data;
     const msg = wired ? `${path}/${JSON.stringify(wired)}` : path;
     opRef.current.publish(new window.ROSLIB.Message({ data: msg }));
     // 后端完成文件操作后会重新发布 nav_data；此处也主动触发一次刷新。
     setTimeout(refresh, 900);
+    return true;
   };
 
   const switchMap = (group, map) => {
-    window.NAV2D?.ClearMap?.();
-    sendCmd("change_map", { group, map });
-    toast.info(
-      `已请求加载 2D 地图“${map}”。LIORF 点云地图不会随之切换；完整导航请用对应地图重新启动导航流程。`,
-    );
+    if (sendCmd("change_map", { group, map })) {
+      toast.info(`正在加载 2D 地图“${map}”；LIORF 点云先验不会随之切换。`);
+    }
   };
 
-  const editMap = (group, map) => {
-    if (!connected) return;
-    if (active.group === group && active.map === map) {
-      setEditingMap({ group, map });
+  const switchProjectMap = (map) => {
+    if (sendCmd("change_project_map", { map }, true)) {
+      toast.info(`正在加载 2D 地图“${map}”；LIORF 点云先验不会随之切换。`);
+    }
+  };
+
+  const editMap = (group, map, source = "ui") => {
+    if (!mapAccess.allowed) {
+      toast.warn(t(mapAccess.reason));
       return;
     }
-    setPendingEdit({ group, map });
-    switchMap(group, map);
+    if (!connected) return;
+    const selection = { group, map, source };
+    if (matchesActiveMap(active, selection)) {
+      setEditingMap(selection);
+      return;
+    }
+    setPendingEdit(selection);
+    if (source === "project") switchProjectMap(map);
+    else switchMap(group, map);
   };
 
   useEffect(() => {
-    if (!pendingEdit || active.group !== pendingEdit.group || active.map !== pendingEdit.map) return;
+    if (!pendingEdit || !matchesActiveMap(active, pendingEdit)) return;
     setEditingMap(pendingEdit);
     setPendingEdit(null);
   }, [active, pendingEdit]);
@@ -182,21 +217,10 @@ const MapsPage = () => {
 
   useEffect(() => {
     if (editingMap && active.group &&
-      (active.group !== editingMap.group || active.map !== editingMap.map)) {
+      !matchesActiveMap(active, editingMap)) {
       setEditingMap(null);
     }
   }, [active, editingMap]);
-
-  const saveMap = () => {
-    const group = saveForm.group.trim();
-    const name = saveForm.name.trim();
-    if (!group || !name) {
-      toast.warn(t("Pick a group and a name for the map"));
-      return;
-    }
-    sendCmd("save_map", { group, map: name });
-    toast.info(`正在保存 LIO-SAM 点云并生成 2D 地图：${name}`);
-  };
 
   const deleteMap = (group, map) => {
     if (
@@ -208,32 +232,25 @@ const MapsPage = () => {
       )
     )
       return;
-    sendCmd("delete_map", { group, map });
-    toast.info(t('Deleting "{name}"…').replace("{name}", map));
+    if (sendCmd("delete_map", { group, map })) {
+      toast.info(t('Deleting "{name}"…').replace("{name}", map));
+    }
   };
 
   const commitRename = () => {
     if (!renaming) return;
     const next = renaming.value.trim();
     if (next && next !== renaming.map) {
-      sendCmd("rename_map", {
+      const sent = sendCmd("rename_map", {
         group: renaming.group,
         map_old: renaming.map,
         map_new: next,
         active:
           active.group === renaming.group && active.map === renaming.map,
       });
-      toast.success(t('Renamed to "{name}"').replace("{name}", next));
+      if (sent) toast.info(t('Renaming to "{name}"…').replace("{name}", next));
     }
     setRenaming(null);
-  };
-
-  const createGroup = () => {
-    const g = newGroup.trim();
-    if (!g) return;
-    sendCmd("create_group", { group: g });
-    toast.success(t('Created group "{name}"').replace("{name}", g));
-    setNewGroup("");
   };
 
   const deleteGroup = (group) => {
@@ -246,11 +263,10 @@ const MapsPage = () => {
       )
     )
       return;
-    sendCmd("delete_group", { group });
-    toast.info(t('Deleting group "{name}"…').replace("{name}", group));
+    if (sendCmd("delete_group", { group })) {
+      toast.info(t('Deleting group "{name}"…').replace("{name}", group));
+    }
   };
-
-  const groupNames = groups.map((g) => g.name);
 
   if (editingMap) {
     return (
@@ -261,7 +277,9 @@ const MapsPage = () => {
           ← 返回已保存的地图
         </button>
         <SectionHeader eyebrow="Map rules" title={`编辑地图：${editingMap.map}`}
-          description={`分组：${editingMap.group} · 当前加载地图的规则将在机器人侧保存。`} />
+          description={editingMap.source === "project"
+            ? `位置：maps/${editingMap.map} · 当前加载地图的规则将在机器人侧保存。`
+            : `分组：${editingMap.group} · 当前加载地图的规则将在机器人侧保存。`} />
         <DashboardCard className="p-4"><AreaRulesEditor /></DashboardCard>
       </div>
     );
@@ -273,7 +291,7 @@ const MapsPage = () => {
       <SectionHeader
         eyebrow="Environments"
         title="Maps"
-        description="保存与管理地图。切换按钮仅重载 2D map_server；完整导航地图需要重启 LIORF。"
+        description="管理已保存地图。切换按钮仅重载 2D map_server；完整导航地图需要重启 LIORF。"
         action={
           <div className="flex items-center gap-3">
             <StatusBadge
@@ -292,89 +310,73 @@ const MapsPage = () => {
         }
       />
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <DashboardCard className="p-4 font-[RobotoMono]">
-          <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-themeBlue">
-            {t("Build a new map")}
-          </p>
-          <p className="mb-3 text-xs text-themeTextGray">
-            在 AckermannRobot 项目根目录的终端运行以下命令，驾驶机器人完成 LIO-SAM 建图，然后在此页保存地图。
-          </p>
-          <code className="block rounded-lg border border-borderSubtle bg-bgSurface px-3 py-2 text-xs text-textWhiteHover">
-            bash scripts/mapping_mini.sh
-          </code>
-        </DashboardCard>
-
-        <DashboardCard className="p-4 font-[RobotoMono]">
-          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-themeBlue">
-            保存当前 LIO-SAM 地图
-          </p>
-          <p className="mb-3 text-xs text-themeTextGray">
-            建图运行期间保存点云并转换为 2D 地图，文件位于项目 maps/ui/分组/地图名/。首次使用前请按项目 README 构建 pcd2gridmap。
-          </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
-            <input
-              list="map-groups"
-              className={inputClass}
-              value={saveForm.group}
-              onChange={(e) =>
-                setSaveForm((p) => ({ ...p, group: e.target.value }))
-              }
-              placeholder={t("Group")}
-            />
-            <datalist id="map-groups">
-              {groupNames.map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
-            <input
-              className={inputClass}
-              value={saveForm.name}
-              onChange={(e) =>
-                setSaveForm((p) => ({ ...p, name: e.target.value }))
-              }
-              placeholder={t("Map name")}
-            />
-            <button
-              onClick={saveMap}
-              disabled={!connected}
-              className="rounded-lg border border-themeBlue bg-themeBlue/10 px-4 py-2 text-sm font-semibold text-themeBlue transition-colors hover:bg-themeBlue hover:text-white disabled:opacity-40"
-            >
-              {t("Save")}
-            </button>
-          </div>
-        </DashboardCard>
-      </div>
-
       <DashboardCard className="p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-themeBlue">
             {t("Saved maps")}
           </p>
-          <div className="flex gap-2">
-            <input
-              className={`${inputClass} py-1`}
-              value={newGroup}
-              onChange={(e) => setNewGroup(e.target.value)}
-              placeholder={t("New group")}
-            />
-            <button
-              onClick={createGroup}
-              disabled={!connected}
-              className="rounded-lg border border-borderSubtle px-3 py-1 text-xs text-themeTextGray hover:border-themeBlue hover:text-themeBlue disabled:opacity-40"
-            >
-              {t("Add group")}
-            </button>
-          </div>
         </div>
 
-        {groups.length === 0 ? (
+        {groups.length === 0 && projectMaps.length === 0 ? (
           <EmptyState
             title="No maps yet"
-            description="Build and save a map above to see it here."
+            description="在 maps/ 下添加包含 map.yaml 和地图图像的目录，然后点击刷新。"
           />
         ) : (
           <div className="space-y-4">
+            {projectMaps.length > 0 && (
+              <div>
+                <p className="mb-1.5 font-[RobotoMono] text-xs uppercase tracking-wider text-themeTextGray">
+                  maps/ 目录
+                </p>
+                <div className="space-y-1.5">
+                  {projectMaps.map((m) => {
+                    const isActive = active.projectMap === m.name;
+                    return (
+                      <div
+                        key={m.name}
+                        className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${
+                          isActive
+                            ? "border-themeBlue/50 bg-themeBlue/5"
+                            : "border-borderSubtle bg-bgSurface"
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-textWhiteHover">
+                          {m.name}
+                          {isActive && (
+                            <span className="ml-2 rounded border border-themeBlue/40 px-1.5 py-0.5 text-[10px] text-themeBlue">
+                              {t("active")}
+                            </span>
+                          )}
+                          {!m.loadable && (
+                            <span className="ml-2 text-[11px] font-normal text-statusYellow">
+                              尚未生成可加载的 2D 地图
+                            </span>
+                          )}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1.5 font-[RobotoMono] text-xs">
+                          <button
+                            onClick={() => switchProjectMap(m.name)}
+                            disabled={!connected || !m.loadable || isActive}
+                            className="rounded-lg border border-themeBlue px-2 py-1 text-themeBlue hover:bg-themeBlue hover:text-white disabled:opacity-40"
+                          >
+                            {t(isActive ? "Loaded" : "Switch")}
+                          </button>
+                          <button
+                            onClick={() => editMap("maps", m.name, "project")}
+                            disabled={!connected || !m.loadable || Boolean(pendingEdit)}
+                            className="rounded-lg border border-borderSubtle px-2 py-1 text-themeBlue hover:border-themeBlue disabled:opacity-40"
+                          >
+                            {pendingEdit?.source === "project" && pendingEdit.map === m.name
+                              ? "加载中…" : "编辑"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {groups.map((group) => (
               <div key={group.name}>
                 <div className="mb-1.5 flex items-center justify-between">
@@ -395,8 +397,11 @@ const MapsPage = () => {
                 ) : (
                   <div className="space-y-1.5">
                     {group.maps.map((m) => {
-                      const isActive =
-                        active.group === group.name && active.map === m.name;
+                      const isActive = matchesActiveMap(active, {
+                        group: group.name,
+                        map: m.name,
+                        source: "ui",
+                      });
                       const isRenaming =
                         renaming?.group === group.name &&
                         renaming?.map === m.name;

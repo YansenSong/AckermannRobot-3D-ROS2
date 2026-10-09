@@ -6,9 +6,9 @@ const RoutePage = lazy(() => import("./RoutePage"));
 const InfoPage = lazy(() => import("./InfoPage"));
 const HealthPage = lazy(() => import("./HealthPage"));
 const EventsPage = lazy(() => import("./EventsPage"));
+const LogsPage = lazy(() => import("./LogsPage"));
 const MapsPage = lazy(() => import("./MapsPage"));
-const MissionsPage = lazy(() => import("./MissionsPage"));
-const ConfigPage = lazy(() => import("./ConfigPage"));
+const BmsPage = lazy(() => import("./BmsPage"));
 
 /**
  * 所有顶层页面的唯一数据源。Header.jsx 的侧边栏/移动端导航和 pages/index.jsx 的路由都读取此数组，
@@ -18,19 +18,24 @@ const ConfigPage = lazy(() => import("./ConfigPage"));
  * `icon` 必须与 Header.jsx 的 NavIcon 中某个分支对应（未注册的名称会回退到通用圆点，避免新条目显示为空白）。
  */
 export const PAGE_REGISTRY = [
-  { path: "/", label: "Map", icon: "map", component: MapPage },
-  { path: "/route", label: "Routes", icon: "route", component: RoutePage },
-  { path: "/maps", label: "Maps", icon: "maps", component: MapsPage },
+  { path: "/", label: "Cockpit", icon: "map", component: MapPage },
   {
-    path: "/missions",
-    label: "Missions",
-    icon: "missions",
-    component: MissionsPage,
+    path: "/route",
+    label: "Task planning",
+    icon: "route",
+    component: RoutePage,
   },
+  { path: "/maps", label: "Maps", icon: "maps", component: MapsPage },
   { path: "/info", label: "Status", icon: "status", component: InfoPage },
   { path: "/health", label: "Health", icon: "health", component: HealthPage },
   { path: "/events", label: "Events", icon: "events", component: EventsPage },
-  { path: "/config", label: "Config", icon: "config", component: ConfigPage },
+  { path: "/logs", label: "Logs", icon: "logs", component: LogsPage },
+  {
+    path: "/bms",
+    label: "Battery management",
+    icon: "battery",
+    component: BmsPage,
+  },
   ...(!INSPECTION_PROFILE
     ? [
         {
@@ -46,28 +51,10 @@ export const PAGE_REGISTRY = [
           component: lazy(() => import("./DevicesPage")),
         },
         {
-          path: "/metrics",
-          label: "Metrics",
-          icon: "metrics",
-          component: lazy(() => import("./MetricsPage")),
-        },
-        {
-          path: "/recordings",
-          label: "Recordings",
-          icon: "recordings",
-          component: lazy(() => import("./RecordingsPage")),
-        },
-        {
           path: "/console",
           label: "Console",
           icon: "console",
           component: lazy(() => import("./ConsolePage")),
-        },
-        {
-          path: "/params",
-          label: "Parameters",
-          icon: "params",
-          component: lazy(() => import("./ParamsPage")),
         },
       ]
     : []),

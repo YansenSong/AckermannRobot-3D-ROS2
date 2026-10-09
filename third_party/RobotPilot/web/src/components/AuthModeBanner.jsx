@@ -1,7 +1,7 @@
 import { T } from "../shared/i18n/i18n";
 import React, { useEffect, useState } from "react";
 
-const API_BASE = window.location.port === "3000" ? "http://127.0.0.1:5050" : "";
+const API_BASE = "";
 
 /** Show a warning if the development-only open mode is accessed remotely. */
 const AuthModeBanner = () => {
@@ -10,7 +10,7 @@ const AuthModeBanner = () => {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/api/auth/status`)
+    fetch(`${API_BASE}/api/auth/status`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled) setStatus(data);

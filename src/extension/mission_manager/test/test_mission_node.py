@@ -6,13 +6,72 @@ import unittest
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry
 from nav_status.msg import NavigationStatus
 from std_msgs.msg import String
 
 from mission_manager.node import MissionManager
 
 
+class PublisherSpy:
+    def __init__(self):
+        self.messages = []
+
+    def publish(self, message):
+        self.messages.append(message)
+
+
 class MissionNodeTest(unittest.TestCase):
+    @staticmethod
+    def software_stop(node, *, active=False, result="confirmed", durable=True):
+        node.on_software_stop_state(String(data=json.dumps({
+            "active": active,
+            "result": result,
+            "durable": durable,
+            "observed_at": "2026-10-08T00:00:00+00:00",
+        })))
+        odometry = Odometry()
+        odometry.pose.pose.orientation.w = 1.0
+        node.on_odom(odometry)
+
+    @staticmethod
+    def current_map(node, map_id="grid-1", map_version_id="grid-1"):
+        node.on_route_catalog(String(data=json.dumps({
+            "active_files": {"map_id": map_id, "map_version_id": map_version_id},
+        })))
+
+    def test_autonomy_guard_requires_fresh_localization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                           f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            try:
+                node.on_software_stop_state(String(data=json.dumps({
+                    "active": False, "result": "confirmed", "durable": True,
+                })))
+                self.assertEqual(
+                    node.motion_guard_block_reason(),
+                    "localization pose is unavailable or stale",
+                )
+                odometry = Odometry()
+                odometry.pose.pose.orientation.w = 1.0
+                node.on_odom(odometry)
+                self.assertEqual(node.motion_guard_block_reason(), "")
+                node.pose_received_at = time.monotonic() - 4
+                self.assertEqual(
+                    node.motion_guard_block_reason(),
+                    "localization pose is unavailable or stale",
+                )
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+
     def test_wait_can_resume_after_manager_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "missions.sqlite3")
@@ -20,23 +79,44 @@ class MissionNodeTest(unittest.TestCase):
             os.environ["ROS_LOG_DIR"] = directory
             rclpy.init(args=["--ros-args", "-p", f"database_path:={path}"])
             node = MissionManager()
+            node.ack_pub = PublisherSpy()
+            self.software_stop(node)
+            self.current_map(node)
             try:
                 def command(value):
                     node.on_command(String(data=json.dumps(value)))
 
                 command({"command": "save", "mission": {
                     "id": "m", "name": "Wait mission",
+                    "map_id": "grid-1", "map_version_id": "grid-1",
                     "steps": [{"type": "wait", "seconds": 0.2}]}})
-                command({"command": "start", "mission_id": "m"})
+                command({
+                    "command": "start", "mission_id": "m",
+                    "request_id": "robot-command-123",
+                    "origin_request_id": "web-request-123456",
+                })
                 task_id = node.run["task_id"]
                 self.assertEqual(node.run["status"], "RUNNING")
+                self.assertEqual(node.run["origin_request_id"], "web-request-123456")
+                self.assertEqual(
+                    json.loads(node.ack_pub.messages[-1].data)["origin_request_id"],
+                    "web-request-123456",
+                )
+                self.assertEqual(
+                    node.store.events(task_id)[0]["request_id"], "web-request-123456"
+                )
                 command({"command": "pause", "task_id": task_id})
                 self.assertEqual(node.run["status"], "PAUSED")
                 self.assertEqual(node.run["hold_active"], 1)
                 self.assertGreater(node.run["remaining_seconds"], 0)
+                self.assertEqual(
+                    node.store.events(task_id)[-1]["request_id"], "web-request-123456"
+                )
                 node.destroy_node()
 
                 node = MissionManager()
+                self.software_stop(node)
+                self.current_map(node)
                 self.assertEqual(node.run["status"], "PAUSED")
                 self.assertTrue(node.stop_owned)
                 command({"command": "resume", "task_id": task_id})
@@ -60,9 +140,12 @@ class MissionNodeTest(unittest.TestCase):
             rclpy.init(args=["--ros-args", "-p",
                              f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
             node = MissionManager()
+            self.software_stop(node)
+            self.current_map(node)
             try:
                 node.on_command(String(data=json.dumps({"command": "save", "mission": {
-                    "id": "m", "name": "Go", "steps": [{"type": "waypoint",
+                    "id": "m", "name": "Go", "map_id": "grid-1", "map_version_id": "grid-1",
+                    "steps": [{"type": "waypoint",
                     "pose": {"x": 1, "y": 2, "z": 0, "w": 1}}]}})))
                 node.on_command(String(data=json.dumps({"command": "start", "mission_id": "m"})))
                 self.assertEqual(node.run["status"], "RUNNING")
@@ -89,9 +172,191 @@ class MissionNodeTest(unittest.TestCase):
                                                        "task_id": node.run["task_id"]})))
                 self.assertEqual(node.run["hold_active"], 0)
                 node.on_command(String(data=json.dumps({"command": "save", "mission": {
-                    "id": "home", "name": "Home", "steps": [{"type": "home"}]}})))
+                    "id": "home", "name": "Home", "map_id": "grid-1", "map_version_id": "grid-1",
+                    "steps": [{"type": "home"}]}})))
                 node.on_command(String(data=json.dumps({"command": "start", "mission_id": "home"})))
                 self.assertEqual(node.run["status"], "RUNNING")
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+
+    def test_motion_commands_fail_closed_on_unknown_or_active_software_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            node.ack_pub = PublisherSpy()
+            self.current_map(node)
+            try:
+                save = {"command": "save", "mission": {
+                    "id": "m", "name": "Wait", "map_id": "grid-1", "map_version_id": "grid-1",
+                    "steps": [{"type": "wait", "seconds": 1}]}}
+                node.on_command(String(data=json.dumps(save)))
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "m"})))
+                self.assertIn("unavailable or stale", json.loads(node.ack_pub.messages[-1].data)["error"])
+                self.assertIsNone(node.run)
+
+                self.software_stop(node, active=True)
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "m"})))
+                self.assertEqual(json.loads(node.ack_pub.messages[-1].data)["error"], "software stop is active")
+                self.assertIsNone(node.run)
+
+                self.software_stop(node, durable=False)
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "m"})))
+                self.assertEqual(json.loads(node.ack_pub.messages[-1].data)["error"], "software stop state is not durable")
+                self.assertIsNone(node.run)
+
+                self.software_stop(node)
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "m"})))
+                task_id = node.run["task_id"]
+                node.on_command(String(data=json.dumps({"command": "pause", "task_id": task_id})))
+                self.software_stop(node, active=True)
+                node.on_command(String(data=json.dumps({"command": "resume", "task_id": task_id})))
+                self.assertEqual(json.loads(node.ack_pub.messages[-1].data)["error"], "software stop is active")
+                self.assertEqual(node.run["status"], "PAUSED")
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+
+    def test_start_and_resume_require_matching_map_identity_and_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            node.ack_pub = PublisherSpy()
+            self.software_stop(node)
+            self.current_map(node)
+            try:
+                node.on_command(String(data=json.dumps({"command": "save", "mission": {
+                    "id": "map-task", "name": "Map bound", "map_id": "grid-1",
+                    "map_version_id": "grid-1", "steps": [{"type": "wait", "seconds": 1}],
+                }})))
+                self.current_map(node, "grid-2", "grid-2")
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "map-task"})))
+                self.assertEqual(
+                    json.loads(node.ack_pub.messages[-1].data)["error"],
+                    "mission map_id does not match the current 2D map",
+                )
+                self.assertIsNone(node.run)
+
+                self.current_map(node)
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "map-task"})))
+                task_id = node.run["task_id"]
+                node.on_command(String(data=json.dumps({"command": "pause", "task_id": task_id})))
+                self.current_map(node, "grid-1", "revision-2")
+                node.on_command(String(data=json.dumps({"command": "resume", "task_id": task_id})))
+                self.assertEqual(
+                    json.loads(node.ack_pub.messages[-1].data)["error"],
+                    "mission map_version_id does not match the current 2D map version",
+                )
+                self.assertEqual(node.run["status"], "PAUSED")
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+
+    def test_schedule_crud_is_robot_persisted_and_revision_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            node.ack_pub = PublisherSpy()
+            self.software_stop(node)
+            self.current_map(node)
+            try:
+                node.on_command(String(data=json.dumps({"command": "save", "mission": {
+                    "id": "scheduled", "name": "Scheduled", "map_id": "grid-1",
+                    "map_version_id": "grid-1", "steps": [{"type": "wait", "seconds": 1}],
+                }})))
+                schedule_body = {
+                    "name": "Tomorrow", "mission_id": "scheduled", "recurrence": "once",
+                    "timezone": "UTC", "local_time": "10:00", "start_date": "2099-01-01",
+                    "weekdays": [], "enabled": True,
+                }
+                node.on_command(String(data=json.dumps({
+                    "command": "schedule.save", "schedule": schedule_body,
+                    "created_by": "operator-a", "request_id": "save-1",
+                })))
+                ack = json.loads(node.ack_pub.messages[-1].data)
+                self.assertTrue(ack["ok"])
+                schedule_id = ack["schedule_id"]
+                saved = node.store.schedule("robot-001", schedule_id)
+                self.assertEqual(saved["created_by"], "operator-a")
+                self.assertEqual(saved["revision"], 1)
+                self.assertEqual(saved["recurrence"], "once")
+
+                node.on_command(String(data=json.dumps({
+                    "command": "schedule.save", "schedule_id": schedule_id,
+                    "expected_revision": 1,
+                    "schedule": {**schedule_body, "enabled": False},
+                    "request_id": "update-1",
+                })))
+                self.assertTrue(json.loads(node.ack_pub.messages[-1].data)["ok"])
+                self.assertEqual(node.store.schedule("robot-001", schedule_id)["revision"], 2)
+
+                node.on_command(String(data=json.dumps({
+                    "command": "schedule.delete", "schedule_id": schedule_id,
+                    "expected_revision": 1, "request_id": "stale-delete",
+                })))
+                self.assertFalse(json.loads(node.ack_pub.messages[-1].data)["ok"])
+                self.assertIsNotNone(node.store.schedule("robot-001", schedule_id))
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+
+    def test_due_schedule_starts_mission_once_and_records_task_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                           f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            self.software_stop(node)
+            self.current_map(node)
+            try:
+                mission = {
+                    "id": "scheduled", "name": "Scheduled", "map_id": "grid-1",
+                    "map_version_id": "grid-1", "steps": [{"type": "wait", "seconds": 30}],
+                }
+                node.store.save_mission(mission)
+                from datetime import datetime, timedelta, timezone
+                due = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+                node.store.create_schedule("robot-001", {
+                    "schedule_id": "schedule-due", "name": "Due now", "mission_id": "scheduled",
+                    "recurrence": "once", "timezone": "UTC", "local_time": "00:00",
+                    "start_date": "2026-10-08", "weekdays": [], "enabled": True,
+                    "next_run_at": due, "created_by": "test",
+                })
+
+                node.scheduler_tick()
+                history = node.store.schedule_history("robot-001", "schedule-due")
+                self.assertEqual(history[0]["status"], "started")
+                self.assertEqual(history[0]["task_id"], node.run["task_id"])
+                self.assertEqual(node.run["mission_id"], "scheduled")
+                self.assertFalse(node.store.schedule("robot-001", "schedule-due")["enabled"])
+                node.scheduler_tick()
+                self.assertEqual(len(node.store.schedule_history("robot-001", "schedule-due")), 1)
             finally:
                 node.destroy_node()
                 rclpy.shutdown()

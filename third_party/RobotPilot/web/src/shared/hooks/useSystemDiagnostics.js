@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useRos, useRosStatus, useRuntimeConfig } from "../../app/App";
-import { AppConfig, LIFECYCLE_NODES } from "../constants";
-import { FRIENDLY_NAMES as LIFECYCLE_FRIENDLY_NAMES } from "../../components/LifecycleStatus";
+import { AppConfig } from "../constants";
 import useDevices from "./useDevices";
 import useDeviceStatuses from "./useDeviceStatuses";
+import useBatteryState from "./useBatteryState";
 
 // Plain-language names for the topic-health keys SystemHealth already
 // computes, so an issue pill reads "Localization has gone silent" instead
@@ -28,7 +28,7 @@ const EXPECTED_TOPICS = [
   { topic: AppConfig.MAP_TOPIC, label: "Map" },
   { topic: AppConfig.LOCALIZATION_POSE_TOPIC, label: "Localization" },
   { topic: AppConfig.NAV_STATUS_TOPIC, label: "Navigation" },
-  { topic: AppConfig.BATTERY_TOPIC, label: "Battery" },
+  { topic: AppConfig.BATTERY_STATE_TOPIC, label: "Battery state" },
   { topic: AppConfig.JOINT_STATES_TOPIC, label: "Joint states" },
 ];
 
@@ -44,24 +44,21 @@ export const OVERALL_LABELS = {
 };
 
 const RECONNECT_TOPICS_INTERVAL_MS = 20000;
-const FAULT_LOG_LIMIT = 30;
 const DIAGNOSTIC_STALE_MS = 5000;
-const FAULT_STARTUP_GRACE_MS = 10000;
-const FAULT_CONFIRM_MS = 3000;
 
 /**
  * Aggregates every health signal this app already computes elsewhere
- * (SystemHealth's topic/TF checks, LifecycleStatus's nav2 states, battery,
+ * (SystemHealth's topic/TF checks, battery,
  * registered-device status, /diagnostics, and a
  * best-effort rosapi topic-graph check) into one overall Ready / Ready with
  * warnings / Partially connected / Not ready rollup, plus a list of the
  * specific issues driving that rollup so the Health Centre page can link
  * each one to where it can actually be fixed.
  *
- * SystemHealth/LifecycleStatus own their own ROS subscriptions already —
+ * SystemHealth owns its own ROS subscriptions already —
  * this hook doesn't re-subscribe to the same topics/services a second time,
- * it just receives their computed state via the reportHealth/reportLifecycle
- * callbacks the Health Centre page wires up.
+ * it just receives its computed state via the reportHealth callback the
+ * Health Centre page wires up.
  */
 export default function useSystemDiagnostics() {
   const ros = useRos();
@@ -69,51 +66,25 @@ export default function useSystemDiagnostics() {
   const { config } = useRuntimeConfig();
   const { devices } = useDevices();
   const deviceStatuses = useDeviceStatuses(ros, devices);
+  const batteryTelemetry = useBatteryState();
 
   const [health, setHealth] = useState({});
   const [tfLinks, setTfLinks] = useState({});
-  const [lifecycle, setLifecycle] = useState({});
-  const [battery, setBattery] = useState({ pct: null, charging: false });
+  const battery = {
+    pct: batteryTelemetry.state?.percent ?? null,
+    charging: batteryTelemetry.usable ? batteryTelemetry.state?.charging : null,
+    source: batteryTelemetry.state?.source || "unavailable",
+    simulated: batteryTelemetry.state?.simulated === true,
+    available: batteryTelemetry.usable,
+    stale: batteryTelemetry.stale,
+  };
   const [diagnosticsByName, setDiagnosticsByName] = useState({});
   const [missingTopics, setMissingTopics] = useState([]);
-  const [faultLog, setFaultLog] = useState([]);
 
   const reportHealth = useCallback(({ health: h, tfLinks: tl }) => {
     setHealth(h);
     setTfLinks(tl);
   }, []);
-
-  const reportLifecycle = useCallback((states) => {
-    setLifecycle(states);
-  }, []);
-
-  // Battery + charging — same topics InfoPage already subscribes to.
-  useEffect(() => {
-    if (!ros || !window.ROSLIB) return;
-
-    const batteryTopic = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.BATTERY_TOPIC,
-      messageType: "std_msgs/Float32",
-    });
-    const chargeTopic = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.CHARGE_STATION_CONNECTED,
-      messageType: "std_msgs/Bool",
-    });
-
-    batteryTopic.subscribe(({ data }) =>
-      setBattery((prev) => ({ ...prev, pct: Math.round(data) })),
-    );
-    chargeTopic.subscribe(({ data }) =>
-      setBattery((prev) => ({ ...prev, charging: data })),
-    );
-
-    return () => {
-      batteryTopic.unsubscribe();
-      chargeTopic.unsubscribe();
-    };
-  }, [ros]);
 
   // Standard ROS2 diagnostics aggregator, if anything in the stack publishes
   // to it — best-effort, absence just means "no diagnostic_updater sources",
@@ -230,7 +201,6 @@ export default function useSystemDiagnostics() {
         severity: 3,
         message:
           "Robot connection is offline — nothing else here can be verified.",
-        linkTo: "/config",
       });
     }
 
@@ -259,36 +229,34 @@ export default function useSystemDiagnostics() {
       });
     });
 
-    const LIFECYCLE_STATE_LABELS = {
-      inactive: "paused",
-      unconfigured: "not set up yet",
-      unknown: "not responding",
-    };
-    Object.entries(lifecycle).forEach(([name, state]) => {
-      if (state === "active") return;
-      const friendlyName = LIFECYCLE_FRIENDLY_NAMES[name] || name;
-      const friendlyState = LIFECYCLE_STATE_LABELS[state] || state;
+    if (!battery.available) {
       list.push({
-        id: `lifecycle-${name}`,
-        severity: state === "inactive" ? 1 : 2,
-        message: `${friendlyName} is ${friendlyState}.`,
-        linkTo: "/health",
+        id: "battery",
+        severity: 1,
+        message: battery.stale
+          ? "Battery telemetry is stale."
+          : "Battery telemetry is unavailable.",
+        linkTo: "/info",
       });
-    });
-
-    if (battery.pct !== null && !battery.charging) {
+    } else if (battery.pct !== null) {
       if (battery.pct <= 10) {
         list.push({
           id: "battery",
           severity: 2,
-          message: `Battery critically low (${battery.pct}%).`,
+          message: `${
+            battery.simulated
+              ? "Simulated battery critically low"
+              : "Battery critically low"
+          } (${Number(battery.pct).toFixed(1)}%).`,
           linkTo: "/info",
         });
       } else if (battery.pct <= (config.lowBatteryThreshold ?? 20)) {
         list.push({
           id: "battery",
           severity: 1,
-          message: `Battery low (${battery.pct}%).`,
+          message: `${
+            battery.simulated ? "Simulated battery low" : "Battery low"
+          } (${Number(battery.pct).toFixed(1)}%).`,
           linkTo: "/info",
         });
       }
@@ -330,7 +298,6 @@ export default function useSystemDiagnostics() {
     rosbridgeStatus,
     health,
     tfLinks,
-    lifecycle,
     battery,
     config.lowBatteryThreshold,
     devices,
@@ -343,55 +310,8 @@ export default function useSystemDiagnostics() {
     ? Math.max(...issues.map((i) => i.severity))
     : 0;
 
-  // Build a baseline while ROS subscriptions and lifecycle polls settle. Only
-  // record new faults that persist, so startup ordering and one failed poll do
-  // not become permanent entries in this session's history.
-  const faultLogStartedAt = useRef(Date.now());
-  const knownIssueIds = useRef(new Set());
-  const pendingIssueSince = useRef(new Map());
-  useEffect(() => {
-    const now = Date.now();
-    const currentIds = new Set(issues.map((i) => i.id));
-    if (now - faultLogStartedAt.current < FAULT_STARTUP_GRACE_MS) {
-      knownIssueIds.current = currentIds;
-      pendingIssueSince.current.clear();
-      return;
-    }
-
-    for (const id of knownIssueIds.current) {
-      if (!currentIds.has(id)) knownIssueIds.current.delete(id);
-    }
-    for (const id of pendingIssueSince.current.keys()) {
-      if (!currentIds.has(id)) pendingIssueSince.current.delete(id);
-    }
-
-    const confirmed = issues.filter((issue) => {
-      if (knownIssueIds.current.has(issue.id)) return false;
-      const firstSeen = pendingIssueSince.current.get(issue.id) ?? now;
-      pendingIssueSince.current.set(issue.id, firstSeen);
-      if (now - firstSeen < FAULT_CONFIRM_MS) return false;
-      pendingIssueSince.current.delete(issue.id);
-      knownIssueIds.current.add(issue.id);
-      return true;
-    });
-    if (confirmed.length === 0) return;
-
-    setFaultLog((prev) =>
-      [
-        ...confirmed.map((issue) => ({
-          id: issue.id,
-          time: now,
-          message: issue.message,
-          severity: issue.severity,
-        })),
-        ...prev,
-      ].slice(0, FAULT_LOG_LIMIT),
-    );
-  }, [issues]);
-
   return {
     reportHealth,
-    reportLifecycle,
     battery,
     diagnosticsMsgs,
     missingTopics,
@@ -400,6 +320,5 @@ export default function useSystemDiagnostics() {
     issues,
     overall,
     overallLabel: OVERALL_LABELS[overall],
-    faultLog,
   };
 }

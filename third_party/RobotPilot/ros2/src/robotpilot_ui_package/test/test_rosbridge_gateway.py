@@ -1,5 +1,7 @@
 import unittest
 
+import json
+
 from robotpilot_ui_package.rosbridge_gateway import allowed_origin, required_role
 
 
@@ -12,6 +14,26 @@ class GatewayPolicyTest(unittest.TestCase):
         self.assertIsNone(required_role({"op": "publish", "topic": "/unknown"}))
         self.assertIsNone(required_role({"op": "call_service", "service": "/rosapi/set_param"}))
         self.assertIsNone(required_role({"op": "advertise_service", "service": "/fake"}))
+
+    def test_software_stop_requests_use_action_specific_roles(self):
+        def message(action):
+            return {
+                "op": "publish",
+                "topic": "/safety/software_stop/request",
+                "msg": {"data": json.dumps({"action": action, "request_id": "request-1"})},
+            }
+
+        self.assertEqual(required_role(message("get_state")), "Viewer")
+        self.assertEqual(required_role(message("request_stop")), "Operator")
+        self.assertEqual(required_role(message("request_release")), "Engineer")
+        self.assertIsNone(required_role(message("anything_else")))
+        self.assertEqual(required_role({
+            "op": "advertise", "topic": "/safety/software_stop/request",
+        }), "Viewer")
+        self.assertIsNone(required_role({
+            "op": "publish", "topic": "/safety/software_stop/request",
+            "msg": {"data": "not-json"},
+        }))
 
     def test_origin_must_match(self):
         allowed = {"https://robot.example"}

@@ -5,6 +5,8 @@ receives the latched map. Republishes every 2 s to cover late-connecting clients
 Nav2 nodes (TRANSIENT_LOCAL subscribers) are unaffected — they only connect to
 the map_server's TRANSIENT_LOCAL publisher, not this VOLATILE relay.
 """
+import signal
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
@@ -55,8 +57,10 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

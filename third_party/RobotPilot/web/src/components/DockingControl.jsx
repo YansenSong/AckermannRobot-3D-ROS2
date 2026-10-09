@@ -2,6 +2,7 @@ import { T, useT } from "../shared/i18n/i18n";
 import { useRef, useEffect, useState } from "react";
 import { useRos } from "../app/App";
 import { AppConfig } from "../shared/constants";
+import { useRoleAccess } from "../shared/auth/roleAccess";
 
 // Position the robot moves to after undocking (map frame, metres)
 const STANDBY_POSE = { x: 0.0, y: 0.0, yaw: 0.0 };
@@ -54,6 +55,7 @@ const STATUSES = {
 const DockingControl = ({ compact = false }) => {
   const { t } = useT();
   const ros = useRos();
+  const operationAccess = useRoleAccess("Operator");
   const [status, setStatus] = useState("idle");
   const [events, setEvents] = useState([]);
   const dockTriggerRef = useRef(null);
@@ -143,9 +145,10 @@ const DockingControl = ({ compact = false }) => {
       dockStatusTopic.unsubscribe();
       navStatusTopic.unsubscribe();
     };
-  }, [ros]);
+  }, [ros, operationAccess.allowed]);
 
   const sendStandbyGoal = () => {
+    if (!operationAccess.allowed) return;
     if (!goalPoseTopicRef.current) return;
     const yaw = STANDBY_POSE.yaw;
     goalPoseTopicRef.current.publish(
@@ -165,6 +168,7 @@ const DockingControl = ({ compact = false }) => {
   };
 
   const handleDock = () => {
+    if (!operationAccess.allowed) return;
     if (!dockTriggerRef.current) return;
     dockTriggerRef.current.publish(new window.ROSLIB.Message({ data: true }));
     setStatus("docking");
@@ -181,6 +185,7 @@ const DockingControl = ({ compact = false }) => {
   };
 
   const handleUndock = () => {
+    if (!operationAccess.allowed) return;
     if (!undockTriggerRef.current) return;
     undockTriggerRef.current.publish(new window.ROSLIB.Message({ data: true }));
     setStatus("undocking");
@@ -228,14 +233,20 @@ const DockingControl = ({ compact = false }) => {
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={handleDock}
-            disabled={busy || status === "docked"}
+            disabled={!operationAccess.allowed || busy || status === "docked"}
+            title={
+              operationAccess.allowed ? undefined : t(operationAccess.reason)
+            }
             className="rounded-lg border border-themeBlue bg-themeBlue/10 py-2 text-xs font-semibold text-themeBlue transition-colors hover:bg-themeBlue hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             <T>{"Dock"}</T>{" "}
           </button>
           <button
             onClick={handleUndock}
-            disabled={busy || status === "idle"}
+            disabled={!operationAccess.allowed || busy || status === "idle"}
+            title={
+              operationAccess.allowed ? undefined : t(operationAccess.reason)
+            }
             className="rounded-lg border border-borderSubtle bg-bgCard py-2 text-xs font-semibold text-textWhiteHover transition-colors hover:border-themeBlue hover:text-themeBlue disabled:cursor-not-allowed disabled:opacity-40"
           >
             <T>{"Undock"}</T>{" "}
@@ -272,14 +283,20 @@ const DockingControl = ({ compact = false }) => {
       <div className="flex gap-2">
         <button
           onClick={handleDock}
-          disabled={busy || status === "docked"}
+          disabled={!operationAccess.allowed || busy || status === "docked"}
+          title={
+            operationAccess.allowed ? undefined : t(operationAccess.reason)
+          }
           className="flex-1 rounded-lg border border-themeBlue bg-themeBlue/10 py-1.5 text-xs font-semibold text-themeBlue transition-colors hover:bg-themeBlue hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           <T>{"⚓ Dock"}</T>{" "}
         </button>
         <button
           onClick={handleUndock}
-          disabled={busy || status === "idle"}
+          disabled={!operationAccess.allowed || busy || status === "idle"}
+          title={
+            operationAccess.allowed ? undefined : t(operationAccess.reason)
+          }
           className="flex-1 rounded-lg border border-borderSubtle bg-bgCard py-1.5 text-xs font-semibold text-textWhiteHover transition-colors hover:border-themeBlue hover:text-themeBlue disabled:cursor-not-allowed disabled:opacity-40"
         >
           <T>{"↩ Undock"}</T>{" "}

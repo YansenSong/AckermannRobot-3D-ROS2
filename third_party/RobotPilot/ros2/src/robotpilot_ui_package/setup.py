@@ -59,6 +59,8 @@ setup(
             "tf_static_relay = robotpilot_ui_package.tf_static_relay:main",
             "nav_relay = robotpilot_ui_package.nav_relays:main",
             "route_store = robotpilot_ui_package.route_store:main",
+            "battery_monitor = robotpilot_ui_package.battery:main",
+            "daily_log_collector = robotpilot_ui_package.daily_log_collector:main",
             "ui_admin = robotpilot_ui_package.auth:main",
             "rosbridge_gateway = robotpilot_ui_package.rosbridge_gateway:main",
         ],

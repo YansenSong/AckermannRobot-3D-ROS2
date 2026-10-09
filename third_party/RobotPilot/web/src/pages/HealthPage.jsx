@@ -1,12 +1,13 @@
-import React from "react";
+import React, { useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
+import { AuthContext } from "../app/App";
 import { useRosStatus } from "../app/App";
 import SystemHealth from "../components/SystemHealth";
-import LifecycleStatus from "../components/LifecycleStatus";
 import SupportPackageButton from "../components/SupportPackageButton";
+import { apiFetch } from "../shared/api/apiFetch";
 import useSystemDiagnostics from "../shared/hooks/useSystemDiagnostics";
 import { useT, T } from "../shared/i18n/i18n";
 import {
@@ -47,19 +48,26 @@ const OVERALL_STYLE = {
   },
 };
 
-const formatTime = (ms) =>
-  new Date(ms).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+const formatBytes = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+};
 
 const HealthPage = () => {
   const { t } = useT();
+  const { robotId } = useContext(AuthContext);
   const rosbridgeStatus = useRosStatus();
+  const [storage, setStorage] = useState(null);
+  const [storageError, setStorageError] = useState("");
   const {
     reportHealth,
-    reportLifecycle,
     battery,
     diagnosticsMsgs,
     missingTopics,
@@ -68,11 +76,81 @@ const HealthPage = () => {
     issues,
     overall,
     overallLabel,
-    faultLog,
   } = useSystemDiagnostics();
 
-  const style = OVERALL_STYLE[overall];
-  const activeIssueIds = new Set(issues.map((issue) => issue.id));
+  const storageLevel = storage?.some((item) => item.level === "critical")
+    ? "critical"
+    : storage?.some((item) => item.level === "warning")
+    ? "warning"
+    : null;
+  const storageSeverity = storageError
+    ? 2
+    : !storage || storageLevel === "warning"
+    ? 1
+    : storageLevel === "critical"
+    ? 2
+    : 0;
+  const effectiveOverall = Math.max(overall, storageSeverity);
+  const effectiveOverallLabel =
+    effectiveOverall === 2
+      ? "Needs attention"
+      : effectiveOverall === 1
+      ? "Ready with warnings"
+      : overallLabel;
+  const effectiveIssues = [
+    ...issues,
+    ...(storageError || !storage
+      ? [
+          {
+            id: "storage-unknown",
+            message: storage
+              ? "Storage health unavailable"
+              : "Loading storage health…",
+          },
+        ]
+      : storageLevel
+      ? [
+          {
+            id: `storage-${storageLevel}`,
+            message:
+              storageLevel === "critical"
+                ? "Storage usage is above the critical threshold."
+                : "Storage usage is above the warning threshold.",
+          },
+        ]
+      : []),
+  ];
+  const style = OVERALL_STYLE[effectiveOverall];
+  useEffect(() => {
+    let active = true;
+    const loadStorage = async () => {
+      try {
+        const response = await apiFetch(
+          `/api/v1/robots/${encodeURIComponent(robotId || "")}/health`,
+          { cache: "no-store" },
+        );
+        const data = await response.json();
+        if (!active) return;
+        setStorage(data.storage || []);
+        setStorageError(data.storage_error || "");
+      } catch (error) {
+        if (!active) return;
+        setStorage(null);
+        setStorageError(error.message || "Storage health unavailable.");
+      }
+    };
+    if (robotId) {
+      loadStorage();
+      const timer = window.setInterval(loadStorage, 30000);
+      return () => {
+        active = false;
+        window.clearInterval(timer);
+      };
+    }
+    return () => {
+      active = false;
+    };
+  }, [robotId]);
 
   return (
     <div className="sectionHeight space-y-5 py-4 sm:space-y-6 sm:py-6">
@@ -81,7 +159,13 @@ const HealthPage = () => {
         title="Health Centre"
         description="Combines connection status, sensor data, navigation health, hardware, and battery into one ready/not-ready check."
         action={
-          <SupportPackageButton health={{ overall, overallLabel, issues }} />
+          <SupportPackageButton
+            health={{
+              overall: effectiveOverall,
+              overallLabel: effectiveOverallLabel,
+              issues: effectiveIssues,
+            }}
+          />
         }
       />
 
@@ -98,17 +182,17 @@ const HealthPage = () => {
             />
           </div>
           <p className={`font-[RobotoMono] text-lg font-bold ${style.text}`}>
-            {t(overallLabel)}
+            {t(effectiveOverallLabel)}
           </p>
         </div>
 
-        {issues.length === 0 ? (
+        {effectiveIssues.length === 0 ? (
           <p className="mt-2 text-sm text-themeTextGray">
             {t("Every checked signal is nominal.")}
           </p>
         ) : (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {issues.map((issue) =>
+            {effectiveIssues.map((issue) =>
               issue.linkTo ? (
                 <Link
                   key={issue.id}
@@ -132,7 +216,6 @@ const HealthPage = () => {
 
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <SystemHealth onHealthChange={reportHealth} />
-        <LifecycleStatus onStatesChange={reportLifecycle} />
 
         <DashboardCard className="p-4">
           <p className="mb-2 font-[RobotoMono] text-xs uppercase tracking-wider text-themeTextGray">
@@ -187,6 +270,52 @@ const HealthPage = () => {
         </DashboardCard>
 
         <DashboardCard className="p-4">
+          <p className="mb-3 font-[RobotoMono] text-xs uppercase tracking-wider text-themeTextGray">
+            <T>{"Storage"}</T>
+          </p>
+          {!storage && !storageError ? (
+            <p className="text-xs text-themeTextGray opacity-70">
+              <T>{"Loading storage health…"}</T>
+            </p>
+          ) : storageError || !storage ? (
+            <p className="text-xs text-statusYellow">
+              {t("Storage health unavailable")}
+            </p>
+          ) : storage.length === 0 ? (
+            <p className="text-xs text-themeTextGray opacity-70">
+              <T>{"No storage paths configured."}</T>
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {storage.map((item) => {
+                const tone =
+                  item.level === "critical"
+                    ? "text-statusRed"
+                    : item.level === "warning"
+                    ? "text-statusYellow"
+                    : "text-statusGreen";
+                return (
+                  <div key={`${item.label}:${item.path}`}>
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate text-textWhiteHover">
+                        {t(item.label)}
+                      </span>
+                      <span className={`shrink-0 font-semibold ${tone}`}>
+                        {item.used_percent}% · {t(item.level)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-themeTextGray">
+                      {formatBytes(item.available_bytes)} {t("available of")}{" "}
+                      {formatBytes(item.total_bytes)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </DashboardCard>
+
+        <DashboardCard className="p-4">
           <p className="mb-2 font-[RobotoMono] text-xs uppercase tracking-wider text-themeTextGray">
             <T>{"Battery"}</T>{" "}
           </p>
@@ -197,7 +326,7 @@ const HealthPage = () => {
           ) : (
             <div className="flex items-center justify-between">
               <p className="font-[RobotoMono] text-2xl font-bold text-textWhiteHover">
-                {battery.pct}%
+                {Number(battery.pct).toFixed(1)}%
               </p>
               <StatusBadge
                 status={battery.charging ? "connected" : "idle"}
@@ -269,48 +398,6 @@ const HealthPage = () => {
           )}
         </DashboardCard>
 
-        <DashboardCard className="p-4 lg:col-span-2 xl:col-span-3">
-          <p className="mb-2 font-[RobotoMono] text-xs uppercase tracking-wider text-themeTextGray">
-            <T>{"Recent faults (this session)"}</T>{" "}
-          </p>
-          {faultLog.length === 0 ? (
-            <p className="text-xs text-themeTextGray opacity-70">
-              <T>{"Nothing new has gone wrong since this page loaded."}</T>{" "}
-            </p>
-          ) : (
-            <div className="space-y-1.5">
-              {faultLog.map((fault, index) => (
-                <div key={index} className="flex items-center gap-2 text-xs">
-                  <span className="shrink-0 font-[RobotoMono] text-themeTextGray">
-                    {formatTime(fault.time)}
-                  </span>
-                  <span
-                    className={
-                      fault.severity >= 2
-                        ? "text-statusRed"
-                        : "text-statusYellow"
-                    }
-                  >
-                    {t(fault.message)}
-                  </span>
-                  <span
-                    className={`shrink-0 ${
-                      activeIssueIds.has(fault.id)
-                        ? "text-statusRed"
-                        : "text-statusGreen"
-                    }`}
-                  >
-                    {t(
-                      activeIssueIds.has(fault.id)
-                        ? "Still active"
-                        : "Recovered",
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </DashboardCard>
       </div>
 
       <ToastContainer theme="dark" position="bottom-right" />

@@ -22,7 +22,7 @@ export const PAGE_HELP = {
     ],
   },
   "/route": {
-    title: "Routes",
+    title: "Task planning",
     summary:
       "Create, edit, and save waypoint routes for the map currently loaded in the Ackermann simulation.",
     tips: [
@@ -58,24 +58,7 @@ export const PAGE_HELP = {
     tips: [
       "Click any listed issue to jump straight to the page where it can actually be fixed.",
       "Ready with warnings means nothing is broken, but something (low battery, a missing topic, an offline device) is worth a look.",
-      "Recent faults is a running log for this browser session only — it resets on reload, it isn't a persisted history.",
     ],
-  },
-  "/recordings": {
-    title: "Recordings",
-    summary:
-      "Record real rosbag sessions and replay them later — useful for debugging, demos, lessons, and dataset collection.",
-    tips: [
-      "Replayed telemetry is always clearly labeled (a Replay mode banner appears on every page) — it's never shown as if it were a live robot.",
-      "Stopping a replay can take several seconds — ros2 bag play needs a moment to shut down cleanly, that's expected, not a stuck button.",
-      "Recording all topics is the safest default if you're not sure what you'll need later.",
-    ],
-  },
-  "/config": {
-    title: "Config",
-    summary:
-      "Connection settings, safety limits, and notification preferences for this browser — nothing here is shared with other operators.",
-    tips: ["Changing the robot's address or port reconnects immediately."],
   },
 };
 

@@ -12,8 +12,11 @@ timestamp data.
 """
 
 import math
+import signal
+import threading
 
 import rclpy
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import PointCloud2, PointField
@@ -119,14 +122,35 @@ class GazeboLidarAdapter(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = GazeboLidarAdapter()
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    shutdown_requested = threading.Event()
+
+    def request_shutdown(_signum, _frame):
+        # Let an in-flight PointCloud2 conversion finish before destroying the
+        # node; raising KeyboardInterrupt inside the callback can interrupt
+        # Python's lazy imports and leave the message conversion half-complete.
+        shutdown_requested.set()
+
+    handled_signals = (signal.SIGINT, signal.SIGTERM)
+    previous_handlers = {
+        signum: signal.getsignal(signum) for signum in handled_signals
+    }
+    for signum in handled_signals:
+        signal.signal(signum, request_shutdown)
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
+        while rclpy.ok() and not shutdown_requested.is_set():
+            executor.spin_once(timeout_sec=0.1)
     finally:
+        for signum in handled_signals:
+            signal.signal(signum, signal.SIG_IGN)
+        executor.remove_node(node)
+        executor.shutdown(timeout_sec=1.0)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == '__main__':

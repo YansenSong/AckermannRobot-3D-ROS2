@@ -14,5 +14,5 @@ export const robotContract = Object.freeze({
   missionCommandTopic: "/mission/command",
   missionStateTopic: "/mission/state",
   softwareStopService: "",
-  manualCommandTopic: "",
+  manualCommandTopic: INSPECTION_PROFILE ? "" : "/cmd_vel",
 });

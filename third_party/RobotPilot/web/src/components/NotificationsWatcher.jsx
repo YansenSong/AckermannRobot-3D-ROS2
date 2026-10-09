@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { useRos, useRuntimeConfig } from "../app/App";
 import { AppConfig } from "../shared/constants";
+import useBatteryState from "../shared/hooks/useBatteryState";
 
 const NAV_TERMINAL_LABELS = {
   4: "Navigation succeeded",
@@ -10,7 +11,11 @@ const NAV_TERMINAL_LABELS = {
 };
 
 const notify = (title, body) => {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  if (
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  )
+    return;
   try {
     // 即发即弃；无需保留此实例的引用。
     const notification = new Notification(title, { body });
@@ -29,6 +34,7 @@ const notify = (title, body) => {
 const NotificationsWatcher = () => {
   const ros = useRos();
   const { config } = useRuntimeConfig();
+  const batteryTelemetry = useBatteryState();
   const lastNavTerminalRef = useRef(null);
   const lowBatteryNotifiedRef = useRef(false);
 
@@ -57,33 +63,41 @@ const NotificationsWatcher = () => {
     });
     dockStatusTopic.subscribe((msg) => {
       if (msg.data === "docked") notify("RobotPilot", "Docking complete");
-      else if (msg.data === "failed") notify("RobotPilot", "Docking failed — check the dock tag and logs");
-    });
-
-    const batteryTopic = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.BATTERY_TOPIC,
-      messageType: "std_msgs/Float32",
-    });
-    batteryTopic.subscribe(({ data }) => {
-      const threshold = config.lowBatteryThreshold;
-      if (data <= threshold) {
-        if (!lowBatteryNotifiedRef.current) {
-          lowBatteryNotifiedRef.current = true;
-          notify("RobotPilot", `Battery at ${Math.round(data)}% — below ${threshold}%`);
-        }
-      } else if (data > threshold + 5) {
-        // 使用滞回：电量恢复到高于阈值数个百分点后才重新启用提醒，避免电量在阈值附近波动时每条消息都触发通知。
-        lowBatteryNotifiedRef.current = false;
-      }
+      else if (msg.data === "failed")
+        notify("RobotPilot", "Docking failed — check the dock tag and logs");
     });
 
     return () => {
       navStatusTopic.unsubscribe();
       dockStatusTopic.unsubscribe();
-      batteryTopic.unsubscribe();
     };
   }, [ros, config.notificationsEnabled, config.lowBatteryThreshold]);
+
+  useEffect(() => {
+    if (!config.notificationsEnabled || !batteryTelemetry.usable) return;
+    const percent = batteryTelemetry.state.percent;
+    const threshold = config.lowBatteryThreshold;
+    if (percent <= threshold) {
+      if (!lowBatteryNotifiedRef.current) {
+        lowBatteryNotifiedRef.current = true;
+        const sourceTag = batteryTelemetry.state.simulated
+          ? " [SIMULATION]"
+          : "";
+        notify(
+          "RobotPilot",
+          `Battery at ${Math.round(
+            percent,
+          )}% — below ${threshold}%${sourceTag}`,
+        );
+      }
+    } else if (percent > threshold + 5) {
+      lowBatteryNotifiedRef.current = false;
+    }
+  }, [
+    config.notificationsEnabled,
+    config.lowBatteryThreshold,
+    batteryTelemetry,
+  ]);
 
   return null;
 };

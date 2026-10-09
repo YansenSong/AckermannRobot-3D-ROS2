@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import signal
 import shutil
 from pathlib import Path
 
@@ -65,6 +66,7 @@ class RouteStore(Node):
         )
         self.nav_data_pub = self.create_publisher(String, self.ROUTE_RESPONSE_TOPIC, 10)
         self.ui_message_pub = self.create_publisher(String, "/ui_message", 10)
+        self.create_timer(5.0, self._publish_catalog)
         self.waypoints_pub = self.create_publisher(
             ArrayPoseStampedWithCovariance, "/WayPoints_topic", 1
         )
@@ -222,6 +224,8 @@ class RouteStore(Node):
             "active_files": {
                 "group": self.map_group if self.map_key else "Null",
                 "map": self.map_name if self.map_key else "Null",
+                "map_id": self.map_key if self.map_key else "Null",
+                "map_version_id": self.map_key if self.map_key else "Null",
                 "route": self._active_route() if self.map_key else "Null",
             },
         }
@@ -440,6 +444,10 @@ class RouteStore(Node):
                         "map": name,
                         "from_key": self.map_key,
                     }
+            elif operation == "change_project_map":
+                # The folder handler publishes the confirmed maps/<name>
+                # selection after map_server accepts it.
+                pass
             elif operation == "rename_map":
                 group = str(data.get("group", ""))
                 old_name = str(data.get("map_old", ""))
@@ -484,8 +492,10 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

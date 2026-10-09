@@ -2,23 +2,13 @@ import packageJson from "../../../package.json";
 import { getEvents } from "../events/eventLog";
 import { loadParamRows, readParamValue } from "../constants/navParams";
 
-const METRICS_STORAGE_KEY = "robotpilotMetrics";
 const PARAM_READ_TIMEOUT_MS = 2500;
 const RECENT_EVENTS_LIMIT = 50;
 
-const readMetricsSnapshot = () => {
-  try {
-    return JSON.parse(localStorage.getItem(METRICS_STORAGE_KEY) || "null");
-  } catch {
-    return null;
-  }
-};
-
 // Best-effort, read-only snapshot of the curated Nav2 param list — a fresh
 // ROSLIB.Service per node/get_parameters call, raced against a timeout so one
-// unresponsive node can't hang the whole export. Deliberately doesn't reuse
-// ParamsPage's live component state (this can be called from a page that
-// never mounted it, e.g. Health Centre).
+// unresponsive node can't hang the whole export. The snapshot can be called
+// from a page that never mounted parameter controls, such as Health Centre.
 const snapshotNavParams = (ros, rosConnected) => {
   if (!ros || !rosConnected || !window.ROSLIB) {
     return Promise.resolve(
@@ -78,21 +68,16 @@ const snapshotNavParams = (ros, rosConnected) => {
 
 /**
  * Assembles a single JSON-serializable snapshot for offline troubleshooting:
- * connection info, the Health Centre rollup, recent events, the persisted
- * "track record" metrics, runtime config, and a best-effort Nav2 param
- * snapshot. Nothing here is secret (no credentials exist in this app), so no
- * redaction is applied — host/IP is left in deliberately, since it's exactly
- * what a support ticket needs to reproduce a connection issue.
+ * connection status, the Health Centre rollup, recent events, runtime config,
+ * and a best-effort Nav2 param snapshot. The package includes no connection
+ * address or credentials.
  *
- * Callers pass in data already computed by hooks they've mounted themselves
- * (issues/overall from useSystemDiagnostics, config from useRuntimeConfig) —
- * this function doesn't re-subscribe to anything, so it's safe to call from
- * any page without doubling up ROS subscriptions or metrics accumulators.
+ * Callers pass in health and runtime settings they already loaded; this
+ * function doesn't create additional ROS subscriptions.
  */
 export default async function buildSupportPackage({
   ros,
   rosStatus,
-  resolvedHost,
   config,
   health,
 }) {
@@ -102,18 +87,13 @@ export default async function buildSupportPackage({
     generatedAt: new Date().toISOString(),
     appVersion: packageJson.version,
     userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
-    connection: {
-      rosbridgeUrl: `ws://${resolvedHost}:${config.rosbridgePort}`,
-      cameraPort: config.cameraPort,
-      rosStatus,
-    },
+    connection: { rosStatus },
     health: {
       overall: health.overall,
       overallLabel: health.overallLabel,
       issues: health.issues,
     },
     recentEvents: getEvents().slice(0, RECENT_EVENTS_LIMIT),
-    metrics: readMetricsSnapshot(),
     runtimeConfig: config,
     navParams,
   };

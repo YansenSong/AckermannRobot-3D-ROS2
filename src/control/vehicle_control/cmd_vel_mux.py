@@ -7,17 +7,21 @@ from /neupan_cmd_vel, and forwards the selected command to the
 ackermann_steering_controller as TwistStamped. The /stop override has highest
 priority.
 
-The /stop topic is a centralized stop override.  Publishing
-std_msgs/msg/Bool with data=true forces zero velocity regardless of the
-currently selected planner; publishing data=false releases the override.
-The mission manager has a separate /mission/hold override so resuming a task
-cannot release an operator's /stop request.
+The /stop topic is retained as an assertion-only compatibility input.
+Authenticated Web stop requests use /safety/software_stop/request and receive
+robot state on /safety/software_stop/state. The persistent latch cannot be
+cleared by /stop=false or the mission manager's separate /mission/hold.
 
 """
 import copy
 import json
 import math
+import os
+from pathlib import Path
+import signal
 import time
+from datetime import datetime, timezone
+import uuid
 
 import rclpy
 from rclpy.node import Node
@@ -42,6 +46,13 @@ class CmdVelMux(Node):
         self.stop_sub = self.create_subscription(
             Bool, '/stop', self.stop_callback, 10
         )
+        self.software_stop_request_sub = self.create_subscription(
+            String, '/safety/software_stop/request',
+            self.software_stop_request_callback, 10
+        )
+        self.software_stop_state_pub = self.create_publisher(
+            String, '/safety/software_stop/state', 10
+        )
         self.mission_hold_sub = self.create_subscription(
             Bool, '/mission/hold', self.mission_hold_callback, 10
         )
@@ -50,13 +61,30 @@ class CmdVelMux(Node):
         )
 
         self.neupan_msg: Twist | None = None
+        self.neupan_received_at: float | None = None
         self.manual_msg: Twist | None = None
         self.manual_received_at: float | None = None
         self.declare_parameter('manual_cmd_timeout', 0.5)
         self.manual_cmd_timeout = float(
             self.get_parameter('manual_cmd_timeout').value
         )
-        self.stop_requested = False
+        self.declare_parameter('neupan_cmd_timeout', 0.5)
+        self.neupan_cmd_timeout = float(
+            self.get_parameter('neupan_cmd_timeout').value
+        )
+        self.declare_parameter(
+            'software_stop_state_file',
+            os.environ.get(
+                'SOFTWARE_STOP_STATE_FILE',
+                str(Path.home() / '.ros' / 'software_stop.json'),
+            ),
+        )
+        self.software_stop_state_file = Path(
+            self.get_parameter('software_stop_state_file').value
+        ).expanduser()
+        self.software_stop_state = self.load_software_stop_state()
+        self.stop_requested = bool(self.software_stop_state['active'])
+        self.last_stop_state_publish = 0.0
         self.mission_hold_requested = False
         self.declare_parameter('area_rules_required', False)
         self.declare_parameter('area_control_timeout', 0.5)
@@ -72,9 +100,15 @@ class CmdVelMux(Node):
             'NeuPAN(/neupan_cmd_vel); /stop and /mission/hold override both → '
             '/ackermann_steering_controller/reference'
         )
+        if self.stop_requested:
+            self.get_logger().warn(
+                'Restored active software stop from persistent state; '
+                'an explicit authorized release is required'
+            )
 
     def neupan_callback(self, msg: Twist):
         self.neupan_msg = msg
+        self.neupan_received_at = time.monotonic()
 
     def manual_callback(self, msg: Twist):
         self.manual_msg = msg
@@ -82,13 +116,268 @@ class CmdVelMux(Node):
 
     def stop_callback(self, msg: Bool):
         requested = bool(msg.data)
-        if requested != self.stop_requested:
-            state = 'ACTIVE' if requested else 'RELEASED'
-            self.get_logger().warn(
-                f'/stop override {state}' if requested
-                else '/stop override released'
+        if requested:
+            self.set_software_stop(
+                active=True,
+                source='legacy_ros_stop',
+                reason='Legacy /stop topic asserted',
+                request_id=str(uuid.uuid4()),
             )
-        self.stop_requested = requested
+        elif self.stop_requested:
+            # Bool has no actor, confirmation, or request correlation. It must
+            # not be able to release the persistent operator stop latch.
+            self.get_logger().warn(
+                'Ignoring legacy /stop=false; use the authorized '
+                'software stop release request'
+            )
+
+    def load_software_stop_state(self):
+        try:
+            state = json.loads(self.software_stop_state_file.read_text(encoding='utf-8'))
+            if not isinstance(state, dict) or not isinstance(state.get('active'), bool):
+                raise ValueError('invalid state shape')
+            return {
+                'active': state['active'],
+                'source': str(state.get('source') or 'persistent_state'),
+                'reason': str(state.get('reason') or ''),
+                'request_id': str(state.get('request_id') or ''),
+                'observed_at': str(state.get('observed_at') or ''),
+                'result': 'confirmed' if state.get('durable', True) else 'degraded',
+                'durable': state.get('durable', True) is True,
+            }
+        except FileNotFoundError:
+            return {
+                'active': False,
+                'source': 'startup',
+                'reason': 'No persisted software stop is active',
+                'request_id': '',
+                'observed_at': self.utc_now(),
+                'result': 'confirmed',
+                'durable': True,
+            }
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            # A damaged/unreadable latch must fail closed. Do not silently
+            # resume motion because persistent safety state could not be read.
+            return {
+                'active': True,
+                'source': 'startup_safety_fallback',
+                'reason': f'Persisted stop state unavailable: {exc}',
+                'request_id': 'startup-state-unreadable',
+                'observed_at': self.utc_now(),
+                'result': 'degraded',
+                'durable': False,
+            }
+
+    @staticmethod
+    def utc_now():
+        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+    def persist_software_stop_state(self):
+        path = self.software_stop_state_file
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
+        try:
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+                json.dump(self.software_stop_state, stream, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            os.chmod(path, 0o600)
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+    def set_software_stop(self, *, active, source, reason, request_id, result='confirmed'):
+        next_state = {
+            'active': active,
+            'source': source,
+            'reason': reason,
+            'request_id': request_id,
+            'observed_at': self.utc_now(),
+            'result': result,
+            'durable': True,
+        }
+        previous_state = self.software_stop_state
+        if active:
+            # Assert in memory before disk IO so a storage failure never
+            # delays the immediate zero-velocity override.
+            self.stop_requested = True
+            self.software_stop_state = next_state
+        try:
+            self.software_stop_state = next_state
+            self.persist_software_stop_state()
+        except OSError as exc:
+            if not active:
+                # A release only takes effect after the cleared state has
+                # reached durable storage. Keep the previous stop asserted.
+                self.software_stop_state = previous_state
+                self.software_stop_state.update({
+                    'request_id': request_id,
+                    'observed_at': self.utc_now(),
+                    'result': 'rejected',
+                    'reason': f'Stop remains active; release persistence failed: {exc}',
+                })
+                self.publish_software_stop_state(force=True)
+                self.get_logger().error(f'Software stop release was not persisted: {exc}')
+                return
+            self.software_stop_state.update({
+                'durable': False,
+                'result': 'degraded',
+                'reason': f'{reason}; stop state persistence failed: {exc}',
+            })
+            self.get_logger().error(
+                f'Software stop state could not be persisted: {exc}'
+            )
+        else:
+            self.software_stop_state = next_state
+            self.stop_requested = active
+        self.publish_software_stop_state(force=True)
+        self.get_logger().warn(
+            f'Software stop {"ACTIVE" if active else "RELEASED"}: {reason}'
+        )
+
+    def software_stop_request_callback(self, msg: String):
+        try:
+            request = json.loads(msg.data)
+            action = request.get('action')
+            request_id = request.get('request_id')
+            if action not in {'get_state', 'request_stop', 'request_release'}:
+                raise ValueError('Unsupported software stop action')
+            if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
+                raise ValueError('request_id must be a non-empty string up to 128 characters')
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
+            self.get_logger().warn(f'Invalid software stop request: {exc}')
+            return
+
+        if action == 'get_state':
+            self.software_stop_state['request_id'] = request_id
+            self.software_stop_state['result'] = 'confirmed'
+            self.software_stop_state['observed_at'] = self.utc_now()
+            self.publish_software_stop_state(force=True)
+            return
+
+        source = str(request.get('source') or 'web')[:100]
+        reason = str(request.get('reason') or '')[:500]
+        if action == 'request_stop':
+            self.set_software_stop(
+                active=True,
+                source=source,
+                reason=reason or 'Operator requested software stop',
+                request_id=request_id,
+            )
+            return
+
+        if not self.safe_to_release_software_stop():
+            self.software_stop_state.update({
+                'request_id': request_id,
+                'observed_at': self.utc_now(),
+                'result': 'rejected',
+                'reason': self.release_block_reason(),
+            })
+            try:
+                self.persist_software_stop_state()
+            except OSError as exc:
+                self.software_stop_state.update({
+                    'result': 'degraded',
+                    'durable': False,
+                    'reason': f'Release rejected; state update could not be persisted: {exc}',
+                })
+                self.get_logger().error(
+                    f'Software stop rejection state could not be persisted: {exc}'
+                )
+            self.publish_software_stop_state(force=True)
+            return
+
+        self.set_software_stop(
+            active=False,
+            source=source,
+            reason=reason or 'Authorized software stop release',
+            request_id=request_id,
+        )
+
+    def safe_to_release_software_stop(self):
+        if not self.software_stop_state.get('durable', False):
+            return False
+        if self.mission_hold_requested:
+            return False
+        now = time.monotonic()
+        manual_is_fresh = (
+            self.manual_msg is not None
+            and self.manual_received_at is not None
+            and now - self.manual_received_at <= self.manual_cmd_timeout
+        )
+        neupan_is_fresh = (
+            self.neupan_msg is not None
+            and self.neupan_received_at is not None
+            and now - self.neupan_received_at <= self.neupan_cmd_timeout
+        )
+        if manual_is_fresh and self.has_nonzero_velocity(self.manual_msg):
+            return False
+        if neupan_is_fresh and self.has_nonzero_velocity(self.neupan_msg):
+            return False
+        area_fresh = (
+            self.area_control is not None
+            and self.area_control_received_at is not None
+            and now - self.area_control_received_at <= self.area_control_timeout
+        )
+        if self.area_rules_required and not area_fresh:
+            return False
+        if area_fresh and (not self.area_control['ready'] or self.area_control['stop']):
+            return False
+        return True
+
+    def release_block_reason(self):
+        if not self.software_stop_state.get('durable', False):
+            return 'Persistent software stop state is not verified'
+        if self.mission_hold_requested:
+            return 'Task hold is active'
+        now = time.monotonic()
+        if (self.manual_msg is not None and self.manual_received_at is not None
+                and now - self.manual_received_at <= self.manual_cmd_timeout
+                and self.has_nonzero_velocity(self.manual_msg)):
+            return 'Manual velocity command is active'
+        if (self.neupan_msg is not None and self.neupan_received_at is not None
+                and now - self.neupan_received_at <= self.neupan_cmd_timeout
+                and self.has_nonzero_velocity(self.neupan_msg)):
+            return 'Navigation velocity command is active'
+        area_fresh = (
+            self.area_control is not None
+            and self.area_control_received_at is not None
+            and time.monotonic() - self.area_control_received_at <= self.area_control_timeout
+        )
+        if self.area_rules_required and not area_fresh:
+            return 'Area safety status is unavailable or stale'
+        if area_fresh and not self.area_control['ready']:
+            return 'Area safety is not ready'
+        if area_fresh and self.area_control['stop']:
+            return 'Area stop is active'
+        return 'Robot safety conditions are not ready'
+
+    @staticmethod
+    def has_nonzero_velocity(msg):
+        return any((
+            msg.linear.x, msg.linear.y, msg.linear.z,
+            msg.angular.x, msg.angular.y, msg.angular.z,
+        ))
+
+    def publish_software_stop_state(self, force=False):
+        now = time.monotonic()
+        if not force and now - self.last_stop_state_publish < 1.0:
+            return
+        self.last_stop_state_publish = now
+        state = dict(self.software_stop_state)
+        state['active'] = self.stop_requested
+        state['observed_at'] = self.utc_now()
+        state['physical_estop'] = {'available': False, 'active': None}
+        self.software_stop_state_pub.publish(String(data=json.dumps(state, sort_keys=True)))
 
     def mission_hold_callback(self, msg: Bool):
         self.mission_hold_requested = bool(msg.data)
@@ -109,6 +398,7 @@ class CmdVelMux(Node):
         self.area_control_received_at = time.monotonic()
 
     def timer_callback(self):
+        self.publish_software_stop_state()
         area_fresh = (self.area_control is not None
                       and self.area_control_received_at is not None
                       and time.monotonic() - self.area_control_received_at <= self.area_control_timeout)
@@ -130,7 +420,11 @@ class CmdVelMux(Node):
             if manual_is_fresh:
                 twist = self.manual_msg
                 source = 'manual'
-            elif self.neupan_msg is not None:
+            elif (
+                self.neupan_msg is not None
+                and self.neupan_received_at is not None
+                and time.monotonic() - self.neupan_received_at <= self.neupan_cmd_timeout
+            ):
                 twist = self.neupan_msg
                 source = 'neupan'
             else:
@@ -164,6 +458,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

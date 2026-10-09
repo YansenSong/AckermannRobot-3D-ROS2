@@ -1,11 +1,11 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 import Camera from "../components/Camera";
 import RobotState from "../components/RobotState";
 import SystemHealth from "../components/SystemHealth";
-import { useRos } from "../app/App";
-import { AppConfig } from "../shared/constants/index";
-import { useT } from "../shared/i18n/i18n";
+import { T, useT } from "../shared/i18n/i18n";
+import useBatteryState from "../shared/hooks/useBatteryState";
+import useRobotStatus from "../shared/hooks/useRobotStatus";
 import { INSPECTION_PROFILE } from "../shared/robot/robotContract";
 import {
   ChartCard,
@@ -50,48 +50,34 @@ const Sparkline = ({ values, className = "" }) => {
 
 const InfoPage = () => {
   const { t } = useT();
-  const ros = useRos();
-  const [batteryPct, setBatteryPct] = useState(null);
   const [batteryHistory, setBatteryHistory] = useState([]);
-  const [charging, setCharging] = useState(false);
-
-  const batteryTopic = useRef(null);
-  const chargeTopic = useRef(null);
+  const batteryTelemetry = useBatteryState();
+  const robotStatus = useRobotStatus();
+  const platform = robotStatus.snapshot;
+  const readiness = robotStatus.stale
+    ? "unknown"
+    : platform?.autonomy_ready
+    ? "ready"
+    : "blocked";
+  const battery = batteryTelemetry.state;
+  const rawBatteryPct = battery?.percent == null ? null : Number(battery.percent);
+  const batteryPct = Number.isFinite(rawBatteryPct) ? rawBatteryPct : null;
+  const charging = batteryTelemetry.usable ? battery.charging : null;
 
   useEffect(() => {
-    if (!ros || !window.ROSLIB) return;
-
-    batteryTopic.current = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.BATTERY_TOPIC,
-      messageType: "std_msgs/Float32",
-    });
-
-    chargeTopic.current = new window.ROSLIB.Topic({
-      ros,
-      name: AppConfig.CHARGE_STATION_CONNECTED,
-      messageType: "std_msgs/Bool",
-    });
-
-    // battery.py 将电量百分比作为普通浮点数（0–100）发布。
-    batteryTopic.current.subscribe(({ data }) => {
-      setBatteryPct(Math.round(data));
-      setBatteryHistory((prev) => [...prev.slice(-(BATTERY_HISTORY_LENGTH - 1)), data]);
-    });
-
-    chargeTopic.current.subscribe(({ data }) => {
-      setCharging(data);
-    });
-
-    return () => {
-      batteryTopic.current?.unsubscribe();
-      chargeTopic.current?.unsubscribe();
-    };
-  }, [ros]);
+    if (!battery?.available || battery.percent == null) return;
+    setBatteryHistory((prev) => [
+      ...prev.slice(-(BATTERY_HISTORY_LENGTH - 1)),
+      battery.percent,
+    ]);
+  }, [battery?.receivedAt]);
 
   const batteryStatus =
-    batteryPct === null
-      ? { status: "unknown", label: "No data" }
+    batteryPct === null || batteryTelemetry.stale || !battery?.available
+      ? {
+          status: "unknown",
+          label: batteryTelemetry.stale ? "Stale data" : "Unavailable",
+        }
       : batteryPct > 60
       ? { status: "success", label: "Good" }
       : batteryPct > 25
@@ -106,23 +92,104 @@ const InfoPage = () => {
         description="Live camera, telemetry, power, and ROS health in one operational view."
       />
 
+      <DashboardCard className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-[RobotoMono] text-xs uppercase tracking-wider text-themeTextGray">
+            <T>{"Robot readiness"}</T>
+          </p>
+          <StatusBadge
+            status={
+              readiness === "ready"
+                ? "success"
+                : readiness === "blocked"
+                ? "warning"
+                : "unknown"
+            }
+            label={
+              readiness === "ready"
+                ? t("Ready")
+                : readiness === "blocked"
+                ? t("Not ready")
+                : t("Unknown")
+            }
+          />
+        </div>
+        <div className="grid gap-2 text-xs text-themeTextGray sm:grid-cols-3">
+          <p>
+            <T>{"Current map"}</T>:{" "}
+            {robotStatus.stale
+              ? t("Stale data")
+              : platform?.current_map?.map ||
+                platform?.current_map?.map_id ||
+                t("Unavailable")}
+          </p>
+          <p>
+            <T>{"Localization"}</T>:{" "}
+            {robotStatus.stale
+              ? t("Unknown")
+              : platform?.localization?.stale
+              ? t("Stale data")
+              : platform?.localization?.online
+              ? t("Online")
+              : t("Unavailable")}
+          </p>
+          <p>
+            <T>{"Software Stop"}</T>:{" "}
+            {robotStatus.stale || platform?.software_stop?.stale
+              ? t("Unknown")
+              : platform?.software_stop?.active
+              ? t("Active")
+              : t("Inactive")}
+          </p>
+        </div>
+        {platform?.readiness_blockers?.length > 0 && (
+          <p className="text-xs text-statusYellow">
+            <T>{"Autonomy blocked"}</T>:{" "}
+            {platform.readiness_blockers.join(" · ")}
+          </p>
+        )}
+        {!platform && robotStatus.error && (
+          <p className="text-xs text-themeTextGray">{robotStatus.error}</p>
+        )}
+      </DashboardCard>
+
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.8fr)] xl:gap-5">
         <section className="grid min-w-0 gap-4">
           <div className="h-[320px] min-w-0 sm:h-[420px] xl:h-[500px]">
             <Camera />
           </div>
-          {INSPECTION_PROFILE ? <p className="dashboard-card p-4 text-sm text-statusYellow">{t("Project localization interface is unconfigured. Status: UNKNOWN.")}</p> : <RobotState />}
+          {INSPECTION_PROFILE ? (
+            <p className="dashboard-card p-4 text-sm text-statusYellow">
+              {t(
+                "Project localization interface is unconfigured. Status: UNKNOWN.",
+              )}
+            </p>
+          ) : (
+            <RobotState />
+          )}
         </section>
 
         <section className="grid min-w-0 content-start gap-4">
           <ChartCard
             title="Battery level"
-            value={batteryPct !== null ? `${batteryPct}%` : "—"}
+            value={batteryPct !== null ? `${batteryPct.toFixed(1)}%` : "—"}
             status={
-              <StatusBadge
-                status={batteryStatus.status}
-                label={batteryStatus.label}
-              />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <StatusBadge
+                  status={batteryStatus.status}
+                  label={batteryStatus.label}
+                />
+                <StatusBadge
+                  status={
+                    battery?.source === "simulated"
+                      ? "warning"
+                      : battery?.source === "hardware"
+                      ? "success"
+                      : "unknown"
+                  }
+                  label={battery?.source || "unavailable"}
+                />
+              </div>
             }
           >
             {batteryPct !== null ? (
@@ -130,7 +197,7 @@ const InfoPage = () => {
                 <div
                   className="premium-progress"
                   role="progressbar"
-                    aria-label={t("Battery charge")}
+                  aria-label={t("Battery charge")}
                   aria-valuemin="0"
                   aria-valuemax="100"
                   aria-valuenow={batteryPct}
@@ -172,7 +239,10 @@ const InfoPage = () => {
               <EmptyState
                 className="min-h-[92px] px-0 pb-0"
                 title="No battery telemetry"
-                description="Waiting for the configured battery topic to publish."
+                description={
+                  battery?.reason ||
+                  "Waiting for an available, identified battery source."
+                }
               />
             )}
           </ChartCard>
@@ -183,15 +253,39 @@ const InfoPage = () => {
                 {t("Charging station")}
               </p>
               <p className="mt-1 text-sm text-themeTextGray">
-                {t(charging
-                  ? "Robot is connected to external power."
-                  : "Robot is not connected to the dock.")}
+                {battery?.simulated
+                  ? t(
+                      charging === true
+                        ? "Simulated battery is charging."
+                        : charging === false
+                        ? "Simulated battery is not charging."
+                        : "Simulated charging state unavailable.",
+                    )
+                  : t(
+                      charging === true
+                        ? "Battery reports charging."
+                        : charging === false
+                        ? "Battery reports not charging."
+                        : "Charging state unavailable; dock status is not power confirmation.",
+                    )}
               </p>
             </div>
             <StatusBadge
-              status={charging ? "connected" : "idle"}
-              label={charging ? "Connected" : "Not connected"}
-              pulse={charging}
+              status={
+                charging === null ? "unknown" : charging ? "connected" : "idle"
+              }
+              label={
+                charging === null
+                  ? "Unavailable"
+                  : battery?.simulated
+                  ? charging
+                    ? "Simulated charging"
+                    : "Simulated not charging"
+                  : charging
+                  ? "Charging"
+                  : "Not charging"
+              }
+              pulse={charging === true}
             />
           </DashboardCard>
 

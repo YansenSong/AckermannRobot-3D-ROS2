@@ -43,6 +43,8 @@ const Routing = () => (
           <Route key={path} path={path.slice(1)} element={<Component />} />
         ),
       )}
+      <Route path="dashboard" element={<Navigate to="/" replace />} />
+      <Route path="missions" element={<Navigate to="/route" replace />} />
       <Route path="*" element={<NotFoundPage />} />
     </Route>
   </Routes>

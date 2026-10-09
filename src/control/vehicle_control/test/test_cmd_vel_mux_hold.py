@@ -1,8 +1,11 @@
 """Mission hold must never clear an operator's independent stop request."""
 
 import importlib.util
+import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import Twist
@@ -30,6 +33,9 @@ class FakeLogger:
     def debug(self, *_args, **_kwargs):
         pass
 
+    def error(self, *_args):
+        pass
+
 
 class FakeClock:
     def now(self):
@@ -39,13 +45,15 @@ class FakeClock:
         return Time()
 
 
-class FakeMux:
+class FakeMux(MODULE.CmdVelMux):
     stop_requested = False
     mission_hold_requested = False
     manual_msg = None
     neupan_msg = None
     manual_received_at = None
     manual_cmd_timeout = 0.5
+    neupan_received_at = None
+    neupan_cmd_timeout = 0.5
     area_rules_required = True
     area_control_timeout = 0.5
     area_control = None
@@ -53,6 +61,14 @@ class FakeMux:
 
     def __init__(self):
         self.pub = FakePublisher()
+        self.software_stop_state_pub = FakePublisher()
+        self.software_stop_state_file = Path(tempfile.mkdtemp()) / "software_stop.json"
+        self.software_stop_state = {
+            "active": False, "source": "startup", "reason": "",
+            "request_id": "", "observed_at": "", "result": "confirmed",
+            "durable": True,
+        }
+        self.last_stop_state_publish = 0.0
 
     def get_logger(self):
         return FakeLogger()
@@ -62,6 +78,24 @@ class FakeMux:
 
 
 class MissionHoldTest(unittest.TestCase):
+    def test_repeated_stop_requests_are_idempotent_and_remain_durable(self):
+        mux = FakeMux()
+        for request_id in ("stop-1", "stop-2"):
+            MODULE.CmdVelMux.software_stop_request_callback(
+                mux,
+                String(data=json.dumps({
+                    "action": "request_stop",
+                    "request_id": request_id,
+                    "source": "web:operator",
+                })),
+            )
+
+        persisted = json.loads(mux.software_stop_state_file.read_text())
+        self.assertTrue(mux.stop_requested)
+        self.assertTrue(persisted["active"])
+        self.assertTrue(persisted["durable"])
+        self.assertEqual(persisted["request_id"], "stop-2")
+
     def test_releasing_mission_hold_does_not_release_operator_stop(self):
         mux = FakeMux()
         MODULE.CmdVelMux.stop_callback(mux, Bool(data=True))
@@ -71,6 +105,130 @@ class MissionHoldTest(unittest.TestCase):
         self.assertTrue(mux.stop_requested)
         self.assertEqual(len(mux.pub.messages), 1)
         self.assertEqual(mux.pub.messages[0].twist.linear.x, 0.0)
+
+    def test_legacy_false_cannot_release_persistent_stop(self):
+        mux = FakeMux()
+        MODULE.CmdVelMux.stop_callback(mux, Bool(data=True))
+        MODULE.CmdVelMux.stop_callback(mux, Bool(data=False))
+        self.assertTrue(mux.stop_requested)
+        self.assertTrue(json.loads(mux.software_stop_state_file.read_text())["active"])
+
+    def test_stop_latch_survives_mux_restart(self):
+        mux = FakeMux()
+        MODULE.CmdVelMux.set_software_stop(
+            mux, active=True, source="web:operator", reason="test stop", request_id="req-1"
+        )
+        recovered = FakeMux()
+        recovered.software_stop_state_file = mux.software_stop_state_file
+        recovered.software_stop_state = MODULE.CmdVelMux.load_software_stop_state(recovered)
+        recovered.stop_requested = recovered.software_stop_state["active"]
+        self.assertTrue(recovered.stop_requested)
+        self.assertEqual(recovered.software_stop_state["request_id"], "req-1")
+
+    def test_corrupt_stop_state_fails_closed(self):
+        mux = FakeMux()
+        mux.software_stop_state_file.write_text("broken", encoding="utf-8")
+        state = MODULE.CmdVelMux.load_software_stop_state(mux)
+        self.assertTrue(state["active"])
+        self.assertFalse(state["durable"])
+        self.assertEqual(state["result"], "degraded")
+
+    def test_failed_stop_persistence_keeps_in_memory_latch_and_reports_degraded(self):
+        mux = FakeMux()
+        with patch.object(mux, "persist_software_stop_state", side_effect=OSError("disk full")):
+            MODULE.CmdVelMux.set_software_stop(
+                mux, active=True, source="test", reason="stop", request_id="stop-1"
+            )
+        self.assertTrue(mux.stop_requested)
+        self.assertFalse(mux.software_stop_state["durable"])
+        self.assertEqual(mux.software_stop_state["result"], "degraded")
+
+    def test_release_is_rejected_while_motion_command_is_fresh(self):
+        mux = FakeMux()
+        mux.area_rules_required = False
+        MODULE.CmdVelMux.set_software_stop(
+            mux, active=True, source="test", reason="stop", request_id="stop-1"
+        )
+        active = Twist()
+        active.linear.x = 0.3
+        MODULE.CmdVelMux.manual_callback(mux, active)
+        request = String(data=json.dumps({
+            "action": "request_release", "request_id": "release-1"
+        }))
+        MODULE.CmdVelMux.software_stop_request_callback(mux, request)
+        self.assertTrue(mux.stop_requested)
+        self.assertEqual(mux.software_stop_state["result"], "rejected")
+        self.assertEqual(mux.software_stop_state["reason"], "Manual velocity command is active")
+
+    def test_release_requires_fresh_area_safety_when_configured(self):
+        mux = FakeMux()
+        MODULE.CmdVelMux.set_software_stop(
+            mux, active=True, source="test", reason="stop", request_id="stop-1"
+        )
+        request = String(data=json.dumps({
+            "action": "request_release", "request_id": "release-1"
+        }))
+        MODULE.CmdVelMux.software_stop_request_callback(mux, request)
+        self.assertTrue(mux.stop_requested)
+        self.assertEqual(mux.software_stop_state["reason"], "Area safety status is unavailable or stale")
+
+    def test_task_hold_and_area_stop_each_block_release(self):
+        for hold, area_json, expected_reason in (
+            (True, '{"ready": true, "stop": false}', "Task hold is active"),
+            (False, '{"ready": true, "stop": true}', "Area stop is active"),
+        ):
+            mux = FakeMux()
+            mux.mission_hold_requested = hold
+            MODULE.CmdVelMux.area_control_callback(mux, String(data=area_json))
+            MODULE.CmdVelMux.set_software_stop(
+                mux, active=True, source="test", reason="stop", request_id="stop-1"
+            )
+            MODULE.CmdVelMux.software_stop_request_callback(
+                mux,
+                String(data=json.dumps({
+                    "action": "request_release", "request_id": "release-1"
+                })),
+            )
+            self.assertTrue(mux.stop_requested)
+            self.assertEqual(mux.software_stop_state["reason"], expected_reason)
+
+    def test_state_query_returns_correlated_robot_state(self):
+        mux = FakeMux()
+        MODULE.CmdVelMux.software_stop_request_callback(
+            mux,
+            String(data=json.dumps({
+                "action": "get_state", "request_id": "query-123"
+            })),
+        )
+        response = json.loads(mux.software_stop_state_pub.messages[-1].data)
+        self.assertEqual(response["request_id"], "query-123")
+        self.assertFalse(response["active"])
+        self.assertEqual(response["physical_estop"], {"available": False, "active": None})
+
+    def test_authorized_release_succeeds_after_motion_and_area_conditions_clear(self):
+        mux = FakeMux()
+        mux.area_rules_required = False
+        MODULE.CmdVelMux.set_software_stop(
+            mux, active=True, source="test", reason="stop", request_id="stop-1"
+        )
+        request = String(data=json.dumps({
+            "action": "request_release", "request_id": "release-1"
+        }))
+        MODULE.CmdVelMux.software_stop_request_callback(mux, request)
+        self.assertFalse(mux.stop_requested)
+        persisted = json.loads(mux.software_stop_state_file.read_text())
+        self.assertFalse(persisted["active"])
+        self.assertEqual(persisted["request_id"], "release-1")
+
+    def test_neupan_command_expires_instead_of_replaying_after_stop_release(self):
+        mux = FakeMux()
+        mux.area_rules_required = False
+        command = Twist()
+        command.linear.x = 0.4
+        MODULE.CmdVelMux.neupan_callback(mux, command)
+        mux.neupan_received_at -= 1.0
+        MODULE.CmdVelMux.timer_callback(mux)
+        self.assertEqual(len(mux.pub.messages), 0)
 
     def test_area_heartbeat_and_speed_limit_constrain_manual_command(self):
         mux = FakeMux()

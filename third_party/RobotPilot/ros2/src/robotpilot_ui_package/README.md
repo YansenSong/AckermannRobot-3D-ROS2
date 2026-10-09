@@ -18,7 +18,17 @@
 - `nav_relays.py`：将 AMCL 和导航/对接 action 状态重新发布到 `/ui/*`。
 - `folders_handler.py`：处理地图、分组、路线和 waypoint 文件命令。
 - `route_store.py`：路线编辑页的仿真适配节点，按当前 `/map` 保存可复用路线到 `~/.ros/ackermann_robot/routes/`。
-- `battery.py`：未接入启动流程的可选电量百分比发布器。
+- `battery.py`：按 `BATTERY_SOURCE=sim|serial|disabled` 选择模拟、串口或关闭；`/battery/state` 是带来源的权威状态，旧 `/battery_status` 仅用于兼容。
+- `daily_log_collector.py`：订阅 `/rosout`，按本地日期追加写入 `~/.ros/log/daily/<节点>_YYYY-MM-DD.log`。日志中心只列出该目录中的每日文件；ROS 原生按进程生成的日志仍保留在原位置。可用 `ROBOTPILOT_LOG_ROOT` 覆盖根目录。
+
+本仓库的 `scripts/run_robotpilot.sh` 面向本地仿真，默认显式设置 `ROBOT_MODE=simulation` 与 `BATTERY_SOURCE=sim`。直接运行 `new_ui_launch.py` 时电池源默认关闭。串口失败会报告 `unavailable`，不会退回模拟值。
+
+模拟电池可通过 ROS 参数复现状态：`sim_initial_percent`、`sim_drain_rate_percent_per_second`、`sim_charge_rate_percent_per_second`、`sim_charging` 和 `sim_available`。例如：
+
+```bash
+ros2 param set /battery_monitor sim_charging true
+ros2 param set /battery_monitor sim_available false
+```
 
 ## Voice Command API 密钥
 

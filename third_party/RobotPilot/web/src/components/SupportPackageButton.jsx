@@ -2,14 +2,13 @@ import React, { useState } from "react";
 import { toast } from "react-toastify";
 
 import { useRos, useRosStatus, useRuntimeConfig } from "../app/App";
-import { resolveRosbridgeHost } from "../shared/constants/runtimeConfig";
 import buildSupportPackage from "../shared/support/buildSupportPackage";
 import { useT } from "../shared/i18n/i18n";
 
 /**
- * Downloads a single JSON file bundling connection info, the Health Centre
- * rollup, recent events, track-record metrics, runtime config, and a
- * best-effort Nav2 param snapshot — meant to be attached to a support
+ * Downloads a single JSON file bundling connection status, the Health Centre
+ * rollup, recent events, runtime config, and a best-effort Nav2 param snapshot
+ * — meant to be attached to a support
  * ticket instead of asking an operator to screenshot five different pages.
  * `health` ({overall, overallLabel, issues}) is passed in from a parent that
  * already calls useSystemDiagnostics, so this button never subscribes to ROS
@@ -28,7 +27,6 @@ const SupportPackageButton = ({ health }) => {
       const pkg = await buildSupportPackage({
         ros,
         rosStatus,
-        resolvedHost: resolveRosbridgeHost(config),
         config,
         health,
       });

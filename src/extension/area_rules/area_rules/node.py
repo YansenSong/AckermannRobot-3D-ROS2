@@ -3,6 +3,8 @@
 import copy
 import json
 import math
+import signal
+from datetime import datetime, timezone
 from pathlib import Path
 
 import rclpy
@@ -31,6 +33,8 @@ class AreaRules(Node):
         self.robot_frame = self.get_parameter("robot_frame").value
         self.grid = None
         self.key = None
+        self.map_id = None
+        self.map_version_id = None
         self.rules = []
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -40,9 +44,11 @@ class AreaRules(Node):
         self.ack_pub = self.create_publisher(String, "/area_rules/ack", 10)
         self.control_pub = self.create_publisher(String, "/area_rules/control", 10)
         self.create_subscription(OccupancyGrid, "/map", self.on_map, LATCHED)
+        self.create_subscription(String, "/ackermann/routes/catalog", self.on_catalog, 10)
         self.create_subscription(String, "/area_rules/command", self.on_command, 10)
         self.create_timer(0.1, self.publish_control)
         self.create_timer(1.0, self.check_expiry)
+        self.create_timer(1.0, self.publish_state)
         self.publish_state()
         self.get_logger().info(f"area rules loaded from {self.store.path}")
 
@@ -62,8 +68,28 @@ class AreaRules(Node):
         self.state_pub.publish(String(data=json.dumps({
             "ready": self.grid is not None,
             "map_key": self.key,
+            "map_id": self.map_id,
+            "map_version_id": self.map_version_id,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
             **state,
         })))
+
+    def on_catalog(self, message):
+        try:
+            active = json.loads(message.data or "{}").get("active_files", {})
+            map_id = active.get("map_id")
+            if not isinstance(map_id, str) or not map_id or map_id == "Null":
+                map_id = None
+            map_version_id = active.get("map_version_id") or map_id
+            if (map_id, map_version_id) == (self.map_id, self.map_version_id):
+                return
+            self.map_id = map_id
+            self.map_version_id = map_version_id
+            self.publish_state()
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            self.map_id = None
+            self.map_version_id = None
+            self.publish_state()
 
     def publish_mask(self):
         if self.grid is None:
@@ -146,6 +172,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

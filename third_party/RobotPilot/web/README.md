@@ -14,10 +14,9 @@ npm run dev
 Vite 在 `http://localhost:3000/` 提供服务，并绑定到 `0.0.0.0`。要查看实时
 ROS 数据，必须能通过配置的主机和端口访问 rosbridge。
 
-Vite 服务器不提供 Flask `/api/*` endpoint。要使用相关功能，需单独运行 ROS UI 后端。可在应用的
-Config 页面覆盖运行时连接设置；默认值位于
-[`src/shared/constants/index.js`](src/shared/constants/index.js) and
-[`src/shared/constants/runtimeConfig.js`](src/shared/constants/runtimeConfig.js).
+Vite 服务器不提供 Flask `/api/*` endpoint。要使用相关功能，需单独运行 ROS UI 后端。ROS 连接使用
+页面主机名和默认端口；本地开发时主机名来自
+[`src/shared/constants/index.js`](src/shared/constants/index.js)。浏览器侧的速度限制与通知偏好保存在本地运行配置中。
 
 开发时如需显示 inspection 导航配置：
 

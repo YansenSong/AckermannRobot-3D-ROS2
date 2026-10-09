@@ -2,9 +2,7 @@ import React, { useContext, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../app/App";
 
-const API_BASE = window.location.port === "3000"
-  ? `http://${window.location.hostname}:5050`
-  : "";
+const API_BASE = "";
 
 const LoginPage = () => {
   const { mode, identity, setIdentity } = useContext(AuthContext);
@@ -30,7 +28,11 @@ const LoginPage = () => {
         body: JSON.stringify({ username: username.trim(), password }),
       });
       if (!response.ok) {
-        setError(response.status === 429 ? "尝试次数过多，请稍后再试。" : "用户名或密码不正确。");
+        setError(
+          response.status === 429
+            ? "尝试次数过多，请稍后再试。"
+            : "用户名或密码不正确。",
+        );
         return;
       }
       const meResponse = await fetch(`${API_BASE}/api/v1/auth/me`, {
@@ -53,21 +55,39 @@ const LoginPage = () => {
         <div className="mb-8 flex items-center gap-3">
           <span className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-themeBlue text-white shadow-lg shadow-themeBlue/25">
             <span className="absolute inset-0 bg-gradient-to-br from-violet-500 via-purple-500 to-pink-400" />
-            <svg className="relative h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+            <svg
+              className="relative h-7 w-7"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              aria-hidden="true"
+            >
               <rect x="4.5" y="7" width="15" height="11" rx="4" />
-              <path d="M9 7V5m6 2V5M9 13h.01M15 13h.01M9 17h6" strokeLinecap="round" />
+              <path
+                d="M9 7V5m6 2V5M9 13h.01M15 13h.01M9 17h6"
+                strokeLinecap="round"
+              />
             </svg>
           </span>
           <div>
-            <p className="font-[RobotoMono] text-[10px] font-semibold uppercase tracking-[0.2em] text-themeTextGray">RobotPilot</p>
+            <p className="font-[RobotoMono] text-[10px] font-semibold uppercase tracking-[0.2em] text-themeTextGray">
+              RobotPilot
+            </p>
             <p className="mt-1 text-sm text-textWhiteActive">机器人管理平台</p>
           </div>
         </div>
 
         <div className="mb-7">
-          <p className="mb-2 font-[RobotoMono] text-[10px] font-semibold uppercase tracking-[0.18em] text-themeBlue">安全访问</p>
-          <h1 className="text-3xl font-bold tracking-tight text-textWhiteHover">欢迎回来</h1>
-          <p className="mt-2 text-sm leading-6 text-themeTextGray">登录以查看机器人状态并管理任务。</p>
+          <p className="mb-2 font-[RobotoMono] text-[10px] font-semibold uppercase tracking-[0.18em] text-themeBlue">
+            安全访问
+          </p>
+          <h1 className="text-3xl font-bold tracking-tight text-textWhiteHover">
+            欢迎回来
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-themeTextGray">
+            登录以查看机器人状态并管理任务。
+          </p>
         </div>
 
         <form onSubmit={submit} className="grid gap-5">
@@ -97,7 +117,14 @@ const LoginPage = () => {
               placeholder="输入密码"
             />
           </label>
-          {error && <p role="alert" className="rounded-xl border border-statusRed/25 bg-statusRed/10 px-3 py-2.5 text-sm text-statusRed">{error}</p>}
+          {error && (
+            <p
+              role="alert"
+              className="rounded-xl border border-statusRed/25 bg-statusRed/10 px-3 py-2.5 text-sm text-statusRed"
+            >
+              {error}
+            </p>
+          )}
           <button
             type="submit"
             disabled={submitting || !username || !password}

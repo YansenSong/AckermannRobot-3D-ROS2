@@ -376,8 +376,13 @@ const updateNavigationOverlayScale = (scene = getScene()) => {
   (window.NAV2D.queuedWaypointLabels || []).forEach(({ label }) => {
     scaleMarkerWithMap(label, scene);
   });
-  (window.NAV2D.savedWaypointItems || []).forEach(({ marker }) => {
+  (window.NAV2D.savedWaypointItems || []).forEach(({ marker, label }) => {
     scaleMarkerToScene(marker, scene);
+    if (label) {
+      scaleMarkerToScene(label, scene);
+      label.x = marker.x + 12 / Math.abs(scene.scaleX || 1);
+      label.y = marker.y - 10 / Math.abs(scene.scaleY || 1);
+    }
   });
   (window.NAV2D.pointNumberLabels || []).forEach(({ marker, label }) => {
     scaleMarkerToScene(label, scene);
@@ -433,6 +438,9 @@ const applyLayerState = () => {
   });
   (window.NAV2D.savedWaypointItems || []).forEach(({ marker }) => {
     marker.visible = state.waypoints !== false;
+  });
+  (window.NAV2D.savedWaypointItems || []).forEach(({ label }) => {
+    if (label) label.visible = state.waypoints !== false;
   });
 };
 
@@ -570,12 +578,15 @@ window.NAV2D.setSavedWaypoints = (waypoints) => {
   const scene = getScene();
   if (!scene) return;
 
-  (window.NAV2D.savedWaypointItems || []).forEach(({ marker }) => {
-    try {
-      scene.removeChild(marker);
-    } catch (e) {
-      // ignore
-    }
+  (window.NAV2D.savedWaypointItems || []).forEach(({ marker, label }) => {
+    [marker, label].forEach((item) => {
+      if (!item) return;
+      try {
+        scene.removeChild(item);
+      } catch (e) {
+        // ignore
+      }
+    });
   });
 
   window.NAV2D.savedWaypointItems = (waypoints || []).map((wp) => {
@@ -602,7 +613,27 @@ window.NAV2D.setSavedWaypoints = (waypoints) => {
       window.NAV2D._savedWaypointClickCallback?.(wp.id);
     });
     scene.addChild(marker);
-    return { id: wp.id, marker };
+    const typeLabel =
+      wp.point_type === "charge"
+        ? "充电点（已配置）"
+        : wp.point_type === "shelter"
+          ? "避雨点（已配置）"
+          : "巡检点";
+    const label = new window.createjs.Text(
+      `${typeLabel} · ${wp.name || wp.id}`,
+      "bold 10px RobotoMono, monospace",
+      "#ffffff",
+    );
+    label.textAlign = "left";
+    label.textBaseline = "middle";
+    label.mouseEnabled = false;
+    label.outline = 3;
+    label.x = marker.x + 12;
+    label.y = marker.y - 10;
+    scaleMarkerToScene(label, scene);
+    label.visible = window.NAV2D.layerState?.waypoints !== false;
+    scene.addChild(label);
+    return { id: wp.id, marker, label };
   });
 };
 

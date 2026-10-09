@@ -1,4 +1,3 @@
-const API_BASE = window.location.port === "3000" ? "http://127.0.0.1:5050" : "";
 import { apiFetch } from "../../shared/api/apiFetch";
 
 const readJsonResponse = async (response) => {
@@ -40,7 +39,7 @@ export const stopRecording = () => postJson("/api/recordings/stop");
 // to disk without buffering it in JS memory.
 export const downloadRecording = (id) => {
   window.open(
-    `${API_BASE}/api/recordings/${encodeURIComponent(id)}/download`,
+    `/api/recordings/${encodeURIComponent(id)}/download`,
     "_blank",
     "noopener",
   );

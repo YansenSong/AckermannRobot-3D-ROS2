@@ -1,6 +1,7 @@
 import { T, useT } from "../shared/i18n/i18n";
 import React, { useEffect, useRef, useState } from "react";
 import { useRos } from "../app/App";
+import { useRoleAccess } from "../shared/auth/roleAccess";
 import { LIFECYCLE_NODES as NODES } from "../shared/constants";
 
 const TRANSITIONS = {
@@ -73,6 +74,7 @@ const normalizeState = (label) => (label || "unknown").toLowerCase();
 const LifecycleStatus = ({ compact = false, onStatesChange }) => {
   const { t } = useT();
   const ros = useRos();
+  const lifecycleAccess = useRoleAccess("Engineer");
   const clientsRef = useRef({});
   const changeClientsRef = useRef({});
   const [states, setStates] = useState(() =>
@@ -136,6 +138,7 @@ const LifecycleStatus = ({ compact = false, onStatesChange }) => {
   }, [ros]);
 
   const changeAll = (transitionName) => {
+    if (!lifecycleAccess.allowed) return;
     const id = TRANSITIONS[transitionName];
     if (!id || !window.ROSLIB) return;
     const confirmMessage = CONFIRM_BEFORE[transitionName];
@@ -186,28 +189,48 @@ const LifecycleStatus = ({ compact = false, onStatesChange }) => {
         <div className="mb-2 grid grid-cols-2 gap-1.5">
           <button
             onClick={() => changeAll("configure")}
-            title={t(ACTION_LABELS.configure.title)}
+            title={
+              lifecycleAccess.allowed
+                ? t(ACTION_LABELS.configure.title)
+                : t(lifecycleAccess.reason)
+            }
+            disabled={!lifecycleAccess.allowed}
             className="rounded-md border border-borderSubtle px-2 py-1 text-[11px] text-themeBlue hover:border-themeBlue"
           >
             {t(ACTION_LABELS.configure.compact)}
           </button>
           <button
             onClick={() => changeAll("activate")}
-            title={t(ACTION_LABELS.activate.title)}
+            title={
+              lifecycleAccess.allowed
+                ? t(ACTION_LABELS.activate.title)
+                : t(lifecycleAccess.reason)
+            }
+            disabled={!lifecycleAccess.allowed}
             className="rounded-md border border-borderSubtle px-2 py-1 text-[11px] text-statusGreen hover:border-statusGreen"
           >
             {t(ACTION_LABELS.activate.compact)}
           </button>
           <button
             onClick={() => changeAll("deactivate")}
-            title={t(ACTION_LABELS.deactivate.title)}
+            title={
+              lifecycleAccess.allowed
+                ? t(ACTION_LABELS.deactivate.title)
+                : t(lifecycleAccess.reason)
+            }
+            disabled={!lifecycleAccess.allowed}
             className="rounded-md border border-borderSubtle px-2 py-1 text-[11px] text-statusYellow hover:border-statusYellow"
           >
             {t(ACTION_LABELS.deactivate.compact)}
           </button>
           <button
             onClick={() => changeAll("cleanup")}
-            title={t(ACTION_LABELS.cleanup.title)}
+            title={
+              lifecycleAccess.allowed
+                ? t(ACTION_LABELS.cleanup.title)
+                : t(lifecycleAccess.reason)
+            }
+            disabled={!lifecycleAccess.allowed}
             className="rounded-md border border-borderSubtle px-2 py-1 text-[11px] text-statusRed hover:border-statusRed"
           >
             {t(ACTION_LABELS.cleanup.compact)}
@@ -277,28 +300,48 @@ const LifecycleStatus = ({ compact = false, onStatesChange }) => {
       <div className="mb-2 grid grid-cols-2 gap-1.5">
         <button
           onClick={() => changeAll("configure")}
-          title={t(ACTION_LABELS.configure.title)}
+          title={
+            lifecycleAccess.allowed
+              ? t(ACTION_LABELS.configure.title)
+              : t(lifecycleAccess.reason)
+          }
+          disabled={!lifecycleAccess.allowed}
           className="rounded-lg border border-borderSubtle px-2 py-1 text-xs text-themeBlue hover:border-themeBlue"
         >
           {t(ACTION_LABELS.configure.full)}
         </button>
         <button
           onClick={() => changeAll("activate")}
-          title={t(ACTION_LABELS.activate.title)}
+          title={
+            lifecycleAccess.allowed
+              ? t(ACTION_LABELS.activate.title)
+              : t(lifecycleAccess.reason)
+          }
+          disabled={!lifecycleAccess.allowed}
           className="rounded-lg border border-borderSubtle px-2 py-1 text-xs text-statusGreen hover:border-statusGreen"
         >
           {t(ACTION_LABELS.activate.full)}
         </button>
         <button
           onClick={() => changeAll("deactivate")}
-          title={t(ACTION_LABELS.deactivate.title)}
+          title={
+            lifecycleAccess.allowed
+              ? t(ACTION_LABELS.deactivate.title)
+              : t(lifecycleAccess.reason)
+          }
+          disabled={!lifecycleAccess.allowed}
           className="rounded-lg border border-borderSubtle px-2 py-1 text-xs text-statusYellow hover:border-statusYellow"
         >
           {t(ACTION_LABELS.deactivate.full)}
         </button>
         <button
           onClick={() => changeAll("cleanup")}
-          title={t(ACTION_LABELS.cleanup.title)}
+          title={
+            lifecycleAccess.allowed
+              ? t(ACTION_LABELS.cleanup.title)
+              : t(lifecycleAccess.reason)
+          }
+          disabled={!lifecycleAccess.allowed}
           className="rounded-lg border border-borderSubtle px-2 py-1 text-xs text-statusRed hover:border-statusRed"
         >
           {t(ACTION_LABELS.cleanup.full)}

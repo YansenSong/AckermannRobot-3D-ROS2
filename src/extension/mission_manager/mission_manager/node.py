@@ -3,8 +3,11 @@
 import json
 import math
 import os
+import re
+import signal
 import time
 import uuid
+from datetime import datetime, timezone
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
@@ -15,11 +18,13 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, String
 
 from .store import MissionStore, utc_now
+from .scheduler import next_run_at, parse_utc
 
 
 NAV_TIMEOUT = 600.0
 DOCK_TIMEOUT = 120.0
 ACTIVE = ("RUNNING", "PAUSED")
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 
 
 def validated_mission(raw):
@@ -58,17 +63,45 @@ def validated_mission(raw):
         elif kind not in ("home", "dock", "undock"):
             raise ValueError(f"step {index + 1} has unknown type")
         result.append(item)
-    return {"id": mission_id, "name": name, "steps": result}
+    map_id = raw.get("map_id")
+    map_version_id = raw.get("map_version_id")
+    if map_id is not None and (not isinstance(map_id, str) or not map_id.strip() or len(map_id) > 128):
+        raise ValueError("mission map_id is invalid")
+    if map_version_id is not None and (
+        not isinstance(map_version_id, str) or not map_version_id.strip() or len(map_version_id) > 128
+    ):
+        raise ValueError("mission map_version_id is invalid")
+    if (map_id is None) != (map_version_id is None):
+        raise ValueError("mission map_id and map_version_id must be provided together")
+    return {
+        "id": mission_id, "name": name, "steps": result,
+        "map_id": map_id.strip() if map_id else None,
+        "map_version_id": map_version_id.strip() if map_version_id else None,
+    }
+
+
+def mission_database_path():
+    """Resolve MissionStore from explicit configuration or the ROS data root."""
+    configured = os.environ.get("ROBOTPILOT_MISSION_DB") or os.environ.get(
+        "OPENAMR_MISSION_DB"
+    )
+    if configured:
+        return os.path.expanduser(configured)
+    default_ros_home = os.path.join(os.path.expanduser("~"), ".ros")
+    ros_home = os.environ.get("ROS_HOME", default_ros_home)
+    return os.path.join(os.path.expanduser(ros_home), "ackermann_missions.sqlite3")
 
 
 class MissionManager(Node):
     def __init__(self):
         super().__init__("mission_manager")
-        default_db = os.path.join(os.path.expanduser("~"), ".ros", "ackermann_missions.sqlite3")
+        default_db = mission_database_path()
         self.declare_parameter("database_path", default_db)
         self.store = MissionStore(self.get_parameter("database_path").value)
         self.run = self.store.latest_run()
+        self.active_request_id = None
         self.pose = None
+        self.pose_received_at = None
         self.deadline = None
         self.step_started = None
         self.nav_seen_active = False
@@ -76,6 +109,11 @@ class MissionManager(Node):
         self.owned_goals = set()
         self.last_wait_persist = 0.0
         self.stop_owned = False
+        self.software_stop_state = None
+        self.software_stop_received_at = None
+        self.map_identity = None
+        self.map_identity_received_at = None
+        self.robot_id = os.environ.get("ROBOT_ID", "robot-001")
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.state_pub = self.create_publisher(String, "/mission/state", qos)
@@ -85,12 +123,18 @@ class MissionManager(Node):
         self.dock_pub = self.create_publisher(Bool, "/dock_trigger", 10)
         self.undock_pub = self.create_publisher(Bool, "/undock_robot", 10)
         self.create_subscription(String, "/mission/command", self.on_command, 10)
+        self.create_subscription(
+            String, "/safety/software_stop/state", self.on_software_stop_state, 10
+        )
+        self.create_subscription(String, "/ackermann/routes/catalog", self.on_route_catalog, 10)
         self.create_subscription(NavigationStatus, "/navigation/state", self.on_nav, 10)
         self.create_subscription(PoseStamped, "/goal_pose", self.on_goal, 10)
         self.create_subscription(String, "/dock_trigger_status", self.on_dock, 10)
         self.create_subscription(Odometry, "/liorf_localization/mapping/odometry", self.on_odom, 10)
         self.create_timer(0.2, self.tick)
         self.create_timer(2.0, self.publish_state)
+        self.store.recover_claimed_schedules(self.robot_id)
+        self.create_timer(1.0, self.scheduler_tick)
         if self.run and (self.run["status"] in ACTIVE or self.run["hold_active"]):
             self._stop_motion()
             if self.run["status"] == "RUNNING":
@@ -99,7 +143,11 @@ class MissionManager(Node):
 
     def _event(self, reason):
         self.store.add_event(self.run["task_id"], self.run["status"],
-                             self.run["step_index"], reason, self.pose)
+                             self.run["step_index"], reason, self.pose,
+                             request_id=(
+                                 self.active_request_id
+                                 or self.run.get("origin_request_id")
+                             ))
 
     def _transition(self, status, reason, **fields):
         self.run = self.store.update_run(self.run["task_id"], status=status, reason=reason, **fields)
@@ -119,6 +167,66 @@ class MissionManager(Node):
             if self.run and self.run["hold_active"]:
                 self.run = self.store.update_run(self.run["task_id"], hold_active=False)
 
+    def on_software_stop_state(self, message):
+        try:
+            state = json.loads(message.data)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return
+        if not isinstance(state, dict) or not isinstance(state.get("active"), bool):
+            return
+        self.software_stop_state = state
+        self.software_stop_received_at = time.monotonic()
+
+    def motion_guard_block_reason(self):
+        if (
+            self.software_stop_state is None
+            or self.software_stop_received_at is None
+            or time.monotonic() - self.software_stop_received_at > 3.0
+        ):
+            return "software stop state is unavailable or stale"
+        if self.software_stop_state.get("result") != "confirmed":
+            return "software stop state is not confirmed"
+        if not self.software_stop_state.get("durable", False):
+            return "software stop state is not durable"
+        if self.software_stop_state["active"]:
+            return "software stop is active"
+        if (
+            self.pose is None
+            or self.pose_received_at is None
+            or time.monotonic() - self.pose_received_at > 3.0
+        ):
+            return "localization pose is unavailable or stale"
+        return ""
+
+    def on_route_catalog(self, message):
+        try:
+            active = json.loads(message.data).get("active_files", {})
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return
+        map_id = active.get("map_id")
+        map_version_id = active.get("map_version_id") or map_id
+        if not isinstance(map_id, str) or not map_id or map_id == "Null":
+            return
+        if not isinstance(map_version_id, str) or not map_version_id:
+            return
+        self.map_identity = {"map_id": map_id, "map_version_id": map_version_id}
+        self.map_identity_received_at = time.monotonic()
+
+    def map_binding_block_reason(self, map_id, map_version_id):
+        if (
+            not self.map_identity
+            or self.map_identity_received_at is None
+            or time.monotonic() - self.map_identity_received_at > 30.0
+        ):
+            return "current 2D map identity is unavailable or stale"
+        if not map_id or not map_version_id:
+            return "mission has no bound map identity"
+        if map_id != self.map_identity["map_id"]:
+            return "mission map_id does not match the current 2D map"
+        if map_version_id != self.map_identity["map_version_id"]:
+            return "mission map_version_id does not match the current 2D map version"
+        return ""
+
     def publish_state(self):
         run = dict(self.run) if self.run else None
         if run:
@@ -132,52 +240,216 @@ class MissionManager(Node):
             item["events"] = self.store.events(item["task_id"], limit=50)
         payload = {"schema_version": 1, "online": True, "server_time": utc_now(),
                    "missions": self.store.missions(), "run": run,
-                   "history": history}
+                   "history": history, "schedules": self.store.schedules(self.robot_id),
+                   "schedule_runs": self.store.schedule_runs(self.robot_id, limit=500)}
         self.state_pub.publish(String(data=json.dumps(payload)))
+
+    def _validated_schedule(self, raw, *, created_by, schedule_id=None):
+        if not isinstance(raw, dict):
+            raise ValueError("schedule must be an object")
+        name = str(raw.get("name", "")).strip()
+        mission_id = str(raw.get("mission_id", "")).strip()
+        if not name or len(name) > 120:
+            raise ValueError("schedule name is missing or too long")
+        mission = self.store.mission(mission_id)
+        if not mission or not mission.get("steps"):
+            raise ValueError("schedule mission is missing or has no steps")
+        recurrence = raw.get("recurrence")
+        timezone_name = raw.get("timezone")
+        local_time = raw.get("local_time")
+        start_date = raw.get("start_date")
+        weekdays = raw.get("weekdays", [])
+        enabled = raw.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError("schedule enabled must be a boolean")
+        if not isinstance(weekdays, list):
+            raise ValueError("schedule weekdays must be a list")
+        now = datetime.now(timezone.utc)
+        next_run = (
+            next_run_at(now, recurrence, timezone_name, local_time, start_date, weekdays)
+            if enabled else None
+        )
+        if enabled and next_run is None:
+            raise ValueError("schedule has no future run time")
+        return {
+            "schedule_id": schedule_id or str(raw.get("schedule_id") or uuid.uuid4()),
+            "name": name,
+            "mission_id": mission_id,
+            "recurrence": recurrence,
+            "timezone": timezone_name,
+            "local_time": local_time,
+            "start_date": start_date,
+            "weekdays": weekdays,
+            "enabled": enabled,
+            "next_run_at": next_run,
+            "created_by": created_by,
+        }
+
+    def scheduler_tick(self):
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        for schedule in self.store.due_schedules(self.robot_id, now_iso):
+            scheduled_for = schedule["next_run_at"]
+            following = next_run_at(
+                now, schedule["recurrence"], schedule["timezone"], schedule["local_time"],
+                schedule.get("start_date"), schedule.get("weekdays"),
+            )
+            if not self.store.claim_schedule_run(
+                self.robot_id, schedule["schedule_id"], scheduled_for, following,
+            ):
+                continue
+            lag = (now - parse_utc(scheduled_for)).total_seconds()
+            if lag > 60:
+                self.store.finish_schedule_run(
+                    self.robot_id, schedule["schedule_id"], scheduled_for,
+                    "skipped", "misfire exceeded 60 seconds",
+                )
+                self.publish_state()
+                continue
+            reason = self.motion_guard_block_reason()
+            mission = self.store.mission(schedule["mission_id"])
+            if reason:
+                status = "skipped"
+            elif self.run and self.run["status"] in ACTIVE:
+                reason, status = "another mission is active", "skipped"
+            elif not mission:
+                reason, status = "scheduled mission no longer exists", "rejected"
+            else:
+                reason = self.map_binding_block_reason(
+                    mission.get("map_id"), mission.get("map_version_id")
+                )
+                status = "skipped" if reason else "started"
+            task_id = None
+            if not reason:
+                try:
+                    task_id = self._start_mission(schedule["mission_id"])
+                except ValueError as exc:
+                    reason, status = str(exc), "rejected"
+            self.store.finish_schedule_run(
+                self.robot_id, schedule["schedule_id"], scheduled_for,
+                status, reason, task_id,
+            )
+            self.publish_state()
+
+    def _start_mission(self, mission_id, origin_request_id=None):
+        if self.run and self.run["status"] in ACTIVE:
+            raise ValueError("a mission is already active")
+        mission = self.store.mission(str(mission_id))
+        if not mission or not mission["steps"]:
+            raise ValueError("mission is missing or has no steps")
+        block_reason = self.motion_guard_block_reason()
+        if block_reason:
+            raise ValueError(block_reason)
+        block_reason = self.map_binding_block_reason(
+            mission.get("map_id"), mission.get("map_version_id")
+        )
+        if block_reason:
+            raise ValueError(block_reason)
+        self._release_motion()
+        self.run = self.store.new_run(
+            str(uuid.uuid4()), mission, origin_request_id=origin_request_id
+        )
+        self.owned_goals.clear()
+        self._event("task started")
+        self._begin_step()
+        return self.run["task_id"]
 
     def on_command(self, message):
         request_id = None
+        origin_request_id = None
         try:
             command = json.loads(message.data)
             if not isinstance(command, dict):
                 raise ValueError("command must be an object")
             request_id = command.get("request_id")
+            candidate_origin = command.get("origin_request_id")
+            if isinstance(candidate_origin, str) and REQUEST_ID_RE.fullmatch(candidate_origin):
+                origin_request_id = candidate_origin
+            self.active_request_id = origin_request_id
             action = command.get("command")
+            if action in {"start", "resume", "retry", "skip"}:
+                block_reason = self.motion_guard_block_reason()
+                if block_reason:
+                    raise ValueError(block_reason)
             if action == "save":
                 mission = validated_mission(command.get("mission"))
+                if mission.get("map_id") is not None:
+                    block_reason = self.map_binding_block_reason(
+                        mission.get("map_id"), mission.get("map_version_id")
+                    )
+                    if block_reason:
+                        raise ValueError(block_reason)
                 self.store.save_mission(mission)
             elif action == "delete":
                 mission_id = str(command.get("mission_id", ""))
                 if not self.store.delete_mission(mission_id):
                     raise ValueError("unknown mission")
             elif action == "start":
-                if self.run and self.run["status"] in ACTIVE:
-                    raise ValueError("a mission is already active")
-                mission = self.store.mission(str(command.get("mission_id", "")))
-                if not mission or not mission["steps"]:
-                    raise ValueError("mission is missing or has no steps")
-                self._release_motion()
-                self.run = self.store.new_run(str(uuid.uuid4()), mission)
-                self.owned_goals.clear()
-                self._event("task started")
-                self._begin_step()
+                self._start_mission(
+                    str(command.get("mission_id", "")), origin_request_id
+                )
+            elif action == "schedule.save":
+                schedule_id = command.get("schedule_id")
+                existing = self.store.schedule(self.robot_id, schedule_id) if schedule_id else None
+                expected_revision = command.get("expected_revision")
+                if existing and expected_revision != existing["revision"]:
+                    raise ValueError("schedule revision changed")
+                schedule = self._validated_schedule(
+                    command.get("schedule"),
+                    created_by=str(command.get("created_by") or "operator"),
+                    schedule_id=schedule_id,
+                )
+                if existing:
+                    result_schedule = self.store.update_schedule(
+                        self.robot_id, schedule_id, schedule, expected_revision
+                    )
+                    if result_schedule is None:
+                        raise ValueError("schedule revision changed")
+                else:
+                    result_schedule = self.store.create_schedule(self.robot_id, schedule)
+                command["_schedule_id"] = result_schedule["schedule_id"]
+            elif action == "schedule.delete":
+                schedule_id = str(command.get("schedule_id", ""))
+                expected_revision = command.get("expected_revision")
+                existing = self.store.schedule(self.robot_id, schedule_id)
+                if not existing:
+                    raise ValueError("unknown schedule")
+                if expected_revision != existing["revision"]:
+                    raise ValueError("schedule revision changed")
+                if not self.store.delete_schedule(self.robot_id, schedule_id, expected_revision):
+                    raise ValueError("schedule revision changed")
             elif action in ("pause", "resume", "cancel", "retry", "skip", "release_hold"):
                 self._control(action, command)
             elif action != "query":
                 raise ValueError("unknown command")
             self.publish_state()
-            ack = {"request_id": request_id, "ok": True}
+            ack = {
+                "request_id": request_id,
+                "origin_request_id": origin_request_id,
+                "ok": True,
+            }
             if action == "start":
                 ack["task_id"] = self.run["task_id"]
+            if action == "schedule.save":
+                ack["schedule_id"] = command["_schedule_id"]
             self.ack_pub.publish(String(data=json.dumps(ack)))
         except (ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError) as exc:
             self.ack_pub.publish(String(data=json.dumps({"request_id": request_id,
+                                                        "origin_request_id": origin_request_id,
                                                         "ok": False, "error": str(exc)})))
+        finally:
+            self.active_request_id = None
 
     def _control(self, action, command):
         if not self.run or command.get("task_id") != self.run["task_id"]:
             raise ValueError("unknown or stale task_id")
         status = self.run["status"]
+        if action in ("resume", "retry", "skip"):
+            block_reason = self.map_binding_block_reason(
+                self.run.get("map_id"), self.run.get("map_version_id")
+            )
+            if block_reason:
+                raise ValueError(block_reason)
         if action == "pause" and status == "RUNNING":
             remaining = max(0.0, self.deadline - time.monotonic()) if self.deadline and self._kind() == "wait" else 0.0
             self._stop_motion()
@@ -315,8 +587,12 @@ class MissionManager(Node):
         p = message.pose.pose
         values = {"x": p.position.x, "y": p.position.y,
                   "z": p.orientation.z, "w": p.orientation.w}
-        if all(math.isfinite(value) for value in values.values()):
+        if (
+            all(math.isfinite(value) for value in values.values())
+            and abs(values["z"] ** 2 + values["w"] ** 2 - 1.0) <= 0.1
+        ):
             self.pose = values
+            self.pose_received_at = time.monotonic()
 
     def destroy_node(self):
         if self.run and self.run["status"] == "RUNNING":
@@ -331,6 +607,10 @@ def main(args=None):
     node = MissionManager()
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()

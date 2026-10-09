@@ -18,8 +18,22 @@ ROLE_LEVEL = {role: level for level, role in enumerate(ROLES)}
 SESSION_SECONDS = 12 * 60 * 60
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 COOKIE_NAME = "robotpilot_session"
+AUTH_SCHEMA_VERSION = 1
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 ROBOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+
+
+def validate_bind_host(mode, host):
+    """Prevent unauthenticated open mode from binding a remote interface."""
+    if mode == "open" and host not in ("127.0.0.1", "::1", "localhost"):
+        raise RuntimeError("AUTH_MODE=open requires a loopback appAddress")
+
+
+def validate_auth_transport(mode, tls_enabled):
+    """Secure session cookies require HTTPS in every protected auth mode."""
+    if mode == "local" and not tls_enabled:
+        raise RuntimeError("AUTH_MODE=local requires a configured TLS certificate and key")
 
 
 def digest(value):
@@ -65,9 +79,16 @@ class AuthStore:
                 os.close(descriptor)
             except FileExistsError:
                 pass
-        os.chmod(self.path, 0o600)
         with self.connect() as db:
+            current_schema = db.execute("PRAGMA user_version").fetchone()[0]
+            if current_schema > AUTH_SCHEMA_VERSION:
+                raise RuntimeError(
+                    "Authentication database schema is newer than this "
+                    f"RobotPilot build ({current_schema} > {AUTH_SCHEMA_VERSION})."
+                )
+            os.chmod(self.path, 0o600)
             db.executescript("""
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
@@ -99,6 +120,8 @@ class AuthStore:
                 );
                 CREATE INDEX IF NOT EXISTS ros_audit_time ON ros_audit_entries(timestamp DESC);
             """)
+            db.execute(f"PRAGMA user_version = {AUTH_SCHEMA_VERSION}")
+        self.schema_version = AUTH_SCHEMA_VERSION
 
     @contextmanager
     def connect(self):
@@ -250,7 +273,12 @@ def install_auth(app, mode, db_path, robot_id):
 
     @app.before_request
     def authorize_request():
-        g.request_id = str(uuid.uuid4())
+        supplied_request_id = request.headers.get("X-Request-ID", "")
+        g.request_id = (
+            supplied_request_id
+            if REQUEST_ID_RE.fullmatch(supplied_request_id)
+            else str(uuid.uuid4())
+        )
         if request.method == "OPTIONS":
             return None
         if mode == "open":

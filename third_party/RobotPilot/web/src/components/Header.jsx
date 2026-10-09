@@ -1,8 +1,11 @@
 import React, { useContext, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { AuthContext, ThemeContext, useRosStatus, useRuntimeConfig } from "../app/App";
+import {
+  AuthContext,
+  ThemeContext,
+  useRosStatus,
+} from "../app/App";
 import { apiFetch } from "../shared/api/apiFetch";
-import { resolveRosbridgeHost } from "../shared/constants/runtimeConfig";
 import { IconButton, StatusBadge } from "../shared/ui/Dashboard";
 import { NAV_REGISTRY } from "../pages/registry";
 import { useT } from "../shared/i18n/i18n";
@@ -27,6 +30,20 @@ const statusConfig = {
 
 const NavIcon = ({ name }) => {
   const paths = {
+    dashboard: (
+      <>
+        <rect x="3" y="3" width="8" height="8" rx="1.5" />
+        <rect x="13" y="3" width="8" height="5" rx="1.5" />
+        <rect x="13" y="10" width="8" height="11" rx="1.5" />
+        <rect x="3" y="13" width="8" height="8" rx="1.5" />
+      </>
+    ),
+    battery: (
+      <>
+        <rect x="3" y="7" width="17" height="10" rx="2" />
+        <path d="M20 10h2v4h-2M8 10v4m5-4v4" />
+      </>
+    ),
     map: (
       <>
         <path d="m3 6 5-2 8 3 5-2v13l-5 2-8-3-5 2V6Z" />
@@ -58,22 +75,22 @@ const NavIcon = ({ name }) => {
         <path d="M4 12h4l2-7 4 14 2-7h4" />
       </>
     ),
-    recordings: (
+    faults: (
       <>
-        <circle cx="12" cy="12" r="9" />
-        <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
+        <path d="M12 3 22 20H2L12 3Z" />
+        <path d="M12 9v5M12 17h.01" />
+      </>
+    ),
+    logs: (
+      <>
+        <path d="M5 4h14v16H5z" />
+        <path d="M8 8h8M8 12h8M8 16h5" />
       </>
     ),
     console: (
       <>
         <rect x="3" y="4" width="18" height="16" rx="2" />
         <path d="m7 9 3 3-3 3M13 15h4" />
-      </>
-    ),
-    metrics: (
-      <>
-        <path d="M3 3v18h18" />
-        <path d="m7 14 3-4 3 3 4-6" />
       </>
     ),
     maps: (
@@ -92,21 +109,6 @@ const NavIcon = ({ name }) => {
       <>
         <path d="M4 5h16M4 12h16M4 19h10" />
         <circle cx="19" cy="19" r="2" />
-      </>
-    ),
-    params: (
-      <>
-        <path d="M5 6h14M5 12h14M5 18h14" />
-        <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none" />
-        <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
-        <circle cx="8" cy="18" r="2" fill="currentColor" stroke="none" />
-      </>
-    ),
-    missions: (
-      <>
-        <path d="M9 4H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V9l-5-5Z" />
-        <path d="M9 3v4a2 2 0 0 0 2 2h4" />
-        <path d="m8 14 2 2 4-4" />
       </>
     ),
     config: (
@@ -227,12 +229,8 @@ const Header = ({ showLogs, onToggleLogs }) => {
   const status = useRosStatus();
   const { theme, toggleTheme } = useContext(ThemeContext);
   const { t, lang, setLang } = useT();
-  const { config } = useRuntimeConfig();
   const { label, pulse } = statusConfig[status] || statusConfig.disconnected;
   const [menuOpen, setMenuOpen] = useState(false);
-  const resolvedAddress = `${resolveRosbridgeHost(config)}:${
-    config.rosbridgePort
-  }`;
 
   const closeMenu = () => setMenuOpen(false);
   const logout = async () => {
@@ -315,22 +313,24 @@ const Header = ({ showLogs, onToggleLogs }) => {
           </div>
           {auth.mode === "local" && auth.identity && (
             <div className="flex items-center justify-between gap-2 rounded-xl border border-borderSubtle bg-bgSurface/50 px-3 py-2">
-              <span className="min-w-0 truncate text-xs text-themeTextGray" title={auth.identity.username}>
+              <span
+                className="min-w-0 truncate text-xs text-themeTextGray"
+                title={auth.identity.username}
+              >
                 {auth.identity.username}
-                <span className="ml-2 text-[10px] opacity-70">{auth.identity.role}</span>
+                <span className="ml-2 text-[10px] opacity-70">
+                  {auth.identity.role}
+                </span>
               </span>
-              <button type="button" onClick={logout} className="shrink-0 font-[RobotoMono] text-[10px] font-semibold text-themeBlue hover:text-textWhiteHover">
+              <button
+                type="button"
+                onClick={logout}
+                className="shrink-0 font-[RobotoMono] text-[10px] font-semibold text-themeBlue hover:text-textWhiteHover"
+              >
                 退出
               </button>
             </div>
           )}
-          <NavLink
-            to="/config"
-            className="truncate text-center font-[RobotoMono] text-[10px] text-themeTextGray/70 hover:text-themeBlue"
-            title={`ws://${resolvedAddress} — ${t("Edit in Config")}`}
-          >
-            {resolvedAddress}
-          </NavLink>
         </div>
       </aside>
 
@@ -380,17 +380,20 @@ const Header = ({ showLogs, onToggleLogs }) => {
                   <span className="font-[RobotoMono] text-[10px] uppercase tracking-[0.14em] text-themeTextGray">
                     {lang === "zh-CN" ? "导航" : "Navigation"}
                   </span>
-                  <p className="font-[RobotoMono] text-[10px] text-themeTextGray/60">
-                    {resolvedAddress}
-                  </p>
                 </div>
                 <StatusBadge status={status} label={label} pulse={pulse} />
               </div>
               <nav className="grid gap-1" aria-label={t("Mobile navigation")}>
                 {auth.mode === "local" && auth.identity && (
                   <div className="flex items-center justify-between border-b border-borderSubtle px-3 py-2 text-xs text-themeTextGray">
-                    <span className="truncate">{auth.identity.username} · {auth.identity.role}</span>
-                    <button type="button" onClick={logout} className="ml-3 shrink-0 font-semibold text-themeBlue">
+                    <span className="truncate">
+                      {auth.identity.username} · {auth.identity.role}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={logout}
+                      className="ml-3 shrink-0 font-semibold text-themeBlue"
+                    >
                       退出登录
                     </button>
                   </div>

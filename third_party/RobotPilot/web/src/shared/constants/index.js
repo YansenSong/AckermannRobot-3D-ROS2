@@ -1,11 +1,13 @@
 export const AppConfig = {
   ROSBRIDGE_SERVER_IP: "127.0.0.1",
   ROSBRIDGE_SERVER_PORT: "9090",
-  CAMERA_PORT: "8080",
   RECONNECTION_TIME: 1000,
+  MAX_RECONNECTION_TIME: 30000,
 
   CMD_VEL_TOPIC: "/cmd_vel",
   STOP_TOPIC: "/stop",
+  SOFTWARE_STOP_REQUEST_TOPIC: "/safety/software_stop/request",
+  SOFTWARE_STOP_STATE_TOPIC: "/safety/software_stop/state",
   ROBOT_POSE_TOPIC: "/odometry/filtered",
   ROBOT_VELOCITY_TOPIC: "/odometry/filtered",
   MAP_TOPIC: "/ui/map",
@@ -40,6 +42,7 @@ export const AppConfig = {
   WP_REQ: "/WP_req",
   SENSORS_TOPIC: "/sensors",
   BATTERY_TOPIC: "/battery_status",
+  BATTERY_STATE_TOPIC: "/battery/state",
   CHARGE_STATION_CONNECTED: "/charge_station_connected",
 
   // 关节状态遥测（sensor_msgs/JointState），可供其他状态视图使用。

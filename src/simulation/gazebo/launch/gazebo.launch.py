@@ -25,6 +25,11 @@ def generate_launch_description():
         default_value='true',
         description='Start the robot RViz instance',
     )
+    gui_arg = DeclareLaunchArgument(
+        'gui',
+        default_value='true',
+        description='Start the Gazebo classic GUI',
+    )
 
     # 1. 解析 URDF (XACRO)
     xacro_file = os.path.join(simulation_share, 'robot', 'xacro', 'robot.xacro')
@@ -67,7 +72,8 @@ def generate_launch_description():
         launch_arguments={
             'world': world_file_path,
             'verbose': 'true',
-            'pause': 'false'
+            'pause': 'false',
+            'gui': LaunchConfiguration('gui'),
         }.items()
     )
     
@@ -147,6 +153,7 @@ def generate_launch_description():
     return LaunchDescription([
         publish_ekf_tf_arg,
         use_rviz_arg,
+        gui_arg,
         robot_state_publisher,
         gazebo_launch,
         spawn_entity,

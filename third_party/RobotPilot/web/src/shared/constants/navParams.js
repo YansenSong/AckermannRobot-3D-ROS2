@@ -1,7 +1,5 @@
-// Shared between ParamsPage (interactive tuning) and the support-package
-// exporter (read-only snapshot) so both agree on which params are "the
-// curated set" without duplicating the starter list or the rcl_interfaces
-// value-decoding logic.
+// Curated Nav2 parameter list and value decoding for read-only support-package
+// snapshots.
 
 export const PARAM_ROWS_STORAGE_KEY = "robotpilotParamRows";
 
@@ -35,35 +33,6 @@ export const readParamValue = (pv) => {
     default:
       return "";
   }
-};
-
-export const buildParamValue = (type, raw) => {
-  const v = {
-    type: 0,
-    bool_value: false,
-    integer_value: 0,
-    double_value: 0,
-    string_value: "",
-    byte_array_value: [],
-    bool_array_value: [],
-    integer_array_value: [],
-    double_array_value: [],
-    string_array_value: [],
-  };
-  if (type === "bool") {
-    v.type = PARAM_TYPES.bool;
-    v.bool_value = raw === true || raw === "true" || raw === "1";
-  } else if (type === "int") {
-    v.type = PARAM_TYPES.int;
-    v.integer_value = parseInt(raw, 10) || 0;
-  } else if (type === "double") {
-    v.type = PARAM_TYPES.double;
-    v.double_value = parseFloat(raw) || 0;
-  } else {
-    v.type = PARAM_TYPES.string;
-    v.string_value = String(raw ?? "");
-  }
-  return v;
 };
 
 export const loadParamRows = () => {

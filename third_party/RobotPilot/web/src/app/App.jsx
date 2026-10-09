@@ -18,6 +18,7 @@ import {
   saveRuntimeConfig,
   resolveRosbridgeHost,
 } from "../shared/constants/runtimeConfig";
+import { createReconnectController } from "../shared/connection/reconnectDelay";
 
 import withProviders from "./providers";
 import Routes from "../pages";
@@ -34,6 +35,8 @@ export const RuntimeConfigContext = createContext({
 });
 export const AuthContext = createContext({
   mode: "open",
+  robotMode: "unknown",
+  robotId: "robot-001",
   identity: null,
   authReady: false,
   setIdentity: () => {},
@@ -43,9 +46,8 @@ export const AuthContext = createContext({
 // and shared app-wide; panels never create their own.
 export const useRos = () => useContext(RosContext);
 export const useRosStatus = () => useContext(RosStatusContext);
-// Connection host/port, camera port, and speed-limit overrides editable on
-// the Config page (/config) and persisted to localStorage — see
-// shared/constants/runtimeConfig.js for the shape and defaults.
+// Browser-only controls and notification preferences are persisted locally —
+// see shared/constants/runtimeConfig.js for the shape and defaults.
 export const useRuntimeConfig = () => useContext(RuntimeConfigContext);
 
 const App = () => {
@@ -56,25 +58,30 @@ const App = () => {
     configuredAuthMode === "open" ? "open" : "unknown",
   );
   const [identity, setIdentity] = useState(null);
+  const [robotMode, setRobotMode] = useState("unknown");
+  const [robotId, setRobotId] = useState("robot-001");
   const [authReady, setAuthReady] = useState(configuredAuthMode === "open");
 
   useEffect(() => {
-    if (configuredAuthMode === "open") return undefined;
     let active = true;
-    const apiBase =
-      window.location.port === "3000"
-        ? `http://${window.location.hostname}:5050`
-        : "";
+    const apiBase = "";
     const loadIdentity = async () => {
       try {
         const statusResponse = await fetch(`${apiBase}/api/auth/status`, {
           credentials: "include",
           cache: "no-store",
         });
-        if (!statusResponse.ok) throw new Error("Authentication status unavailable");
+        if (!statusResponse.ok)
+          throw new Error("Authentication status unavailable");
         const auth = await statusResponse.json();
         if (!active) return;
-        setAuthMode(auth.mode);
+        if (["simulation", "hardware"].includes(auth.robot_mode)) {
+          setRobotMode(auth.robot_mode);
+        }
+        if (typeof auth.robot_id === "string" && auth.robot_id.trim()) {
+          setRobotId(auth.robot_id.trim());
+        }
+        if (configuredAuthMode !== "open") setAuthMode(auth.mode);
         if (auth.mode === "local") {
           const meResponse = await fetch(`${apiBase}/api/v1/auth/me`, {
             credentials: "include",
@@ -83,7 +90,7 @@ const App = () => {
           if (meResponse.ok) setIdentity(await meResponse.json());
         }
       } catch (error) {
-        if (active) setAuthMode("unavailable");
+        if (active && configuredAuthMode !== "open") setAuthMode("unavailable");
         console.error("Unable to load authentication state", error);
       } finally {
         if (active) setAuthReady(true);
@@ -94,6 +101,21 @@ const App = () => {
       active = false;
     };
   }, [configuredAuthMode]);
+
+  useEffect(() => {
+    const handleAuthenticationRequired = () => {
+      if (authMode === "local") setIdentity(null);
+    };
+    window.addEventListener(
+      "robotpilot:auth-required",
+      handleAuthenticationRequired,
+    );
+    return () =>
+      window.removeEventListener(
+        "robotpilot:auth-required",
+        handleAuthenticationRequired,
+      );
+  }, [authMode]);
 
   const [runtimeConfig, setRuntimeConfig] = useState(() => loadRuntimeConfig());
 
@@ -135,12 +157,12 @@ const App = () => {
   // Depend only on the two connection-relevant fields (not the whole
   // runtimeConfig object) so unrelated settings changes — e.g. a speed
   // limit — don't tear down and reopen the rosbridge connection.
-  const { rosbridgeHost, rosbridgePort } = runtimeConfig;
+  const rosbridgePort = AppConfig.ROSBRIDGE_SERVER_PORT;
 
   const tryToConnect = useCallback(async () => {
     if (!authReady || !["open", "local"].includes(authMode)) return;
     if (authMode === "local" && !identity) return;
-    const host = resolveRosbridgeHost({ rosbridgeHost });
+    const host = resolveRosbridgeHost();
     try {
       if (authMode === "local") {
         const localPage =
@@ -158,25 +180,28 @@ const App = () => {
     } catch (err) {
       console.log("Connecting error", err);
     }
-  }, [ros, rosbridgeHost, rosbridgePort, authReady, authMode, identity]);
+  }, [ros, rosbridgePort, authReady, authMode, identity]);
 
   useEffect(() => {
-    let reconnectTimeout = null;
+    const reconnect = createReconnectController({
+      connect: tryToConnect,
+      baseMs: AppConfig.RECONNECTION_TIME,
+      maxMs: AppConfig.MAX_RECONNECTION_TIME,
+    });
 
     const handleConnect = () => {
+      reconnect.connected();
       setStatus("connected");
     };
 
     const handleClose = () => {
       setStatus("disconnected");
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      reconnectTimeout = setTimeout(tryToConnect, AppConfig.RECONNECTION_TIME);
+      reconnect.schedule();
     };
 
     const handleError = () => {
       setStatus("error");
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      reconnectTimeout = setTimeout(tryToConnect, AppConfig.RECONNECTION_TIME);
+      reconnect.schedule();
     };
 
     ros.on("connection", handleConnect);
@@ -192,9 +217,7 @@ const App = () => {
       ros.off("connection", handleConnect);
       ros.off("close", handleClose);
       ros.off("error", handleError);
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-      }
+      reconnect.dispose();
       ros.close();
     };
   }, [ros, tryToConnect]);
@@ -203,7 +226,14 @@ const App = () => {
     <RuntimeConfigContext.Provider value={runtimeConfigValue}>
       <ThemeContext.Provider value={themeValue}>
         <AuthContext.Provider
-          value={{ mode: authMode, identity, authReady, setIdentity }}
+          value={{
+            mode: authMode,
+            robotMode,
+            robotId,
+            identity,
+            authReady,
+            setIdentity,
+          }}
         >
           <RosContext.Provider value={ros}>
             <RosStatusContext.Provider value={status}>

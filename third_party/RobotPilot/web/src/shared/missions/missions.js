@@ -26,7 +26,9 @@ export const replaceMissionsFromRobot = (value) => {
 };
 export const loadLegacyMissions = () => {
   try {
-    const value = JSON.parse(localStorage.getItem("robotpilotMissions") || "[]");
+    const value = JSON.parse(
+      localStorage.getItem("robotpilotMissions") || "[]",
+    );
     return Array.isArray(value) ? value : [];
   } catch {
     return [];
@@ -40,8 +42,15 @@ const save = (mission) => {
 };
 export const importMission = (mission) =>
   save({ ...mission, id: String(mission.id) });
-export const addMission = (name) => {
-  const mission = { id: newMissionId(), name, steps: [] };
+export const addMission = (name, mapId, mapVersionId) => {
+  if (!mapId || !mapVersionId) return null;
+  const mission = {
+    id: newMissionId(),
+    name,
+    steps: [],
+    map_id: mapId,
+    map_version_id: mapVersionId,
+  };
   return save(mission) ? mission : null;
 };
 export const removeMission = (id) => {

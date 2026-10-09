@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 import webbrowser
+import signal
+import threading
 import rclpy
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 import os
 import shutil
 import json
 import time
 import subprocess
-import threading
 import uuid
 import yaml
 import csv
+from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, Pose, PoseStamped, PoseWithCovariance
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String, Empty
 from robotpilot_ui_msgs.msg import ArrayPoseStampedWithCovariance
 from nav2_msgs.srv import LoadMap
-
 
 class UIFoldersHandler(Node):
     def __init__(self):
@@ -50,9 +52,14 @@ class UIFoldersHandler(Node):
 
         package_share_dir = get_package_share_directory('robotpilot_ui_package')
         project_root = os.environ.get('ACKERMANN_ROBOT_WS', '')
-        self.maps_folder = (
-            os.path.join(project_root, 'maps', 'ui')
+        self.project_maps_folder = (
+            os.path.join(project_root, 'maps')
             if project_root and os.path.isdir(project_root)
+            else None
+        )
+        self.maps_folder = (
+            os.path.join(self.project_maps_folder, 'ui')
+            if self.project_maps_folder
             else os.path.join(package_share_dir, 'maps')
         )
         self.routs_folder = os.path.join(package_share_dir, 'paths')
@@ -94,6 +101,7 @@ class UIFoldersHandler(Node):
 
         self.dict_cmd = None
         self._save_map_busy = False
+        self._map_switch_pending = False
 
         # Connect to the map_server already managed by Nav2's lifecycle manager.
         self.change_map_cli = self.create_client(LoadMap, '/map_server/load_map')
@@ -129,16 +137,89 @@ class UIFoldersHandler(Node):
                 )
         return entries
 
+    def _project_map_entries(self):
+        """List map exports stored directly below the workspace maps directory."""
+        root = getattr(self, 'project_maps_folder', None)
+        if not root or not os.path.isdir(root):
+            return []
+        entries = []
+        for name in sorted(os.listdir(root)):
+            if name == 'ui' or not self._valid_catalog_name(name):
+                continue
+            directory = Path(root) / name
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            map_yaml = directory / 'map.yaml'
+            loadable = False
+            if map_yaml.is_file() and not map_yaml.is_symlink():
+                try:
+                    content = yaml.safe_load(map_yaml.read_text(encoding='utf-8'))
+                    image_name = content.get('image') if isinstance(content, dict) else None
+                    image_path = Path(image_name) if isinstance(image_name, str) else None
+                    if (image_path and not image_path.is_absolute()
+                            and '..' not in image_path.parts):
+                        image = directory
+                        for part in image_path.parts:
+                            image = image / part
+                            if image.is_symlink():
+                                break
+                        else:
+                            loadable = image.is_file()
+                except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError):
+                    pass
+            point_cloud = directory / 'GlobalMap.pcd'
+            has_point_cloud = point_cloud.is_file() and not point_cloud.is_symlink()
+            if loadable or has_point_cloud:
+                entries.append({
+                    'name': name,
+                    'loadable': loadable,
+                    'has_point_cloud': has_point_cloud,
+                })
+        return entries
+
     @staticmethod
     def _path_is_within(path, parent):
         if not path:
             return False
         try:
             return os.path.commonpath(
-                [os.path.abspath(path), os.path.abspath(parent)]
-            ) == os.path.abspath(parent)
+                [os.path.realpath(path), os.path.realpath(parent)]
+            ) == os.path.realpath(parent)
         except ValueError:
             return False
+
+    @staticmethod
+    def _valid_catalog_name(name):
+        return (
+            isinstance(name, str)
+            and bool(name.strip())
+            and name == name.strip()
+            and name not in (".", "..")
+            and "/" not in name
+            and "\\" not in name
+        )
+
+    def _stage_current_selection(self, map_file, route_file):
+        data = self.get_cur_files()
+        data["map_file"] = map_file
+        data["route_file"] = route_file
+        temporary = f"{self.current_files}.{uuid.uuid4().hex}.tmp"
+        staged = False
+        try:
+            with open(temporary, "w", encoding="utf-8") as file:
+                yaml.safe_dump(data, file)
+                file.flush()
+                os.fsync(file.fileno())
+            staged = True
+            return temporary
+        finally:
+            if not staged and os.path.isfile(temporary):
+                os.remove(temporary)
+
+    @staticmethod
+    def _discard_staged_selection(temporary):
+        if temporary and os.path.isfile(temporary):
+            os.remove(temporary)
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
@@ -222,17 +303,14 @@ class UIFoldersHandler(Node):
 
     def get_paths(self):
         files = {}
+        project_maps = self._project_map_entries()
         route_identities = {}
         try:
             with open(os.path.join(self.route_store_folder, 'map_identities.json'), 'r') as stream:
                 route_identities = json.load(stream)
         except (OSError, ValueError):
             pass
-        if not os.path.isdir(self.maps_folder):
-            self.get_logger().warn(f"Maps folder does not exist: {self.maps_folder}")
-            return json.dumps({"catalog_source": "maps", "structure": [], "active_files": {"group": "Null", "map": "Null", "route": "Null"}})
-
-        for group in sorted(os.listdir(self.maps_folder)):
+        for group in sorted(os.listdir(self.maps_folder)) if os.path.isdir(self.maps_folder) else []:
             group_path = os.path.join(self.maps_folder, group)
             if not os.path.isdir(group_path):
                 continue
@@ -259,7 +337,14 @@ class UIFoldersHandler(Node):
         data = self.get_cur_files()
         route_file = data.get("route_file", "")
         map_file = data.get("map_file", "")
-        if route_file:
+        project_map = next((
+            entry['name'] for entry in project_maps
+            if map_file and os.path.realpath(os.path.expanduser(map_file)) ==
+            os.path.realpath(os.path.join(self.project_maps_folder, entry['name'], 'map.yaml'))
+        ), '')
+        if project_map:
+            group, map_name, route = "maps", project_map, "Null"
+        elif route_file:
             route_parts = os.path.expanduser(route_file).split("/")[-3:]
             if len(route_parts) == 3:
                 group, map_name, route = route_parts[0], route_parts[1], route_parts[2].split(".")[0]
@@ -274,7 +359,15 @@ class UIFoldersHandler(Node):
         else:
             group, map_name, route = "Null", "Null", "Null"
 
-        response = {"catalog_source": "maps", "structure": [], "active_files": {"group": group, "map": map_name, "route": route}}
+        response = {
+            "catalog_source": "maps",
+            "structure": [],
+            "project_maps": project_maps,
+            "active_files": {
+                "group": group, "map": map_name, "route": route,
+                "project_map": project_map,
+            },
+        }
         for i, j in files.items():
             response["structure"].append({i: j})
         return json.dumps(response)
@@ -378,38 +471,110 @@ class UIFoldersHandler(Node):
             self._save_map_busy = False
 
     def change_map_func(self):
-        path_to_new_map = f"{self.maps_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map']}"
-        self.change_map(path_to_new_map)
+        group = self.dict_cmd.get("group", "")
+        map_name = self.dict_cmd.get("map", "")
+        if not self._valid_catalog_name(group) or not self._valid_catalog_name(map_name):
+            self._pub("Map switch failed: invalid map group or name.")
+            return False
+        path_to_new_map = os.path.join(self.maps_folder, group, map_name)
+        return self.change_map(path_to_new_map)
+
+    def change_project_map_func(self):
+        name = self.dict_cmd.get("map", "")
+        if not self._valid_catalog_name(name):
+            self._pub("Map switch failed: invalid project map name.")
+            return False
+        entry = next((item for item in self._project_map_entries() if item['name'] == name), None)
+        if not entry or not entry['loadable']:
+            self._pub(f"Map switch failed: no loadable 2D map in maps/{name}.")
+            return False
+        path = os.path.join(self.project_maps_folder, name, 'map.yaml')
+        return self.change_map(path, yaml=True, project_map=True)
 
     def create_group_func(self):
+        group = self.dict_cmd.get("group", "")
+        if not self._valid_catalog_name(group):
+            self._pub("Group creation failed: invalid group name.")
+            return False
         try:
-            os.mkdir(f"{self.routs_folder}/{self.dict_cmd['group']}")
-            os.mkdir(f"{self.maps_folder}/{self.dict_cmd['group']}")
+            map_group = os.path.join(self.maps_folder, group)
+            route_group = os.path.join(self.routs_folder, group)
+            os.mkdir(map_group)
+            try:
+                os.mkdir(route_group)
+            except Exception:
+                os.rmdir(map_group)
+                raise
             self._pub_nav_data()
+            self._pub(f'Created group "{group}"')
+            return True
         except Exception as e:
-            self.get_logger().info(f"Error in create_group_func: {e}")
+            self.get_logger().error(f"Error in create_group_func: {e}")
+            self._pub(f"Group creation failed: {e}")
+            return False
 
     def rename_map_func(self):
         try:
-            old_map_file = f"{self.maps_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map_old']}"
-            new_map_file = f"{self.maps_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map_new']}"
-            old_route_folder_file = f"{self.routs_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map_old']}"
-            new_route_folder_file = f"{self.routs_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map_new']}"
-            old_ros_folder_file = f"{self.maps_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map_old']}_ros"
-            new_ros_folder_file = f"{self.maps_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map_new']}_ros"
+            group = self.dict_cmd.get("group", "")
+            old_name = self.dict_cmd.get("map_old", "")
+            new_name = self.dict_cmd.get("map_new", "")
+            if not all(self._valid_catalog_name(value) for value in (group, old_name, new_name)):
+                raise ValueError("Invalid map group or name")
+            old_map_file = os.path.join(self.maps_folder, group, old_name)
+            new_map_file = os.path.join(self.maps_folder, group, new_name)
+            current = self.get_cur_files()
+            current_map = os.path.expanduser(current.get("map_file", ""))
+            current_route = os.path.expanduser(current.get("route_file", ""))
+            old_route_folder_file = os.path.join(self.routs_folder, group, old_name)
+            if (
+                current_map
+                and os.path.realpath(current_map) == os.path.realpath(f"{old_map_file}.yaml")
+            ) or self._path_is_within(current_route, old_route_folder_file):
+                self._pub("Map rename rejected: switch to another map before renaming the active map.")
+                return False
+            new_route_folder_file = os.path.join(self.routs_folder, group, new_name)
+            old_ros_folder_file = os.path.join(self.maps_folder, group, f"{old_name}_ros")
+            new_ros_folder_file = os.path.join(self.maps_folder, group, f"{new_name}_ros")
+
+            if any(os.path.islink(path) for path in (
+                os.path.join(self.maps_folder, group),
+                os.path.join(self.routs_folder, group),
+                old_map_file, f"{old_map_file}.yaml", old_route_folder_file,
+                f"{old_ros_folder_file}.yaml",
+            )):
+                raise ValueError("Map assets cannot be renamed through symbolic links")
+            if not os.path.isfile(f"{old_map_file}.yaml") or not os.path.isdir(old_route_folder_file):
+                raise FileNotFoundError(f"Map or route folder does not exist: {group}/{old_name}")
+            if os.path.exists(new_route_folder_file):
+                raise FileExistsError(f"Map already exists: {group}/{new_name}")
 
             with open(f"{old_map_file}.yaml", 'r') as file:
                 map_cur_path = yaml.safe_load(file) or {}
-            image_file = map_cur_path.get("image", f"{self.dict_cmd['map_old']}.png")
+            image_file = map_cur_path.get("image", f"{old_name}.png")
             image_extension = os.path.splitext(image_file)[1] or ".png"
-            map_cur_path["image"] = f"{self.dict_cmd['map_new']}{image_extension}"
+            rename_sources = [f"{old_map_file}{image_extension}"]
+            rename_targets = [
+                f"{new_map_file}.yaml",
+                f"{new_map_file}{image_extension}",
+                new_map_file,
+                f"{new_ros_folder_file}.yaml",
+            ]
+            if os.path.isfile(f"{old_ros_folder_file}.yaml"):
+                rename_sources.append(f"{old_ros_folder_file}.yaml")
+            if os.path.isdir(old_map_file):
+                rename_sources.append(old_map_file)
+            if not all(os.path.exists(path) for path in rename_sources):
+                raise FileNotFoundError(f"Map assets are incomplete: {group}/{old_name}")
+            if any(os.path.exists(path) for path in rename_targets):
+                raise FileExistsError(f"Map already exists: {group}/{new_name}")
+            map_cur_path["image"] = f"{new_name}{image_extension}"
             if os.path.isfile(f"{old_ros_folder_file}.yaml"):
                 with open(f"{old_ros_folder_file}.yaml", 'r') as file:
                     ros_cur_path = yaml.safe_load(file) or {}
                 if "map_server" in ros_cur_path and "ros__parameters" in ros_cur_path["map_server"]:
-                    ros_cur_path["map_server"]["ros__parameters"]["yaml_filename"] = f"{self.dict_cmd['map_new']}.yaml"
+                    ros_cur_path["map_server"]["ros__parameters"]["yaml_filename"] = f"{new_name}.yaml"
                 else:
-                    ros_cur_path["yaml_filename"] = f"{self.dict_cmd['map_new']}.yaml"
+                    ros_cur_path["yaml_filename"] = f"{new_name}.yaml"
                 with open(f"{old_ros_folder_file}.yaml", 'w') as file:
                     yaml.dump(ros_cur_path, file)
             with open(f"{old_map_file}.yaml", 'w') as file:
@@ -429,15 +594,35 @@ class UIFoldersHandler(Node):
                 self.set_cur_route(f"{new_route_folder_file}/{data['route_file'].split('/')[-1].split('.')[0]}")
 
             self._pub_nav_data()
+            self._pub(f'Renamed map "{old_name}" to "{new_name}"')
+            return True
         except Exception as e:
-            self.get_logger().info(f"Error in rename_map_func: {e}")
+            self.get_logger().error(f"Error in rename_map_func: {e}")
+            self._pub(f"Map rename failed: {e}")
+            return False
 
     def delete_map_func(self):
         try:
-            group = self.dict_cmd["group"]
-            map_name = self.dict_cmd["map"]
+            group = self.dict_cmd.get("group", "")
+            map_name = self.dict_cmd.get("map", "")
+            if not all(self._valid_catalog_name(value) for value in (group, map_name)):
+                raise ValueError("Invalid map group or name")
             map_base = os.path.join(self.maps_folder, group, map_name)
             route_map_folder = os.path.join(self.routs_folder, group, map_name)
+            if any(os.path.islink(path) for path in (
+                os.path.join(self.maps_folder, group),
+                os.path.join(self.routs_folder, group),
+                map_base,
+                route_map_folder,
+            )):
+                raise ValueError("Map assets cannot be deleted through symbolic links")
+            current = self.get_cur_files()
+            active_map = os.path.expanduser(current.get("map_file", ""))
+            active_route = os.path.expanduser(current.get("route_file", ""))
+            if active_map and os.path.realpath(active_map) == os.path.realpath(f"{map_base}.yaml"):
+                raise RuntimeError("Switch to another map before deleting the active map")
+            if self._path_is_within(active_route, route_map_folder):
+                raise RuntimeError("Switch to another route before deleting this map")
             removed = False
 
             for extension in (".yaml", "_ros.yaml", ".png", ".pgm"):
@@ -456,75 +641,48 @@ class UIFoldersHandler(Node):
                     f"No saved map or route data for {group}/{map_name}"
                 )
 
-            current = self.get_cur_files()
-            active_map = os.path.expanduser(current.get("map_file", ""))
-            active_route = os.path.expanduser(current.get("route_file", ""))
-            deleted_active_map = os.path.abspath(active_map) == os.path.abspath(
-                f"{map_base}.yaml"
-            )
-            deleted_active_route = self._path_is_within(
-                active_route, route_map_folder
-            )
-
-            if deleted_active_map:
-                candidates = self._saved_map_entries()
-                if candidates:
-                    next_group, next_map, next_file = candidates[0]
-                    self.dict_cmd = {"group": next_group, "map": next_map}
-                    self.change_map(next_file, yaml=True)
-                else:
-                    self.set_cur_map("")
-                    self.set_cur_route("")
-                    self._pub("No maps remain")
-            elif deleted_active_route:
-                self.set_cur_route("")
-                self._pub("No routes on the map")
-
             self.WP_req_callback(Empty())
             self._pub_nav_data()
             self._pub(f'Deleted map "{map_name}"')
+            return True
         except Exception as e:
             self.get_logger().error(f"Error in delete_map_func: {e}")
             self._pub(f"Map deletion failed: {e}")
+            return False
 
     def delete_group_func(self):
         try:
-            group = self.dict_cmd["group"]
+            group = self.dict_cmd.get("group", "")
+            if not self._valid_catalog_name(group):
+                raise ValueError("Invalid group name")
             map_group = os.path.join(self.maps_folder, group)
             route_group = os.path.join(self.routs_folder, group)
             if not os.path.isdir(map_group) and not os.path.isdir(route_group):
                 raise FileNotFoundError(f"No saved map group named {group}")
+            if os.path.islink(map_group) or os.path.islink(route_group):
+                raise ValueError("Map groups cannot be deleted through symbolic links")
 
             current = self.get_cur_files()
             active_map = os.path.expanduser(current.get("map_file", ""))
             active_route = os.path.expanduser(current.get("route_file", ""))
-            deleted_active_map = self._path_is_within(active_map, map_group)
-            deleted_active_route = self._path_is_within(active_route, route_group)
+            if self._path_is_within(active_map, map_group):
+                raise RuntimeError("Switch to a map outside this group before deleting it")
+            if self._path_is_within(active_route, route_group):
+                raise RuntimeError("Switch to a route outside this group before deleting it")
 
             if os.path.isdir(map_group):
                 shutil.rmtree(map_group)
             if os.path.isdir(route_group):
                 shutil.rmtree(route_group)
 
-            if deleted_active_map:
-                candidates = self._saved_map_entries()
-                if candidates:
-                    next_group, next_map, next_file = candidates[0]
-                    self.dict_cmd = {"group": next_group, "map": next_map}
-                    self.change_map(next_file, yaml=True)
-                else:
-                    self.set_cur_map("")
-                    self.set_cur_route("")
-                    self._pub("No maps remain")
-            elif deleted_active_route:
-                self.set_cur_route("")
-
             self.WP_req_callback(Empty())
             self._pub_nav_data()
             self._pub(f'Deleted group "{group}"')
+            return True
         except Exception as e:
             self.get_logger().error(f"Error in delete_group_func: {e}")
             self._pub(f"Group deletion failed: {e}")
+            return False
 
     # ── Route commands ────────────────────────────────────────────────────────
 
@@ -602,24 +760,38 @@ class UIFoldersHandler(Node):
 
     def rename_group_func(self):
         try:
-            old_maps = f"{self.maps_folder}/{self.dict_cmd['group_old']}"
-            new_maps = f"{self.maps_folder}/{self.dict_cmd['group_new']}"
-            old_routes = f"{self.routs_folder}/{self.dict_cmd['group_old']}"
-            new_routes = f"{self.routs_folder}/{self.dict_cmd['group_new']}"
+            old_group = self.dict_cmd.get("group_old", "")
+            new_group = self.dict_cmd.get("group_new", "")
+            if not all(self._valid_catalog_name(value) for value in (old_group, new_group)):
+                raise ValueError("Invalid group name")
+            old_maps = os.path.join(self.maps_folder, old_group)
+            new_maps = os.path.join(self.maps_folder, new_group)
+            old_routes = os.path.join(self.routs_folder, old_group)
+            new_routes = os.path.join(self.routs_folder, new_group)
+            if os.path.islink(old_maps) or os.path.islink(old_routes):
+                raise ValueError("Map groups cannot be renamed through symbolic links")
+            current = self.get_cur_files()
+            active_map = os.path.expanduser(current.get("map_file", ""))
+            active_route = os.path.expanduser(current.get("route_file", ""))
+            if self._path_is_within(active_map, old_maps) or self._path_is_within(active_route, old_routes):
+                raise RuntimeError("Switch to a different map and route before renaming this group")
+            if os.path.exists(new_maps) or os.path.exists(new_routes):
+                raise FileExistsError(f"Group already exists: {new_group}")
+            if not os.path.isdir(old_maps) or not os.path.isdir(old_routes):
+                raise FileNotFoundError(f"Map or route group does not exist: {old_group}")
             os.rename(old_maps, new_maps)
-            os.rename(old_routes, new_routes)
-
-            data = self.get_cur_files()
-            if self.dict_cmd['group_old'] in data.get("map_file", ""):
-                data["map_file"] = data["map_file"].replace(old_maps, new_maps)
-            if self.dict_cmd['group_old'] in data.get("route_file", ""):
-                data["route_file"] = data["route_file"].replace(old_routes, new_routes)
-            with open(self.current_files, 'w') as file:
-                yaml.dump(data, file)
-
+            try:
+                os.rename(old_routes, new_routes)
+            except Exception:
+                os.rename(new_maps, old_maps)
+                raise
             self._pub_nav_data()
+            self._pub(f'Renamed group "{old_group}" to "{new_group}"')
+            return True
         except Exception as e:
-            self.get_logger().info(f"Error in rename_group_func: {e}")
+            self.get_logger().error(f"Error in rename_group_func: {e}")
+            self._pub(f"Group rename failed: {e}")
+            return False
 
     # ── UI command dispatcher ─────────────────────────────────────────────────
 
@@ -630,6 +802,7 @@ class UIFoldersHandler(Node):
             map_commands = {
                 "save_map",
                 "change_map",
+                "change_project_map",
                 "create_group",
                 "rename_map",
                 "delete_map",
@@ -644,6 +817,7 @@ class UIFoldersHandler(Node):
             dispatch = {
                 "save_map":     self.save_map_func,
                 "change_map":   self.change_map_func,
+                "change_project_map": self.change_project_map_func,
                 "create_group": self.create_group_func,
                 "rename_map":   self.rename_map_func,
                 "delete_map":   self.delete_map_func,
@@ -667,35 +841,120 @@ class UIFoldersHandler(Node):
 
     # ── Map service helpers ───────────────────────────────────────────────────
 
-    def change_map(self, map_name: str, yaml: bool = False, manual: bool = False):
-        self.get_logger().info(f"\n ==========[CHANGING MAP TO {map_name}]======== \n")
-        map_yaml_file = map_name if yaml else f"{map_name}.yaml"
-        self.set_cur_map(map_yaml_file)
+    def change_map(self, map_name: str, yaml: bool = False, manual: bool = False,
+                   project_map: bool = False):
+        if self._map_switch_pending:
+            self._pub("Map switch rejected: another map load is still in progress.")
+            return False
 
-        if manual:
-            parts = map_name.split("/")
-            self.dict_cmd['group'] = parts[-2]
-            self.dict_cmd['map'] = parts[-1].split(".")[0]
+        requested_path = map_name if yaml else f"{map_name}.yaml"
+        map_yaml_file = os.path.abspath(os.path.expanduser(requested_path))
+        maps_root = os.path.realpath(
+            self.project_maps_folder if project_map else self.maps_folder
+        )
+        resolved_map = os.path.realpath(map_yaml_file)
+        try:
+            if os.path.commonpath((maps_root, resolved_map)) != maps_root:
+                raise ValueError("map path is outside the saved maps directory")
+        except ValueError as error:
+            self._pub(f"Map switch failed: {error}")
+            return False
+        if not map_yaml_file.endswith(".yaml") or os.path.islink(map_yaml_file):
+            self._pub("Map switch failed: expected a regular .yaml map file.")
+            return False
+        if not os.path.isfile(map_yaml_file):
+            self._pub(f"Map switch failed: map file does not exist: {map_yaml_file}")
+            return False
 
-        route_dir = f"{self.routs_folder}/{self.dict_cmd['group']}/{self.dict_cmd['map']}"
-        routes_on_map = os.listdir(route_dir) if os.path.isdir(route_dir) else []
-        if routes_on_map:
-            path_to_route = f"{route_dir}/{routes_on_map[0].split('.')[0]}"
-            self.set_cur_route(path_to_route)
+        relative = os.path.relpath(resolved_map, maps_root).split(os.sep)
+        if len(relative) != 2:
+            self._pub("Map switch failed: map file must be inside a map directory.")
+            return False
+        group, filename = relative
+        if project_map:
+            if (filename != 'map.yaml' or group == 'ui'
+                    or os.path.islink(os.path.join(maps_root, group))):
+                self._pub("Map switch failed: invalid project map directory.")
+                return False
+            map_label = group
+            group = 'maps'
         else:
-            self.set_cur_route("")
-            self._pub("No routes on the map")
+            map_label = os.path.splitext(filename)[0]
+        if not all(self._valid_catalog_name(value) for value in (group, map_label)):
+            self._pub("Map switch failed: invalid map group or name.")
+            return False
 
-        self.WP_req_callback(Empty())
+        route_dir = None if project_map else os.path.join(self.routs_folder, group, map_label)
+        routes = sorted(
+            entry for entry in os.listdir(route_dir)
+            if entry.endswith(".csv")
+        ) if route_dir and os.path.isdir(route_dir) else []
+        route_file = os.path.join(route_dir, routes[0]) if routes else ""
 
-        req = LoadMap.Request()
-        req.map_url = map_yaml_file
-        if self.change_map_cli.service_is_ready() or self.change_map_cli.wait_for_service(timeout_sec=1.0):
-            self.change_map_cli.call_async(req)
-        else:
-            self.get_logger().warn("Cannot load map because /map_server/load_map is unavailable.")
-            self._pub("Map server is unavailable; map selection was saved but not loaded.")
-        self._pub_nav_data()
+        if not self.change_map_cli.service_is_ready() and not self.change_map_cli.wait_for_service(timeout_sec=1.0):
+            self._pub("Map switch failed: /map_server/load_map is unavailable.")
+            return False
+
+        try:
+            staged_selection = self._stage_current_selection(map_yaml_file, route_file)
+        except Exception as error:
+            self._pub(f"Map switch failed: cannot stage the active map selection: {error}")
+            return False
+
+        request = LoadMap.Request()
+        request.map_url = map_yaml_file
+        try:
+            future = self.change_map_cli.call_async(request)
+            self._map_switch_pending = True
+            self.get_logger().info(f"Requesting 2D map load: {map_yaml_file}")
+            self._pub(f'Loading 2D map "{group}/{map_label}"…')
+        except Exception as error:
+            self._discard_staged_selection(staged_selection)
+            self._pub(f"Map switch failed: {error}")
+            return False
+
+        def finish_load(result_future):
+            nonlocal staged_selection
+            self._map_switch_pending = False
+            map_server_loaded = False
+            try:
+                response = result_future.result()
+                if response.result != LoadMap.Response.RESULT_SUCCESS:
+                    self._discard_staged_selection(staged_selection)
+                    self._pub(
+                        f"Map switch failed: MapServer returned result {response.result}."
+                    )
+                    return
+
+                map_server_loaded = True
+                os.replace(staged_selection, self.current_files)
+                staged_selection = None
+                self.dict_cmd = {"group": group, "map": map_label}
+                self.WP_req_callback(Empty())
+                self._pub_nav_data()
+                self._pub(
+                    f'Map loaded "{group}/{map_label}" (2D map only; '
+                    "the LIORF 3D prior is unchanged)."
+                )
+            except Exception as error:
+                self._discard_staged_selection(staged_selection)
+                self.get_logger().error(f"Map load response handling failed: {error}")
+                if map_server_loaded:
+                    self._pub(
+                        "MapServer loaded the 2D map, but saving or refreshing the "
+                        f"selection failed: {error}"
+                    )
+                else:
+                    self._pub(f"Map switch failed: {error}")
+
+        try:
+            future.add_done_callback(finish_load)
+        except Exception as error:
+            self._map_switch_pending = False
+            self._discard_staged_selection(staged_selection)
+            self._pub(f"Map switch failed: {error}")
+            return False
+        return True
 
     def set_cur_map(self, map_name: str):
         data = self.get_cur_files()
@@ -717,7 +976,32 @@ class UIFoldersHandler(Node):
 def main():
     rclpy.init()
     controller = UIFoldersHandler()
-    rclpy.spin(controller)
+    executor = SingleThreadedExecutor()
+    executor.add_node(controller)
+    shutdown_requested = threading.Event()
+
+    def request_shutdown(_signum, _frame):
+        shutdown_requested.set()
+
+    handled_signals = (signal.SIGINT, signal.SIGTERM)
+    previous_handlers = {
+        signum: signal.getsignal(signum) for signum in handled_signals
+    }
+    for signum in handled_signals:
+        signal.signal(signum, request_shutdown)
+    try:
+        while rclpy.ok() and not shutdown_requested.is_set():
+            executor.spin_once(timeout_sec=0.1)
+    finally:
+        for signum in handled_signals:
+            signal.signal(signum, signal.SIG_IGN)
+        executor.remove_node(controller)
+        executor.shutdown(timeout_sec=1.0)
+        controller.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == "__main__":
