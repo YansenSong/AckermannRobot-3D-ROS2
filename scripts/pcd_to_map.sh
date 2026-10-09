@@ -6,12 +6,12 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MAPS_DIR="$PROJECT_DIR/maps"
-CONVERTER="$PROJECT_DIR/third_party/pcd2pgm/build/pcd2gridmap"
+CONVERTER="$PROJECT_DIR/src/extension/pcd2pgm/build/pcd2gridmap"
 
 if [[ ! -x "$CONVERTER" ]]; then
   echo "PCD converter is not built. Build it first:" >&2
-  echo "  cmake -S third_party/pcd2pgm -B third_party/pcd2pgm/build" >&2
-  echo "  cmake --build third_party/pcd2pgm/build" >&2
+  echo "  cmake -S src/extension/pcd2pgm -B src/extension/pcd2pgm/build" >&2
+  echo "  cmake --build src/extension/pcd2pgm/build" >&2
   exit 1
 fi
 
