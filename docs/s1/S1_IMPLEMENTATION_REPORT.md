@@ -121,4 +121,4 @@
 
 - 失败复现：启动配置测试在修复前找不到 Adapter 节点及 fixture 仿真门禁；fixture Outbox 测试在修复前得到 `simulation=false`。
 - 修复：`navigation.launch.py` 增加默认关闭的 Adapter 开关和 external/fixture 参数；仿真入口显式传递 profile，fixture 同时要求 `ROBOT_MODE=simulation`；脚本增加 `--inspection-adapter=...` 包检查，bringup 声明 ROS 包运行依赖。Adapter 退出记录错误并自动重启，Provider 心跳过期由 Manager 标记 stale。fixture Outbox 顶层为 `simulation=true`、`is_test_data=true`。
-- 回归：Python `161 passed、3 skipped`，React `43 passed`（含运行页 DOM、地图 pin），Vite 构建通过；`robot_bringup`、`mission_manager`、`inspection_adapter` 分别构建通过，`ros2 launch ... --show-args` 显示默认关闭及 external 默认模式。未运行 Gazebo+Web 多进程系统验收，R12 继续 BLOCKED，不提升为 `SIM_VERIFIED`。
+- 回归：Python `161 passed、3 skipped`，React `43 passed`（含运行页 DOM、地图 pin），Vite 构建通过；`robot_bringup`、`mission_manager`、`inspection_adapter` 分别构建通过，`ros2 launch ... --show-args` 显示默认关闭及 external 默认模式。曾尝试以 fixture 启动 `navigation_sim.launch.py`：Manager 与 Adapter 进程启动，但 Gazebo `gzserver` 因 `getifaddres: Operation not permitted` 退出，随后导航 TF 不完整；20 秒超时终止余下进程。此环境下 Gazebo+Web 多进程系统验收未完成，R12 继续 BLOCKED，不提升为 `SIM_VERIFIED`。
