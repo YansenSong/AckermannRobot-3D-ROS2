@@ -70,6 +70,8 @@ class MissionStoreTest(unittest.TestCase):
             store.close()
             reopened = MissionStore(path, "robot-001")
             self.assertEqual(reopened.pending_events()[0]["payload"]["late"], True)
+            self.assertTrue(reopened.pending_events()[0]["simulation"])
+            self.assertTrue(reopened.pending_events()[0]["is_test_data"])
             reopened.close()
 
     def test_inspection_request_and_paused_receipt_survive_restart(self):
@@ -94,6 +96,21 @@ class MissionStoreTest(unittest.TestCase):
             self.assertEqual(store.save_inspection_result(receipt), receipt)
             with self.assertRaisesRegex(ValueError, "conflicting results"):
                 store.save_inspection_result({**receipt, "result_id": "result-2"})
+            store.close()
+
+    def test_fixture_result_event_is_clearly_marked_as_test_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = MissionStore(os.path.join(directory, "fixture.sqlite3"))
+            mission = store.save_mission({"id": "mission", "name": "Mission", "steps": [],
+                                          "map_id": "map-a", "map_version_id": "v1"})
+            run = store.new_run("task", mission)
+            store.add_inspection_result(run, {
+                "result_id": "result", "action_run_id": "action", "observed_at": "2026-10-10T00:00:00Z",
+                "source_mode": "fixture", "outcome": "INCONCLUSIVE",
+            })
+            event = next(item for item in store.pending_events() if item["type"] == "inspection.result")
+            self.assertTrue(event["simulation"])
+            self.assertTrue(event["is_test_data"])
             store.close()
 
     def test_command_claim_replays_ack_and_conflicting_body_is_rejected(self):

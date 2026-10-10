@@ -17,6 +17,8 @@ def generate_launch_description():
         DeclareLaunchArgument('map'),
         DeclareLaunchArgument('map_pgm'),
         DeclareLaunchArgument('globalmap_pcd'),
+        DeclareLaunchArgument('enable_inspection_adapter', default_value='false'),
+        DeclareLaunchArgument('inspection_provider_mode', default_value='external'),
         DeclareLaunchArgument(
             'gazebo_gui',
             default_value='true',
@@ -50,6 +52,9 @@ def generate_launch_description():
             'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
             'params_file': LaunchConfiguration('params_file'),
             'use_rviz': 'false',
+            'enable_inspection_adapter': LaunchConfiguration('enable_inspection_adapter'),
+            'inspection_provider_mode': LaunchConfiguration('inspection_provider_mode'),
+            'inspection_simulation_profile': 'true',
         }.items(),
     )
 

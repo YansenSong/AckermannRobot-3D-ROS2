@@ -85,6 +85,8 @@ class MissionFixtureFlowTest(unittest.TestCase):
                 self.assertEqual(len(result_events), 1)
                 self.assertEqual(result_events[0]["payload"]["outcome"], "INCONCLUSIVE")
                 self.assertEqual(result_events[0]["payload"]["source_mode"], "fixture")
+                self.assertTrue(result_events[0]["simulation"])
+                self.assertTrue(result_events[0]["is_test_data"])
                 self.assertEqual(result_events[0]["payload"]["waypoint_id"], "wp-fixture")
                 sys.path.insert(0, os.path.abspath("third_party/RobotPilot/ros2/src/robotpilot_ui_package"))
                 from robotpilot_ui_package.platform_api import PlatformStore

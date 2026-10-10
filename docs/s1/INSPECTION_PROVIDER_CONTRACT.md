@@ -29,6 +29,7 @@ ROS 消息当前使用 std_msgs/String，载荷为 JSON。robot → adapter 的�
 - action_run_id 对同一请求重投必须一致，包含 requested_at 在内的原始请求内容也必须完全不变。MissionManager 与适配器分别在 SQLite 缓存请求/result；相同 ID 不同请求内容拒绝。暂停期间的有效回执先持久化，恢复时最多推进一次；取消后回执和旧 attempt 回执记为 late 事件，不推进任务。
 - evidence 只允许 evidence_id、media_type、checksum、size_bytes 等小型 metadata；禁止路径、任意 URL、图像字节和未知字段。当前平台没有受控媒体存储，Web 应显示媒体不可用。
 - source_mode 使用 fixture/simulation/hardware。fixture 场景可测试 normal、abnormal、inconclusive、rejected、offline、timeout、late_result、duplicate；默认运行模式 external，fixture 必须显式设置 INSPECTION_PROVIDER_MODE=fixture。fixture 结论的 source_mode 为 fixture，confidence 为 null，证据为空。
+- `inspection.result` 与 late 审计事件沿用事件顶层 `simulation`，fixture 和 simulation 均为 true；新增顶层 `is_test_data`，仅 fixture 为 true。消费者以 payload.source_mode 为来源权威，不能把 fixture 当成实机检测。
 
 ## 安全与执行约束
 

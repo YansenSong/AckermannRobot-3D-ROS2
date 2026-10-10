@@ -1,5 +1,18 @@
 # S1 测试矩阵与本轮实测
 
+## 后续审计 Patch A～D 回归（2026-10-10）
+
+| 检查 | 实测结果 | 边界 |
+|---|---|---|
+| 平台 API、MissionManager、Adapter、AreaRules、cmd_vel hold、bringup 配置 Python 回归 | `161 passed、3 skipped` | 含 R01～R11 的平台/节点级覆盖；其中 Provider 重启只覆盖无回执超时与不重复派发，未连接真实 Provider。 |
+| React/Vitest | 16 文件、`43 passed` | 新增运行页 DOM 状态/stale、nav2d map pin 点击/清除测试；无完整浏览器 Gazebo E2E。 |
+| Vite production build | 通过 | Web 源码本轮未改业务页面逻辑；新增页面测试。 |
+| ROS2 包 | `mission_manager`、`inspection_adapter`、`robot_bringup` 构建通过 | 使用隔离 `/tmp` 安装前缀；bringup 首次因 Adapter 依赖未先装入前缀而失败，补齐依赖后重跑通过。 |
+| 启动参数 | `ros2 launch robot_bringup navigation_sim.launch.py --show-args` 通过 | 显示 Adapter 默认关闭、Provider 模式默认 external。 |
+| shell/差异 | `bash -n scripts/nav_liorf_neupan.sh`、`git diff --check` 通过 | 无 Gazebo 运行证明。 |
+
+审计复现矩阵 R01～R10 见 `S1_IMPLEMENTATION_REPORT.md` Patch A～C；R11 的 Manager/Adapter 重启由节点测试覆盖，Provider 未交付，仅验证无回执时 TIMEOUT 且不重复执行；R12 仍为 `BLOCKED`，未启动完整 Gazebo+Web+ROS2。下表保留原 W0～W9 实施时的实测记录，不把两个阶段的计数相加。
+
 ## 自动化检查
 
 | 检查 | 复现命令/条件 | 本轮结果 | 边界 |

@@ -11,14 +11,14 @@
 | 阶段 | 实际实现与证据 | 当前边界 |
 |---|---|---|
 | W0 基线与差异 | 保留用户原始交接文件；记录本地 HEAD、基线差异和测试记录于 `S1_BASELINE.md`。 | 当前分支开始时只有用户提供的交接文件未跟踪；本轮修改均保留。 |
-| W1 Provider 契约/替身 | 新增 `inspection_adapter`，含 capability/heartbeat/request/result/control ROS topic、schema 验证、显式 fixture 模式和 8 个场景；契约见 `INSPECTION_PROVIDER_CONTRACT.md`。点位动作页显示实时 Provider 来源、在线/过期和动作能力。 | fixture 默认关闭；外部团队协议及真实 provider 尚未交付；没有独立的 Provider 管理页。 |
+| W1 Provider 契约/替身 | 新增 `inspection_adapter`，含 capability/heartbeat/request/result/control ROS topic、schema 验证、显式 fixture 模式和 8 个场景；导航启动链现有显式 opt-in Adapter 参数，退出写错误日志并自动重启，Manager 心跳过期标记 stale；契约见 `INSPECTION_PROVIDER_CONTRACT.md`。点位动作页显示实时 Provider 来源、在线/过期和动作能力。 | fixture 默认关闭；外部团队协议及真实 provider 尚未交付；没有独立的 Provider 管理页。 |
 | W2 地图/区域 | 复用现有地图清单、地图 bundle 校验与 `area_rules`；新增 map quality review 的提交、Admin 审核、版本/checksum 绑定。 | 未实现建图会话和运行区白名单安全执行；旧地图/区域 ROSBridge 写入口未整体迁移；二维/三维切换仍遵循 S0 冷切换约束。 |
 | W3 点位/资产 | 新增资产创建、编辑/停用、地图版本关联、点位关联/解除关联 API 与 Web；动作计划可校验、版本化保存为不可执行草稿。 | 未实现基准照片上传/存储。 |
 | W4 任务编排 | 指定任务 API/UI 支持单点立即执行；多点序列可编译为不可变 MissionManager mission 快照，保存时 Provider 可离线；inspection profile 复用现有 SchedulerPage 和 `/schedules` 建立周期调度。MissionManager 在实际开始和到点派发时重验地图、安全状态和 Provider 能力；任务页可按 ID/名称、状态和时间筛选当前及最近巡检历史。 | 模板版本化编辑/管理和调度运行历史呈现未补齐；完整历史归档查询待扩展；周期触发只验证 API 接入，未运行真实调度周期；真实 provider 能力联调待外部提供。 |
 | W5 运行页 | MapPage 在巡检 profile 显示在线/离线或未知、状态过期、电量来源、当前地图/模式、任务摘要、当前 map/version 告警数；告警位置经当前 map/version 过滤后显示为可点击地图 pin；明确物理急停未知。 | 当前页是地图操作页聚合，不是独立大屏验收；无 Gazebo 联动截图或地图 pin 的浏览器视觉验收。 |
 | W6 结果/告警 | Outbox 事件事务写入结果；异常按资产组或巡检点形成业务告警，关闭后新异常另建 episode；结果按所有关联资产筛选、告警先按地图版本过滤再分页；告警详情/证据元数据、状态机及操作审计均有 API；Web 显示 Fixture/Simulation 来源及媒体不可用态，地图 pin 可跳转对应告警详情。 | 无图像文件上传、持久化、服务端授权读取或下载；处理页面目前提供确认按钮，其他处理状态主要通过 API；没有独立 SSE 告警流。 |
 | W7 设备/BMS | 复用现有 Info/BMS/Health、`/battery/state`、`/config` 和 Fault 机制；状态缺失显示 unavailable/unknown。 | 本轮未扩展设备粒度健康快照；未完成传感器断流集成测试或硬件联调。 |
-| W8 联动与回归 | Python 平台、MissionManager、Adapter、AreaRules、前端单测和 Vite build 已执行；一个隔离 ROS_DOMAIN_ID fixture 集成测试实际贯通到 PlatformStore。 | 完整 `check_s0.sh` 本轮结果另见测试表；Gazebo、ROS graph 多进程演示、截图和真实 provider 均未执行。 |
+| W8 联动与回归 | Python 平台、MissionManager、Adapter、AreaRules、bringup 启动配置、前端 DOM/map pin 单测和 Vite build 已执行；一个隔离 ROS_DOMAIN_ID fixture 集成测试实际贯通到 PlatformStore。 | 完整 `check_s0.sh` 本轮结果另见测试表；Gazebo、ROS graph 多进程演示、截图和真实 provider 均未执行。 |
 | W9 文档/交接 | 本报告、API/数据模型、测试矩阵、Provider 契约和外部待办均更新；S0 文档未修改。 | 由于上述 BLOCKED/EXTERNAL_PENDING 项，不能作为全部 57 项验收完成声明。 |
 
 ## S1-01～S1-57 逐项状态
@@ -27,7 +27,7 @@
 
 | ID / 功能 | 阶段 | 状态 | 真实实现、测试证据及缺口 |
 |---|---|---|---|
-| S1-01 机器人在线卡片 | W5 | CODE_READY | `web/src/pages/MapPage.jsx` 使用 `useRobotStatus` 显示在线/未知及 stale；无在线/断线 DOM 测试。 |
+| S1-01 机器人在线卡片 | W5 | CODE_READY | `web/src/pages/MapPage.jsx` 使用 `useRobotStatus` 显示在线/未知及 stale；后续 DOM 测试覆盖在线和 stale 提示，真实断线浏览器联测未做。 |
 | S1-02 实时二维地图 | W5 | CODE_READY | 复用 `web/src/components/Map.jsx` 与现有地图订阅；仍受当前地图/bundle 状态约束。 |
 | S1-03 实时位置/朝向 | W5 | CODE_READY | 复用 Map 的 ROS pose 展示和状态 stale；Gazebo 位姿联动未测。 |
 | S1-04 轨迹/规划路线 | W5 | CODE_READY | 复用 Map 已有轨迹和路线绘制；未增加持久轨迹历史。 |
@@ -73,8 +73,8 @@
 | S1-44 异常事件接收 | W6 | FIXTURE_VERIFIED / EXTERNAL_PENDING | Adapter fixture result topic→MissionManager→Outbox 已通过；真实业务异常来源未接入。 |
 | S1-45 告警分类/等级 | W6 | CODE_READY / EXTERNAL_PENDING | 仅依据外部 detector/category 和结果建立业务告警；无模型判定；外部类别/严重度策略需确认。 |
 | S1-46 告警详情/证据 | W6 | CODE_READY / BLOCKED / EXTERNAL_PENDING | GET 告警详情返回关联证据 metadata；`InspectionPage.jsx` 展示媒体不可用态，拒绝文件路径/URL；无实际媒体读写/图像展示。 |
-| S1-47 地图告警定位 | W5/W6 | CODE_READY / BLOCKED | 告警 API 从关联结果解析 map frame 坐标，map_id/map_version_id 独立索引并在 SQL 中先过滤再分页；MapPage 仅渲染当前身份的可点击 pin 并跳到告警详情列表。无有效位置不落在原点；浏览器/Gazebo 视觉验收未做。 |
-| S1-48 无法确认状态 | W6 | FIXTURE_VERIFIED / EXTERNAL_PENDING | `INCONCLUSIVE` 与技术状态分离且无默认正常；集成测试验证 INCONCLUSIVE 入库。 |
+| S1-47 地图告警定位 | W5/W6 | CODE_READY / BLOCKED | 告警 API 从关联结果解析 map frame 坐标，map_id/map_version_id 独立索引并在 SQL 中先过滤再分页；MapPage 仅渲染当前身份的可点击 pin 并跳到告警详情列表。新增 DOM 测试核对当前地图版本和 stale 清 pin，nav2d 测试核对 map frame 坐标/点击/清除；Gazebo 视觉验收未做。 |
+| S1-48 无法确认状态 | W6 | FIXTURE_VERIFIED / EXTERNAL_PENDING | `INCONCLUSIVE` 与技术状态分离且无默认正常；集成测试验证 INCONCLUSIVE 入库，以及 fixture 事件 `simulation=true`、`is_test_data=true`。 |
 | S1-49 告警去重/持续 | W6 | CODE_READY | 同分类/地图版本按资产组优先、无资产时按巡检点归并；RESOLVED/CLOSED 后再触发新 OPEN episode，旧案留存。多资产按组还是逐资产告警、持续窗口仍需业务方确认。 |
 | S1-50 告警查询/留存 | W6 | CODE_READY | 结果带 limit/offset 与 task/point/任一关联 asset/outcome/source 过滤；告警 SQL 先按 map/version 过滤再分页并返回 next_offset；无导出和稳定游标接口。 |
 | S1-51 告警处理状态 | W6 | CODE_READY | Operator If-Match 状态机与平台事件审计；Web 当前仅显示 OPEN→ACKNOWLEDGED 操作。 |
@@ -116,3 +116,9 @@
 - 失败复现：新增的不同点同类、第二资产筛选和其他地图超过 100 条后查询当前地图三个用例在修复前均失败。
 - 修复：平台 SQLite schema 7→8；`inspection_result_assets` 存全部资产并回填旧结果；告警增加结构化地图/点位、对象 fingerprint 和 episode。当前规则为资产组优先、无资产按巡检点；RESOLVED/CLOSED 后新异常建新 OPEN episode。告警列表在 SQL 中先过滤地图，再按 limit/offset 分页；摄入事务用 `BEGIN IMMEDIATE` 串行化同对象并发写入。
 - 回归：平台旧库升级、关闭后再触发、不同点、并发、资产筛选和跨地图超过 100 条均通过；Python 全量 `158 passed、3 skipped`，React `40 passed`，Vite 构建通过。旧 schema 7 已错误合并的历史计数无法自动拆分，仍保留原告警以免丢失处置记录；多资产告警粒度待产品确认。
+
+### Patch D：F05、F09 启动与 fixture 审计标签
+
+- 失败复现：启动配置测试在修复前找不到 Adapter 节点及 fixture 仿真门禁；fixture Outbox 测试在修复前得到 `simulation=false`。
+- 修复：`navigation.launch.py` 增加默认关闭的 Adapter 开关和 external/fixture 参数；仿真入口显式传递 profile，fixture 同时要求 `ROBOT_MODE=simulation`；脚本增加 `--inspection-adapter=...` 包检查，bringup 声明 ROS 包运行依赖。Adapter 退出记录错误并自动重启，Provider 心跳过期由 Manager 标记 stale。fixture Outbox 顶层为 `simulation=true`、`is_test_data=true`。
+- 回归：Python `161 passed、3 skipped`，React `43 passed`（含运行页 DOM、地图 pin），Vite 构建通过；`robot_bringup`、`mission_manager`、`inspection_adapter` 分别构建通过，`ros2 launch ... --show-args` 显示默认关闭及 external 默认模式。未运行 Gazebo+Web 多进程系统验收，R12 继续 BLOCKED，不提升为 `SIM_VERIFIED`。

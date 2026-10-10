@@ -4,7 +4,7 @@
 # 前置: 需先用 LIO-SAM 建好 GlobalMap.pcd + 转为 map.pgm/map.yaml
 #
 # 用法:
-#   终端 1: bash scripts/nav_liorf_neupan.sh <maps/地图目录>
+#   终端 1: bash scripts/nav_liorf_neupan.sh <maps/地图目录> [--inspection-adapter=external|fixture]
 #   终端 2: bash scripts/run_neupan.sh
 
 set -eo pipefail
@@ -12,9 +12,22 @@ set -eo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 MAPS_DIR="$PROJECT_DIR/maps"
 
-if [[ $# -ne 1 ]]; then
-    echo "Usage: bash scripts/nav_liorf_neupan.sh <maps/地图目录>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "Usage: bash scripts/nav_liorf_neupan.sh <maps/地图目录> [--inspection-adapter=external|fixture]" >&2
     echo "Example: bash scripts/nav_liorf_neupan.sh maps/mini" >&2
+    exit 1
+fi
+
+INSPECTION_MODE=""
+if [[ $# -eq 2 ]]; then
+    case "$2" in
+        --inspection-adapter=external) INSPECTION_MODE="external" ;;
+        --inspection-adapter=fixture) INSPECTION_MODE="fixture" ;;
+        *) echo "Unknown inspection adapter option: $2" >&2; exit 1 ;;
+    esac
+fi
+if [[ "$INSPECTION_MODE" == "fixture" && "${ROBOT_MODE:-}" != "simulation" ]]; then
+    echo "Fixture requires ROBOT_MODE=simulation" >&2
     exit 1
 fi
 
@@ -42,15 +55,24 @@ if [[ ! -f "$MAP_DIR/map.bundle.json" ]]; then
 fi
 source "$PROJECT_DIR/install/setup.bash"
 
-for required_package in robot_bringup nav_status mission_manager area_rules; do
+required_packages=(robot_bringup nav_status mission_manager area_rules)
+if [[ -n "$INSPECTION_MODE" ]]; then
+    required_packages+=(inspection_adapter)
+fi
+for required_package in "${required_packages[@]}"; do
     if ! ros2 pkg prefix "$required_package" >/dev/null 2>&1; then
         echo "缺少 ROS 包 $required_package。请先在项目根目录构建并重新加载环境：" >&2
         echo "  source /opt/ros/humble/setup.bash" >&2
-        echo "  colcon build --packages-up-to robot_bringup mission_manager area_rules" >&2
+        echo "  colcon build --packages-up-to robot_bringup mission_manager inspection_adapter area_rules" >&2
         echo "  source install/setup.bash" >&2
         exit 1
     fi
 done
+
+inspection_args=()
+if [[ -n "$INSPECTION_MODE" ]]; then
+    inspection_args=(enable_inspection_adapter:=true "inspection_provider_mode:=$INSPECTION_MODE")
+fi
 
 echo ""
 echo "=============================================="
@@ -65,4 +87,5 @@ echo "=============================================="
 exec ros2 launch robot_bringup navigation_sim.launch.py \
     map:="$MAP_DIR/map.yaml" \
     map_pgm:="$MAP_DIR/map.pgm" \
-    globalmap_pcd:="$MAP_DIR/GlobalMap.pcd"
+    globalmap_pcd:="$MAP_DIR/GlobalMap.pcd" \
+    "${inspection_args[@]}"
