@@ -16,8 +16,12 @@ test("inspection profile omits the standalone missions page", async () => {
     "/info",
     "/health",
     "/events",
+    "/inspection",
+    "/assets",
+    "/waypoint-actions",
     "/logs",
     "/bms",
+    "/scheduler",
   ]);
   expect(NAV_REGISTRY.some(({ path }) => path === "/missions")).toBe(false);
 });

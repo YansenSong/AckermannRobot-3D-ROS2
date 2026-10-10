@@ -50,6 +50,24 @@ class MissionNodeTest(unittest.TestCase):
             "bundle_id": "bundle-test", "globalmap_pcd_sha256": "test-pcd",
         })))
 
+    @staticmethod
+    def fixture_provider(node):
+        capability = {
+            "schema_version": 1, "robot_id": node.robot_id, "provider_id": "fixture-provider",
+            "source_mode": "fixture", "online": True, "software_version": "fixture-v1",
+            "observed_at": "2026-10-10T00:00:00Z",
+            "actions": [
+                {"kind": "capture", "supported": True, "detectors": []},
+                {"kind": "detect", "supported": True, "detectors": ["fire_smoke"]},
+                {"kind": "broadcast", "supported": True, "detectors": []},
+            ],
+        }
+        node.on_inspection_capabilities(String(data=json.dumps(capability)))
+        node.on_inspection_provider_heartbeat(String(data=json.dumps({
+            "schema_version": 1, "robot_id": node.robot_id, "provider_id": "fixture-provider",
+            "source_mode": "fixture", "online": True, "observed_at": "2026-10-10T00:00:00Z",
+        })))
+
     def test_ekf_no_events_fault_requires_missing_filtered_odom(self):
         with tempfile.TemporaryDirectory() as directory:
             previous_log_dir = os.environ.get("ROS_LOG_DIR")
@@ -283,6 +301,17 @@ class MissionNodeTest(unittest.TestCase):
                 node.on_nav(status)
                 status.state = NavigationStatus.ARRIVED
                 node.on_nav(status)
+                self.assertEqual(node.run["status"], "RUNNING")
+                stable = Odometry()
+                stable.header.frame_id = "odom"
+                stable.pose.pose.orientation.w = 1.0
+                node.on_odom(stable)
+                node.on_ekf_odom(stable)
+                node.tick()
+                time.sleep(0.51)
+                node.on_odom(stable)
+                node.on_ekf_odom(stable)
+                node.tick()
                 self.assertEqual(node.run["status"], "SUCCEEDED")
                 node.on_command(String(data=json.dumps({"command": "start", "mission_id": "m"})))
                 external = PoseStamped()
@@ -306,6 +335,109 @@ class MissionNodeTest(unittest.TestCase):
                     os.environ.pop("ROS_LOG_DIR", None)
                 else:
                     os.environ["ROS_LOG_DIR"] = previous_log_dir
+
+    def test_inspection_action_is_requested_after_stable_arrival_and_result_advances_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            previous_robot_mode = os.environ.get("ROBOT_MODE")
+            os.environ["ROS_LOG_DIR"] = directory
+            os.environ["ROBOT_MODE"] = "simulation"
+            rclpy.init(args=["--ros-args", "-p", f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            node.action_request_pub = PublisherSpy()
+            self.software_stop(node)
+            self.current_map(node)
+            self.fixture_provider(node)
+            stable = Odometry()
+            stable.header.frame_id = "odom"
+            stable.pose.pose.orientation.w = 1.0
+            node.on_ekf_odom(stable)
+            try:
+                node.on_command(String(data=json.dumps({"command": "save", "mission": {
+                    "id": "inspect", "name": "Inspect", "map_id": "grid-1", "map_version_id": "grid-1",
+                    "steps": [
+                        {"id": "nav-1", "type": "waypoint", "waypoint_id": "wp-1",
+                         "pose": {"x": 1, "y": 2, "z": 0, "w": 1}},
+                        {"id": "detect-1", "type": "inspection_action", "action": "detect",
+                         "detector_types": ["fire_smoke"], "asset_ids": ["asset-1"], "timeout_ms": 5000},
+                    ]}})))
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "inspect"})))
+                self.assertEqual(node.run["status"], "RUNNING")
+                self.assertEqual(node.action_request_pub.messages, [])
+                nav = NavigationStatus()
+                nav.stamp.sec = node.goal_sent_ns // 1000000000
+                nav.stamp.nanosec = node.goal_sent_ns % 1000000000
+                nav.state = NavigationStatus.PLANNING
+                nav.detail = "new goal received; waiting for global plan"
+                node.on_nav(nav)
+                nav.state = NavigationStatus.ARRIVED
+                node.on_nav(nav)
+                node.on_odom(stable)
+                node.on_ekf_odom(stable)
+                node.tick()
+                self.assertEqual(node.action_request_pub.messages, [])
+                time.sleep(0.51)
+                node.on_odom(stable)
+                node.on_ekf_odom(stable)
+                node.tick()
+                self.assertEqual(len(node.action_request_pub.messages), 1)
+                request = json.loads(node.action_request_pub.messages[0].data)
+                self.assertEqual(request["waypoint_id"], "wp-1")
+                self.assertEqual(request["detector_types"], ["fire_smoke"])
+                node.on_inspection_result(String(data=json.dumps({
+                    "schema_version": 1, "result_id": "result-fixture-1", "robot_id": "robot-001",
+                    "mission_id": "inspect", "task_id": node.run["task_id"],
+                    "step_id": "detect-1", "attempt": 1,
+                    "action_run_id": request["action_run_id"], "status": "SUCCEEDED",
+                    "outcome": "INCONCLUSIVE", "source_mode": "fixture",
+                    "observed_at": "2026-10-10T00:00:00Z", "map_id": "grid-1",
+                    "map_version_id": "grid-1", "confidence": None,
+                })))
+                self.assertEqual(node.run["status"], "SUCCEEDED")
+                outbox = node.store.pending_events()
+                self.assertIn("inspection.result", [item["type"] for item in outbox])
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+                if previous_robot_mode is None:
+                    os.environ.pop("ROBOT_MODE", None)
+                else:
+                    os.environ["ROBOT_MODE"] = previous_robot_mode
+
+    def test_inspection_mission_requires_fresh_matching_provider_capability(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            previous_robot_mode = os.environ.get("ROBOT_MODE")
+            os.environ["ROS_LOG_DIR"] = directory
+            os.environ["ROBOT_MODE"] = "simulation"
+            rclpy.init(args=["--ros-args", "-p", f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            try:
+                mission = {"steps": [{"type": "inspection_action", "action": "detect",
+                                      "detector_types": ["fire_smoke"]}]}
+                self.assertIn("capability or heartbeat", node.inspection_mission_block_reason(mission))
+                self.fixture_provider(node)
+                self.assertEqual(node.inspection_mission_block_reason(mission), "")
+                unsupported = {"steps": [{"type": "inspection_action", "action": "detect",
+                                          "detector_types": ["water"]}]}
+                self.assertIn("does not support all", node.inspection_mission_block_reason(unsupported))
+                node.inspection_heartbeat_seen = time.monotonic() - 6
+                self.assertIn("capability or heartbeat", node.inspection_mission_block_reason(mission))
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+                if previous_robot_mode is None:
+                    os.environ.pop("ROBOT_MODE", None)
+                else:
+                    os.environ["ROBOT_MODE"] = previous_robot_mode
 
     def test_motion_commands_fail_closed_on_unknown_or_active_software_stop(self):
         with tempfile.TemporaryDirectory() as directory:

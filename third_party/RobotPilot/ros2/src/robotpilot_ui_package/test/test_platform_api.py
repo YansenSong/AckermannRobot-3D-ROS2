@@ -3,6 +3,7 @@ import sqlite3
 import os
 import json
 import base64
+import math
 import threading
 import time
 import unittest
@@ -35,6 +36,15 @@ class FakeBridge:
             "mission_online": True,
             "mission": {
                 "missions": [{"id": "patrol", "name": "Patrol", "steps": []}],
+                "inspection_provider": {
+                    "online": True, "stale": False, "provider_id": "fixture-provider",
+                    "source_mode": "fixture", "software_version": "fixture-v1",
+                    "actions": [
+                        {"kind": "capture", "supported": True, "detectors": []},
+                        {"kind": "detect", "supported": True, "detectors": ["fire_smoke"]},
+                        {"kind": "broadcast", "supported": True, "detectors": []},
+                    ],
+                },
                 "run": None, "history": [],
                 "schedules": [{
                     "schedule_id": "schedule-1", "name": "Morning", "mission_id": "patrol",
@@ -445,7 +455,7 @@ class PlatformApiTest(unittest.TestCase):
         self.assertIn("version", response.json)
         self.assertIn("commit", response.json)
         self.assertIn("frontend_build", response.json)
-        self.assertEqual(response.json["schema_versions"]["platform"], 3)
+        self.assertEqual(response.json["schema_versions"]["platform"], 7)
         self.assertIsNone(response.json["schema_versions"]["auth"])
         self.assertNotIn("path", response.json)
 
@@ -523,6 +533,22 @@ class PlatformApiTest(unittest.TestCase):
             ["map_metadata_updated", "map_metadata_updated", "map_checksum_version_recorded",
              "map_checksum_version_recorded"],
         )
+
+    def test_map_quality_review_is_bound_to_immutable_server_checksum(self):
+        path = self.base + "/maps/catalog/Campus-A/Office/quality-reviews"
+        checks = {"occupancy_map_reviewed": True, "point_cloud_reviewed": True,
+                  "map_alignment_reviewed": True, "localization_tested": True,
+                  "safety_zones_reviewed": True}
+        submitted = self.client.post(path, json={"checks": checks, "issues": "fixture review"})
+        self.assertEqual(submitted.status_code, 201)
+        self.assertEqual(submitted.json["status"], "SUBMITTED")
+        listing = self.client.get(path).json["reviews"]
+        self.assertEqual(listing[0]["checks"], checks)
+        self.assertTrue(listing[0]["checksum"])
+        decision = self.client.patch(self.base + f"/maps/quality-reviews/{submitted.json['review_id']}",
+                                     json={"status": "APPROVED", "review_note": "reviewed"})
+        self.assertEqual(decision.status_code, 200)
+        self.assertEqual(decision.json["status"], "APPROVED")
 
     def test_map_catalog_rejects_traversal_and_symlinked_image(self):
         detail_path = self.base + "/maps/catalog/Campus-A/Office"
@@ -866,6 +892,225 @@ class PlatformApiTest(unittest.TestCase):
         )))
         self.assertEqual(self.store.faults("robot-001", active_only=True), [])
 
+    def test_s1_result_ingest_is_atomic_and_idempotent(self):
+        result = {
+            "result_id": "result-fixture-1", "action_run_id": "action-1",
+            "task_id": "task-1", "step_id": "step-1", "status": "SUCCEEDED",
+            "outcome": "ABNORMAL", "source_mode": "fixture",
+            "observed_at": "2026-10-10T00:00:00Z", "map_id": "map-a",
+            "map_version_id": "v1", "detector_type": "fire_smoke",
+            "position": {"frame_id": "map", "x": 1.25, "y": -0.5, "yaw": 0.2,
+                         "observed_at": "2026-10-10T00:00:00Z"},
+            "evidence": [{"evidence_id": "evidence-1", "media_type": "image/jpeg",
+                          "checksum": "a" * 64, "size_bytes": 32}],
+        }
+        event = {
+            "schema_version": 1, "event_id": "event-fixture-1", "robot_id": "robot-001",
+            "source": "mission_manager", "source_seq": 1,
+            "type": "inspection.result", "severity": "WARNING",
+            "occurred_at": "2026-10-10T00:00:00Z",
+            "correlation": {"task_id": "task-1", "request_id": None},
+            "payload": result,
+        }
+        self.assertEqual(self.store.ingest_robot_events("robot-001", [event]), 1)
+        self.assertEqual(self.store.ingest_robot_events("robot-001", [event]), 1)
+        self.assertEqual(len(self.client.get(self.base + "/inspection/results").json["results"]), 1)
+        self.assertEqual(len(self.client.get(self.base + "/inspection/alerts").json["alerts"]), 1)
+        alert = self.client.get(self.base + "/inspection/alerts").json["alerts"][0]
+        self.assertEqual(alert["map_id"], "map-a")
+        self.assertEqual(alert["map_version_id"], "v1")
+        self.assertEqual(alert["position"]["frame_id"], "map")
+        self.assertEqual(alert["position"]["x"], 1.25)
+        filtered = self.client.get(self.base + "/inspection/alerts?map_id=map-a&map_version_id=v1")
+        self.assertEqual(len(filtered.json["alerts"]), 1)
+        stale_map = self.client.get(self.base + "/inspection/alerts?map_id=map-a&map_version_id=v2")
+        self.assertEqual(stale_map.json["alerts"], [])
+        self.assertEqual(self.client.get(self.base + "/inspection/alerts?map_id=map-a").status_code, 400)
+        alert_detail = self.client.get(self.base + f"/inspection/alerts/{alert['alert_id']}")
+        self.assertEqual(alert_detail.status_code, 200)
+        self.assertEqual(alert_detail.json["alert"]["alert_id"], alert["alert_id"])
+        self.assertEqual(alert_detail.json["evidence"][0]["evidence_id"], "evidence-1")
+        self.assertNotIn("uri_or_path", alert_detail.json["evidence"][0])
+        self.assertNotIn("result_details_json", alert_detail.json["alert"])
+        ack = self.client.patch(self.base + f"/inspection/alerts/{alert['alert_id']}",
+                                json={"state": "ACKNOWLEDGED", "note": "review started"},
+                                headers={"If-Match": '"1"'})
+        self.assertEqual(ack.status_code, 200)
+        invalid_transition = self.client.patch(self.base + f"/inspection/alerts/{alert['alert_id']}",
+                                               json={"state": "CLOSED"},
+                                               headers={"If-Match": '"2"'})
+        self.assertEqual(invalid_transition.status_code, 409)
+        evidence_response = self.client.get(self.base + "/inspection/evidence/evidence-1")
+        self.assertEqual(evidence_response.status_code, 200)
+        self.assertEqual(evidence_response.json["media_status"], "UNAVAILABLE")
+        self.assertIsNone(evidence_response.json["media_url"])
+        repeated = {**event, "event_id": "event-fixture-2", "source_seq": 2,
+                    "payload": {**result, "result_id": "result-fixture-2", "evidence": []}}
+        self.store.ingest_robot_events("robot-001", [repeated])
+        alert = self.client.get(self.base + "/inspection/alerts").json["alerts"][0]
+        self.assertEqual(alert["occurrence_count"], 2)
+        self.assertEqual(alert["state"], "ACKNOWLEDGED")
+        bad = {**event, "event_id": "event-fixture-3", "source_seq": 3,
+               "payload": {**result, "result_id": "result-fixture-3", "confidence": float("nan")}}
+        with self.assertRaises(ValueError):
+            self.store.ingest_robot_events("robot-001", [bad])
+        unsafe = {**event, "event_id": "event-fixture-4", "source_seq": 4,
+                  "payload": {**result, "result_id": "result-fixture-4",
+                              "evidence": [{"evidence_id": "unsafe", "path": "/private/a.jpg"}]}}
+        with self.assertRaisesRegex(ValueError, "metadata only"):
+            self.store.ingest_robot_events("robot-001", [unsafe])
+        self.assertEqual(len(self.client.get(self.base + "/inspection/results").json["results"]), 2)
+
+    def test_inspection_task_search_filters_mission_manager_history(self):
+        snapshot = self.bridge.snapshot()
+        snapshot["mission"]["run"] = {
+            "task_id": "task-live-001", "mission_id": "inspection-live-001",
+            "mission_name": "West wing patrol", "status": "running", "step_index": 1,
+            "started_at": "2026-10-10T00:00:00Z", "steps": [
+                {"type": "waypoint"}, {"type": "inspection_action"},
+            ], "events": [],
+        }
+        snapshot["mission"]["history"] = [{
+            "task_id": "task-old-001", "mission_id": "inspection-old-001",
+            "mission_name": "North patrol", "status": "FAILED", "step_index": 0,
+            "started_at": "2026-10-08T00:00:00Z", "steps": [{"type": "inspection_action"}],
+            "events": [{"status": "FAILED"}],
+        }, {
+            "task_id": "navigation-001", "mission_id": "navigation-001",
+            "mission_name": "Navigate home", "status": "SUCCEEDED",
+            "started_at": "2026-10-09T00:00:00Z", "steps": [{"type": "waypoint"}],
+        }]
+        self.bridge.snapshot = lambda: snapshot
+        all_tasks = self.client.get(self.base + "/inspection/tasks")
+        self.assertEqual([item["task_id"] for item in all_tasks.json["tasks"]], [
+            "task-live-001", "task-old-001",
+        ])
+        failed = self.client.get(self.base + "/inspection/tasks?status=failed&q=north")
+        self.assertEqual([item["task_id"] for item in failed.json["tasks"]], ["task-old-001"])
+        self.assertEqual(self.client.get(self.base + "/inspection/tasks?status=unknown").status_code, 400)
+
+    def test_asset_waypoint_link_requires_matching_map_versions(self):
+        wp = self.client.post(self.base + "/waypoints", json={
+            "map_id": "simulation/map-a", "name": "Asset Check", "x": 1, "y": 2, "yaw": 0,
+        })
+        self.assertEqual(wp.status_code, 201)
+        asset = self.client.post(self.base + "/assets", json={
+            "map_id": "simulation/map-a", "name": "Cabinet A", "metadata": {"kind": "fire_safety"},
+        })
+        self.assertEqual(asset.status_code, 201)
+        asset_id = asset.json["asset_id"]
+        waypoint_id = wp.json["waypoint_id"]
+        linked = self.client.put(self.base + f"/assets/{asset_id}/waypoints/{waypoint_id}")
+        self.assertEqual(linked.status_code, 201)
+        self.assertEqual(len(self.client.get(self.base + f"/assets/{asset_id}/waypoints").json["waypoints"]), 1)
+        listed_asset = next(item for item in self.client.get(self.base + "/assets").json["assets"]
+                            if item["asset_id"] == asset_id)
+        self.assertEqual(listed_asset["waypoint_ids"], [waypoint_id])
+        self.assertEqual(self.client.delete(self.base + f"/assets/{asset_id}/waypoints/{waypoint_id}").status_code, 204)
+        self.assertEqual(self.client.get(self.base + f"/assets/{asset_id}/waypoints").json["waypoints"], [])
+        self.assertEqual(self.client.put(self.base + f"/assets/{asset_id}/waypoints/{waypoint_id}").status_code, 201)
+        updated = self.client.patch(self.base + f"/assets/{asset_id}",
+                                    json={"name": "Cabinet A", "metadata": {"kind": "fire_safety"}, "active": False},
+                                    headers={"If-Match": '"1"'})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json["revision"], 2)
+        self.assertEqual(self.client.patch(self.base + f"/assets/{asset_id}", json={"name": "stale"},
+                                           headers={"If-Match": '"1"'}).status_code, 412)
+
+    def test_waypoint_action_plan_is_versioned_and_never_executable_without_adapter(self):
+        waypoint = self.client.post(self.base + "/waypoints", json={
+            "map_id": "simulation/map-a", "name": "Action Draft", "x": 0, "y": 0, "yaw": 0,
+        }).json
+        path = self.base + f"/waypoints/{waypoint['waypoint_id']}/action-plan"
+        saved = self.client.put(path, json={"actions": [{"kind": "detect", "timeout_ms": 15000,
+                                                          "detector_types": ["fire_smoke"]}]},
+                                headers={"If-Match": '"0"'})
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json["revision"], 1)
+        self.assertFalse(saved.json["executable"])
+        self.assertEqual(self.client.put(path, json={"actions": []}, headers={"If-Match": '"0"'}).status_code, 412)
+
+    def test_inspection_task_compiles_current_snapshots_and_dispatches_idempotently(self):
+        self.assertTrue(self.client.get(self.base + "/inspection/capabilities").json["online"])
+        waypoint = self.client.post(self.base + "/waypoints", json={
+            "map_id": "simulation/map-a", "name": "Fire Cabinet", "x": 1.5, "y": -2.0, "yaw": 1.0,
+        }).json
+        asset = self.client.post(self.base + "/assets", json={
+            "map_id": "simulation/map-a", "name": "Cabinet A", "metadata": {"kind": "fire_safety"},
+        }).json
+        self.client.put(self.base + f"/assets/{asset['asset_id']}/waypoints/{waypoint['waypoint_id']}")
+        plan_path = self.base + f"/waypoints/{waypoint['waypoint_id']}/action-plan"
+        self.assertEqual(self.client.put(plan_path, json={"actions": [{
+            "kind": "detect", "timeout_ms": 5000, "detector_types": ["fire_smoke"],
+            "parameters": {"camera_id": "front"},
+        }]}, headers={"If-Match": '"0"'}).status_code, 200)
+        headers = {"Idempotency-Key": "inspection-run-0001"}
+        body = {"name": "Cabinet patrol", "waypoint_ids": [waypoint["waypoint_id"]]}
+        result = self.client.post(self.base + "/inspection/tasks", json=body, headers=headers)
+        self.assertEqual(result.status_code, 202)
+        self.assertEqual(result.json["status"], "accepted")
+        self.assertEqual(len(self.bridge.calls), 2)
+        mission = self.bridge.calls[0][0]["mission"]
+        self.assertEqual(mission["map_version_id"], "simulation/map-a")
+        self.assertEqual(mission["steps"][0]["waypoint_id"], waypoint["waypoint_id"])
+        self.assertAlmostEqual(mission["steps"][0]["pose"]["z"], math.sin(0.5))
+        self.assertEqual(mission["steps"][1]["type"], "inspection_action")
+        self.assertEqual(mission["steps"][1]["asset_ids"], [asset["asset_id"]])
+        self.assertEqual(mission["steps"][1]["parameters"], {"camera_id": "front"})
+        duplicate = self.client.post(self.base + "/inspection/tasks", json=body, headers=headers)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(duplicate.json["mission_id"], result.json["mission_id"])
+        self.assertEqual(len(self.bridge.calls), 2)
+        changed = self.client.post(self.base + "/inspection/tasks",
+                                   json={**body, "name": "Changed"}, headers=headers)
+        self.assertEqual(changed.status_code, 409)
+
+    def test_inspection_template_compiles_offline_and_can_be_scheduled(self):
+        waypoint = self.client.post(self.base + "/waypoints", json={
+            "map_id": "simulation/map-a", "name": "Template Point", "x": 1, "y": 2, "yaw": 0,
+        }).json
+        plan_path = self.base + f"/waypoints/{waypoint['waypoint_id']}/action-plan"
+        self.assertEqual(self.client.put(plan_path, json={"actions": [{
+            "kind": "capture", "timeout_ms": 5000,
+        }]}, headers={"If-Match": '"0"'}).status_code, 200)
+        snapshot = self.bridge.snapshot()
+        snapshot["pose_online"] = False
+        snapshot["mission"]["inspection_provider"] = {"online": False, "stale": True, "actions": []}
+        self.bridge.snapshot = lambda: snapshot
+        compiled = self.client.post(self.base + "/inspection/tasks", json={
+            "name": "Daily template", "waypoint_ids": [waypoint["waypoint_id"]], "compile_only": True,
+        }, headers={"Idempotency-Key": "inspection-template-0001"})
+        self.assertEqual(compiled.status_code, 201)
+        self.assertEqual(compiled.json["status"], "compiled")
+        self.assertEqual([call[0]["command"] for call in self.bridge.calls], ["save"])
+        mission = self.bridge.calls[0][0]["mission"]
+        self.assertEqual(mission["id"], compiled.json["mission_id"])
+        self.assertEqual(mission["steps"][1]["type"], "inspection_action")
+        scheduled = self.client.post(self.base + "/schedules", json={
+            "schedule": {"name": "Daily template", "mission_id": compiled.json["mission_id"]},
+        }, headers={"Idempotency-Key": "inspection-template-schedule-01"})
+        self.assertEqual(scheduled.status_code, 202)
+        self.assertEqual(self.bridge.calls[-1][0]["command"], "schedule.save")
+
+    def test_inspection_task_blocks_without_fresh_capabilities(self):
+        waypoint = self.client.post(self.base + "/waypoints", json={
+            "map_id": "simulation/map-a", "name": "Blocked", "x": 0, "y": 0, "yaw": 0,
+        }).json
+        self.client.put(self.base + f"/waypoints/{waypoint['waypoint_id']}/action-plan",
+                        json={"actions": [{"kind": "capture", "timeout_ms": 1000}]},
+                        headers={"If-Match": '"0"'})
+        fake = FakeBridge()
+        fake_snapshot = fake.snapshot()
+        fake_snapshot["mission"]["inspection_provider"] = {
+            "online": False, "stale": True, "actions": [],
+        }
+        self.bridge.snapshot = lambda: fake_snapshot
+        result = self.client.post(self.base + "/inspection/tasks",
+                                  json={"waypoint_ids": [waypoint["waypoint_id"]]},
+                                  headers={"Idempotency-Key": "inspection-block-01"})
+        self.assertEqual(result.status_code, 503)
+        self.assertEqual(self.bridge.calls, [])
+
     def test_waypoints_are_persistent_robot_scoped_and_revision_checked(self):
         body = {
             "map_id": "simulation/map-a", "name": "Inspection A", "x": 1.25,
@@ -933,7 +1178,7 @@ class PlatformApiTest(unittest.TestCase):
         self.assertIsNone(migrated["valid_from"])
         self.assertIsNone(migrated["valid_until"])
         with sqlite3.connect(legacy_path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 7)
             tables = {row[0] for row in db.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )}
@@ -943,13 +1188,13 @@ class PlatformApiTest(unittest.TestCase):
     def test_platform_database_rejects_future_schema_before_mutation(self):
         future_path = str(Path(self.directory.name) / "future-platform.sqlite3")
         with sqlite3.connect(future_path) as db:
-            db.execute("PRAGMA user_version = 4")
+            db.execute("PRAGMA user_version = 8")
         os.chmod(future_path, 0o644)
         with self.assertRaisesRegex(RuntimeError, "schema is newer"):
             PlatformStore(future_path)
         self.assertEqual(Path(future_path).stat().st_mode & 0o777, 0o644)
         with sqlite3.connect(future_path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
 
     def test_waypoint_payload_rejects_invalid_values_duplicate_and_unsupported_action(self):
         body = {"map_id": "simulation/map-a", "name": "A", "x": 0, "y": 0, "yaw": 0}

@@ -28,7 +28,9 @@ import { INSPECTION_PROFILE } from "../shared/robot/robotContract";
 import { useT, T } from "../shared/i18n/i18n";
 import useSoftwareStop from "../shared/hooks/useSoftwareStop";
 import useMissionRun from "../shared/hooks/useMissionRun";
+import useRobotStatus from "../shared/hooks/useRobotStatus";
 import { startOneOffMission } from "../shared/missions/taskApi";
+import { apiFetch } from "../shared/api/apiFetch";
 
 const INITIAL_POSE_COV = [
   0.25, 0, 0, 0, 0, 0, 0, 0.25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -41,6 +43,7 @@ const MapPage = () => {
   const { config } = useRuntimeConfig();
   const { robotId, robotMode } = useContext(AuthContext);
   const activeMission = useMissionRun();
+  const robotStatus = useRobotStatus();
   const missionIsActive = ["running", "paused"].includes(activeMission?.status);
   const { t } = useT();
   const navigationAccess = useRoleAccess("Operator");
@@ -79,6 +82,52 @@ const MapPage = () => {
     );
   };
   const mapRef = useRef(null);
+  const [businessAlerts, setBusinessAlerts] = useState([]);
+  const alertMapId = robotStatus.snapshot?.current_map?.map_id || "";
+  const alertMapVersionId = robotStatus.snapshot?.current_map?.map_version_id || "";
+
+  useEffect(() => {
+    if (!INSPECTION_PROFILE) return undefined;
+    if (!alertMapId || !alertMapVersionId || robotStatus.stale) {
+      setBusinessAlerts([]);
+      window.NAV2D?.setInspectionAlerts?.([]);
+      return undefined;
+    }
+    let active = true;
+    const refresh = async () => {
+      const query = new URLSearchParams({ map_id: alertMapId, map_version_id: alertMapVersionId });
+      try {
+        const response = await apiFetch(
+          `/api/v1/robots/${encodeURIComponent(robotId || "")}/inspection/alerts?${query}`,
+        );
+        const payload = await response.json();
+        if (active) {
+          const nextAlerts = payload.alerts || [];
+          setBusinessAlerts(nextAlerts);
+          window.NAV2D?.setInspectionAlerts?.(nextAlerts);
+        }
+      } catch {
+        // Keep the last version-matched pins visible while the alert API is unavailable.
+      }
+    };
+    setBusinessAlerts([]);
+    window.NAV2D?.setInspectionAlerts?.([]);
+    refresh();
+    const timer = window.setInterval(refresh, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.NAV2D?.setInspectionAlerts?.([]);
+    };
+  }, [alertMapId, alertMapVersionId, robotId, robotStatus.stale]);
+
+  useEffect(() => {
+    if (!INSPECTION_PROFILE || !window.NAV2D) return undefined;
+    window.NAV2D._inspectionAlertClickCallback = (alertId) => {
+      window.location.href = `/inspection?alert_id=${encodeURIComponent(alertId)}`;
+    };
+    return () => { window.NAV2D._inspectionAlertClickCallback = null; };
+  }, []);
 
   // mode: null | 'goal' | 'pose' | 'waypoint'
   const [mode, setModeState] = useState(null);
@@ -691,11 +740,17 @@ const MapPage = () => {
       <div className="flex min-h-[calc(100vh-145px)] min-w-0 flex-col gap-3 py-3">
         {!INSPECTION_PROFILE && <SystemAlerts />}
         {INSPECTION_PROFILE && (
-          <p className="dashboard-card p-3 text-sm text-statusYellow">
-            {t(
-              "Project navigation and localization interfaces are unconfigured. Status: UNKNOWN.",
-            )}
-          </p>
+          <section aria-label="运行总览" className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <div className="dashboard-card p-3"><p className="text-xs text-themeTextGray">机器人</p><strong>{robotStatus.snapshot?.robot_connection?.online ? "在线" : "离线/未知"}</strong><p className="text-xs">{robotStatus.stale ? "状态数据已过期" : robotStatus.snapshot?.robot_connection?.source || robotMode}</p></div>
+            <div className="dashboard-card p-3"><p className="text-xs text-themeTextGray">任务</p><strong>{robotStatus.snapshot?.task?.status || "空闲/未知"}</strong><p className="text-xs">{robotStatus.snapshot?.task?.taskId || robotStatus.snapshot?.task?.task_id || "无当前任务"}</p>{robotStatus.snapshot?.task?.active_action && <p className="mt-1 text-xs text-themeBlue">{robotStatus.snapshot.task.active_action.kind} · {robotStatus.snapshot.task.active_action.status}</p>}</div>
+            <div className="dashboard-card p-3"><p className="text-xs text-themeTextGray">电量</p><strong>{robotStatus.snapshot?.battery?.available && robotStatus.snapshot?.battery?.percent != null ? `${robotStatus.snapshot.battery.percent}%` : "未知"}</strong><p className="text-xs">{robotStatus.snapshot?.battery?.source || "unavailable"}</p></div>
+            <div className="dashboard-card p-3"><p className="text-xs text-themeTextGray">地图与安全</p><strong>{robotStatus.snapshot?.current_map?.map_id || "地图未知"}</strong><p className="text-xs">{robotStatus.snapshot?.autonomy_ready ? "安全门禁就绪" : "门禁未确认"}</p></div>
+            <div className="dashboard-card p-3"><p className="text-xs text-themeTextGray">地图内业务告警</p><strong>{robotStatus.stale ? "未知" : businessAlerts.filter((item) => item.state !== "CLOSED").length}</strong><p className="truncate text-xs">{robotStatus.stale ? "地图状态过期" : businessAlerts[0]?.category || "暂无当前版本告警"}</p></div>
+            <div className="col-span-2 flex items-center justify-between rounded-lg border border-statusYellow/40 bg-statusYellow/5 p-3 text-xs text-statusYellow sm:col-span-5">
+              <span>{robotStatus.error || (robotStatus.stale ? "运行状态过期或不可用；卡片不代表实时状态。" : `运行模式：${robotMode || "unknown"}。物理急停状态未由该接口确认。`)}</span>
+              <a className="shrink-0 underline" href="/inspection">查看巡检结果与告警</a>
+            </div>
+          </section>
         )}
         <MapLayers />
 

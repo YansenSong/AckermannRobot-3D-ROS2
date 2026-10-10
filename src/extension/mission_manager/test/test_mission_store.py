@@ -10,6 +10,44 @@ from mission_manager.store import MissionStore
 
 
 class MissionStoreTest(unittest.TestCase):
+    def test_inspection_action_step_is_whitelisted_and_fully_validated(self):
+        mission = validated_mission({
+            "id": "inspect", "name": "Fixture inspection", "map_id": "map-1",
+            "map_version_id": "map-v1", "steps": [
+                {"type": "waypoint", "waypoint_id": "wp-1", "pose": {"x": 1, "y": 2}},
+                {"type": "inspection_action", "action": "detect", "detector_types": ["fire_smoke"],
+                 "asset_ids": ["asset-1"], "timeout_ms": 5000, "parameters": {"camera_id": "front"}},
+            ],
+        })
+        action = mission["steps"][1]
+        self.assertEqual(action["type"], "inspection_action")
+        self.assertEqual(action["detector_types"], ["fire_smoke"])
+        with self.assertRaisesRegex(ValueError, "unsupported inspection action"):
+            validated_mission({"id": "bad", "name": "Bad", "steps": [
+                {"type": "inspection_action", "action": "publish_topic", "timeout_ms": 1000},
+            ]})
+        with self.assertRaisesRegex(ValueError, "detector type"):
+            validated_mission({"id": "bad", "name": "Bad", "steps": [
+                {"type": "inspection_action", "action": "detect", "timeout_ms": 1000},
+            ]})
+
+    def test_late_inspection_receipt_is_durable_and_deduplicated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "late.sqlite3")
+            store = MissionStore(path, "robot-001")
+            receipt = {"result_id": "result-late", "action_run_id": "action-late",
+                       "task_id": "task-late", "mission_id": "mission-late",
+                       "observed_at": "2026-10-10T00:00:00Z", "source_mode": "fixture",
+                       "outcome": "INCONCLUSIVE"}
+            event_id = store.record_late_inspection_result(receipt)
+            self.assertEqual(store.record_late_inspection_result(receipt), event_id)
+            self.assertEqual(store.outbox_status()["pending_count"], 1)
+            self.assertEqual(store.pending_events()[0]["type"], "inspection.result.late")
+            store.close()
+            reopened = MissionStore(path, "robot-001")
+            self.assertEqual(reopened.pending_events()[0]["payload"]["late"], True)
+            reopened.close()
+
     def test_command_claim_replays_ack_and_conflicting_body_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "commands.sqlite3")

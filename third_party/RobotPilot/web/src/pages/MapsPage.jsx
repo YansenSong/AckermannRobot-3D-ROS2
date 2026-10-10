@@ -13,6 +13,7 @@ import {
 } from "../shared/ui/Dashboard";
 import { useT } from "../shared/i18n/i18n";
 import { useRoleAccess } from "../shared/auth/roleAccess";
+import MapQualityReviewPanel from "../components/MapQualityReviewPanel";
 
 // 传输时用下划线代替空格；UI 中显示为空格。
 const toWire = (s) =>
@@ -508,6 +509,7 @@ const MapsPage = () => {
           </div>
         )}
       </DashboardCard>
+      <MapQualityReviewPanel group={toWire(active.group)} map={toWire(active.map)} />
     </div>
   );
 };

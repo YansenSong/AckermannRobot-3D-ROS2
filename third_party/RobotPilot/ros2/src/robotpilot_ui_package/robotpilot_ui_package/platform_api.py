@@ -37,7 +37,7 @@ from .log_maintenance import prune_expired_logs
 from .route_tasks import list_saved_routes, route_mission
 from .storage_monitor import storage_report
 
-PLATFORM_SCHEMA_VERSION = 3
+PLATFORM_SCHEMA_VERSION = 7
 
 try:
     from ament_index_python.packages import get_package_share_directory
@@ -51,6 +51,33 @@ def utc_now():
 
 def json_hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def inspection_alert_payload(row):
+    """Expose alert metadata and only a validated map-frame location."""
+    item = dict(row)
+    details_json = item.pop("result_details_json", None)
+    try:
+        details = json.loads(details_json) if details_json else {}
+    except (TypeError, ValueError):
+        details = {}
+    position = details.get("position") if isinstance(details, dict) else None
+    valid_position = (
+        isinstance(position, dict)
+        and isinstance(position.get("frame_id"), str)
+        and position["frame_id"].lstrip("/") == "map"
+        and isinstance(position.get("x"), (int, float)) and not isinstance(position.get("x"), bool)
+        and math.isfinite(position.get("x"))
+        and isinstance(position.get("y"), (int, float)) and not isinstance(position.get("y"), bool)
+        and math.isfinite(position.get("y"))
+        and isinstance(details.get("map_id"), str) and details["map_id"]
+        and isinstance(details.get("map_version_id"), str) and details["map_version_id"]
+    )
+    if valid_position:
+        item.update({"map_id": details["map_id"], "map_version_id": details["map_version_id"],
+                     "position": {key: position[key] for key in ("frame_id", "x", "y", "yaw", "observed_at")
+                                  if key in position}})
+    return item
 
 
 def battery_config_payload(config):
@@ -267,6 +294,7 @@ class PlatformStore:
                     metadata_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
                     PRIMARY KEY (robot_id, asset_id)
                 );
                 CREATE INDEX IF NOT EXISTS assets_map ON assets(robot_id, map_id, map_version_id);
@@ -299,6 +327,62 @@ class PlatformStore:
                 );
                 CREATE INDEX IF NOT EXISTS event_evidence_event
                     ON event_evidence(robot_id, event_id);
+                CREATE TABLE IF NOT EXISTS inspection_alerts (
+                    robot_id TEXT NOT NULL,
+                    alert_id TEXT NOT NULL,
+                    inspection_result_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'OPEN',
+                    note TEXT NOT NULL DEFAULT '',
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,
+                    occurrence_count INTEGER NOT NULL DEFAULT 1,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    updated_by TEXT,
+                    PRIMARY KEY (robot_id, alert_id)
+                );
+                CREATE INDEX IF NOT EXISTS inspection_alerts_recent
+                    ON inspection_alerts(robot_id, last_seen DESC);
+                CREATE TABLE IF NOT EXISTS waypoint_action_plans (
+                    robot_id TEXT NOT NULL,
+                    waypoint_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    actions_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (robot_id, waypoint_id)
+                );
+                CREATE TABLE IF NOT EXISTS asset_waypoints (
+                    robot_id TEXT NOT NULL,
+                    asset_id TEXT NOT NULL,
+                    waypoint_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    PRIMARY KEY (robot_id, asset_id, waypoint_id),
+                    FOREIGN KEY (robot_id, asset_id) REFERENCES assets(robot_id, asset_id),
+                    FOREIGN KEY (robot_id, waypoint_id) REFERENCES waypoints(robot_id, waypoint_id)
+                );
+                CREATE INDEX IF NOT EXISTS asset_waypoints_waypoint
+                    ON asset_waypoints(robot_id, waypoint_id);
+                CREATE TABLE IF NOT EXISTS map_quality_reviews (
+                    robot_id TEXT NOT NULL,
+                    review_id TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    map_name TEXT NOT NULL,
+                    version_id TEXT NOT NULL,
+                    checksum TEXT NOT NULL,
+                    checks_json TEXT NOT NULL,
+                    issues TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'SUBMITTED',
+                    submitted_by TEXT NOT NULL,
+                    reviewed_by TEXT,
+                    review_note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    reviewed_at TEXT,
+                    PRIMARY KEY (robot_id, review_id)
+                );
+                CREATE INDEX IF NOT EXISTS map_quality_reviews_map
+                    ON map_quality_reviews(robot_id, group_name, map_name, created_at DESC);
                 CREATE TABLE IF NOT EXISTS device_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     robot_id TEXT NOT NULL,
@@ -367,6 +451,9 @@ class PlatformStore:
             waypoint_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(waypoints)")
             }
+            asset_columns = {row["name"] for row in db.execute("PRAGMA table_info(assets)")}
+            if "revision" not in asset_columns:
+                db.execute("ALTER TABLE assets ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
             for column, declaration in (
                 ("point_type", "TEXT NOT NULL DEFAULT 'inspection'"),
                 ("source", "TEXT NOT NULL DEFAULT 'operator'"),
@@ -505,6 +592,7 @@ class PlatformStore:
         for event in events:
             if not isinstance(event, dict) or event.get("schema_version") != 1:
                 raise ValueError("unsupported robot event schema")
+            event = copy.deepcopy(event)
             if event.get("robot_id") != robot_id:
                 raise ValueError("robot event belongs to a different robot")
             seq = event.get("source_seq")
@@ -516,6 +604,8 @@ class PlatformStore:
             event_id = event.get("event_id")
             source = event.get("source")
             event_type = event.get("type")
+            if event_type == "inspection.result":
+                event["payload"] = self._sanitize_inspection_payload(event.get("payload"))
             occurred_at = event.get("occurred_at")
             if not isinstance(event_id, str) or not isinstance(source, str) or not isinstance(event_type, str):
                 raise ValueError("robot event identity is invalid")
@@ -577,8 +667,113 @@ class PlatformStore:
                      occurred_at, encoded, utc_now()),
                 )
                 self._append_event(db, robot_id, "robot_event", event)
+                if event_type == "inspection.result":
+                    self._ingest_inspection_result(db, robot_id, event)
                 last_committed_seq = seq
         return prepared[-1][2]
+
+    @staticmethod
+    def _sanitize_inspection_payload(result):
+        allowed = {"schema_version", "provider_id", "result_id", "robot_id", "mission_id", "task_id",
+                   "step_id", "attempt", "action_run_id", "status", "outcome", "detector_type",
+                   "confidence", "observed_at", "source_mode", "model_version", "map_id",
+                   "map_version_id", "waypoint_id", "asset_ids", "position", "classifications",
+                   "evidence", "fixture_scenario", "reason_code"}
+        if not isinstance(result, dict) or set(result) - allowed:
+            raise ValueError("inspection result contains unsupported fields")
+        evidence = result.get("evidence", [])
+        if not isinstance(evidence, list):
+            raise ValueError("inspection evidence must be a list")
+        evidence_fields = {"evidence_id", "media_type", "checksum", "size_bytes"}
+        for item in evidence:
+            if not isinstance(item, dict) or set(item) - evidence_fields:
+                raise ValueError("inspection evidence may contain metadata only")
+        position = result.get("position")
+        if position is not None and (not isinstance(position, dict)
+                                     or set(position) - {"frame_id", "x", "y", "yaw", "observed_at"}):
+            raise ValueError("inspection position metadata is invalid")
+        classifications = result.get("classifications", [])
+        if not isinstance(classifications, list) or len(classifications) > 100:
+            raise ValueError("inspection classifications are invalid")
+        classification_fields = {"detector_type", "label", "class_id", "value", "confidence"}
+        if any(not isinstance(item, dict) or set(item) - classification_fields for item in classifications):
+            raise ValueError("inspection classifications contain unsupported fields")
+        if result.get("reason_code") not in (None, "PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT", "PROVIDER_FAILED", "PROVIDER_REJECTED"):
+            raise ValueError("inspection reason_code is invalid")
+        return result
+
+    @staticmethod
+    def _ingest_inspection_result(db, robot_id, event):
+        result = PlatformStore._sanitize_inspection_payload(event.get("payload"))
+        if not isinstance(result, dict):
+            raise ValueError("inspection result payload must be an object")
+        required = ("result_id", "action_run_id", "task_id", "step_id", "status",
+                    "outcome", "source_mode", "observed_at", "map_id", "map_version_id")
+        if any(not isinstance(result.get(key), str) or not result[key] for key in required):
+            raise ValueError("inspection result identity is incomplete")
+        if result["source_mode"] not in ("fixture", "simulation", "hardware"):
+            raise ValueError("invalid inspection source_mode")
+        if result["status"] not in ("SUCCEEDED", "FAILED", "UNAVAILABLE", "TIMEOUT"):
+            raise ValueError("invalid inspection action status")
+        if result["outcome"] not in ("NORMAL", "ABNORMAL", "INCONCLUSIVE", "NOT_APPLICABLE"):
+            raise ValueError("invalid inspection outcome")
+        if result["status"] != "SUCCEEDED" and result["outcome"] != "NOT_APPLICABLE":
+            raise ValueError("failed actions cannot have a detection outcome")
+        stamp = datetime.fromisoformat(result["observed_at"].replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            raise ValueError("inspection observed_at needs timezone")
+        confidence = result.get("confidence")
+        if confidence is not None and (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+                                       or not math.isfinite(confidence) or not 0 <= confidence <= 1):
+            raise ValueError("inspection confidence must be in [0,1] or null")
+        if result.get("robot_id", robot_id) != robot_id or result["task_id"] != event["correlation"].get("task_id"):
+            raise ValueError("inspection result correlation mismatch")
+        evidence = result.get("evidence", [])
+        if not isinstance(evidence, list) or len(evidence) > 20:
+            raise ValueError("inspection evidence list is invalid")
+        for item in evidence:
+            if not isinstance(item, dict):
+                raise ValueError("inspection evidence metadata is invalid")
+            evidence_id = item.get("evidence_id")
+            media_type = item.get("media_type")
+            checksum = item.get("checksum")
+            size_bytes = item.get("size_bytes")
+            if (not isinstance(evidence_id, str) or not 1 <= len(evidence_id) <= 128
+                    or media_type not in ("image/jpeg", "image/png", "image/webp", "video/mp4")
+                    or not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", checksum)
+                    or isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or not 0 <= size_bytes <= 100 * 1024 * 1024):
+                raise ValueError("inspection evidence metadata is invalid")
+        db.execute(
+            """INSERT INTO inspection_results(robot_id,inspection_result_id,asset_id,mission_id,
+               task_id,waypoint_id,outcome,source,occurred_at,details_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (robot_id, result["result_id"], (result.get("asset_ids") or [None])[0],
+             result.get("mission_id"), result["task_id"], result.get("waypoint_id"),
+             result["outcome"], result["source_mode"], result["observed_at"],
+             json.dumps(result, allow_nan=False, separators=(",", ":"))),
+        )
+        for item in evidence:
+            db.execute(
+                """INSERT INTO event_evidence(robot_id,evidence_id,event_id,inspection_result_id,
+                   media_type,uri_or_path,checksum,available,recorded_at) VALUES (?,?,?,?,?,?,?,0,?)""",
+                (robot_id, item["evidence_id"], event["event_id"], result["result_id"],
+                 item["media_type"], None, item["checksum"].lower(), result["observed_at"]),
+            )
+        if result["outcome"] == "ABNORMAL":
+            category = result.get("detector_type") or "other"
+            asset_ids = result.get("asset_ids") or []
+            fingerprint = json_hash({"category": category, "map_id": result["map_id"],
+                                     "map_version_id": result["map_version_id"], "asset_ids": sorted(asset_ids)})
+            alert_id = "alert-" + fingerprint[:40]
+            db.execute(
+                """INSERT INTO inspection_alerts(robot_id,alert_id,inspection_result_id,category,
+                   severity,first_seen,last_seen,occurrence_count) VALUES (?,?,?,?,?,?,?,1)
+                   ON CONFLICT(robot_id,alert_id) DO UPDATE SET
+                   inspection_result_id=excluded.inspection_result_id,last_seen=excluded.last_seen,
+                   occurrence_count=inspection_alerts.occurrence_count+1""",
+                (robot_id, alert_id, result["result_id"], category, "WARNING",
+                 result["observed_at"], result["observed_at"]),
+            )
 
     def robot_event_history(self, robot_id, *, limit=100, before=None,
                             event_type=None, severity=None, task_id=None,
@@ -1492,14 +1687,14 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
             "valid_from": valid_from, "valid_until": valid_until, "enabled": enabled,
         }
 
-    def expected_revision():
+    def expected_revision(allow_zero=False):
         value = request.headers.get("If-Match", "").strip().strip('"')
         try:
             revision = int(value)
         except ValueError:
             abort(428, "If-Match with the current waypoint revision is required.")
-        if revision < 1:
-            abort(400, "If-Match must contain a positive revision.")
+        if revision < (0 if allow_zero else 1):
+            abort(400, "If-Match contains an invalid revision.")
         return revision
 
     def ensure_current_map(robot_id, map_id):
@@ -1511,9 +1706,9 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
             abort(409, "Waypoint map_id does not match the robot's current 2D map.")
         return identity
 
-    def dispatch(robot_id, action, command):
+    def dispatch(robot_id, action, command, idempotency_key=None):
         bridge = bridge_or_503()
-        key = request.headers.get("Idempotency-Key", "")
+        key = idempotency_key if idempotency_key is not None else request.headers.get("Idempotency-Key", "")
         if not 8 <= len(key) <= 128:
             abort(400, "Idempotency-Key must be 8–128 characters.")
         body_hash = json_hash({"path": request.path, "command": command})
@@ -1659,6 +1854,67 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
         )
         return jsonify({"version": version, "created": True}), 201
 
+    @app.get(prefix + "/maps/catalog/<group_name>/<map_name>/quality-reviews")
+    @require_role("Viewer")
+    def platform_map_quality_reviews(robot_id, group_name, map_name):
+        map_asset_manifest(group_name, map_name)
+        with store.connect() as db:
+            rows = db.execute("""SELECT * FROM map_quality_reviews WHERE robot_id=? AND group_name=? AND map_name=?
+                ORDER BY created_at DESC LIMIT 100""", (robot_id, group_name, map_name)).fetchall()
+        return jsonify({"reviews": [{**dict(row), "checks": json.loads(row["checks_json"])} for row in rows]})
+
+    @app.post(prefix + "/maps/catalog/<group_name>/<map_name>/quality-reviews")
+    @require_role("Engineer")
+    def platform_submit_map_quality_review(robot_id, group_name, map_name):
+        manifest, checksum = map_asset_manifest(group_name, map_name)
+        body = request.get_json(silent=True)
+        checks = body.get("checks") if isinstance(body, dict) else None
+        issues = body.get("issues", "") if isinstance(body, dict) else ""
+        required_checks = {"occupancy_map_reviewed", "point_cloud_reviewed", "map_alignment_reviewed",
+                           "localization_tested", "safety_zones_reviewed"}
+        if not isinstance(checks, dict) or set(checks) != required_checks or any(not isinstance(v, bool) for v in checks.values()):
+            abort(400, "Map quality checks must include every required boolean check.")
+        if not isinstance(issues, str) or len(issues) > 4000:
+            abort(400, "Map quality issues must be at most 4000 characters.")
+        version_id = f"sha256:{checksum}"
+        version = next((item for item in store.map_versions(robot_id, group_name, map_name) if item["checksum"] == checksum), None)
+        if not version:
+            metadata = store.map_metadata(robot_id, group_name, map_name) or {}
+            version = store.record_map_version(robot_id, group_name, map_name, version_id,
+                                               checksum, manifest, metadata, g.identity["username"])
+        review_id = str(uuid.uuid4())
+        with store.connect() as db:
+            db.execute("""INSERT INTO map_quality_reviews(robot_id,review_id,group_name,map_name,
+                version_id,checksum,checks_json,issues,submitted_by,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (robot_id, review_id, group_name, map_name, version_id, checksum,
+                 json.dumps(checks, sort_keys=True), issues.strip(), g.identity["username"], utc_now()))
+            store._append_event(db, robot_id, "map_quality_review_submitted", {
+                "review_id": review_id, "group": group_name, "map": map_name,
+                "version_id": version_id, "actor": g.identity["username"],
+            })
+        return jsonify({"review_id": review_id, "version_id": version_id,
+                        "checks": checks, "status": "SUBMITTED"}), 201
+
+    @app.patch(prefix + "/maps/quality-reviews/<review_id>")
+    @require_role("Admin")
+    def platform_review_map_quality(robot_id, review_id):
+        body = request.get_json(silent=True)
+        status = body.get("status") if isinstance(body, dict) else None
+        note = body.get("review_note", "") if isinstance(body, dict) else ""
+        if status not in ("APPROVED", "REJECTED") or not isinstance(note, str) or len(note) > 2000:
+            abort(400, "A valid review status and note are required.")
+        with store.connect() as db:
+            changed = db.execute("""UPDATE map_quality_reviews SET status=?,reviewed_by=?,review_note=?,reviewed_at=?
+                WHERE robot_id=? AND review_id=? AND status='SUBMITTED'""",
+                (status, g.identity["username"], note, utc_now(), robot_id, review_id)).rowcount
+            if not changed:
+                abort(404, "Pending map quality review not found.")
+            store._append_event(db, robot_id, "map_quality_review_decided", {
+                "review_id": review_id, "status": status, "actor": g.identity["username"],
+            })
+        return jsonify({"review_id": review_id, "status": status, "reviewed_by": g.identity["username"]})
+
     @app.get(prefix + "/status")
     @require_role("Viewer")
     def platform_status(robot_id):
@@ -1711,6 +1967,10 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
             },
             "navigation": {**(snapshot["navigation"] or {}), "stale": not snapshot["navigation_online"]},
             "task": mission.get("run"), "task_stale": not snapshot["mission_online"],
+            "inspection_provider": (
+                mission.get("inspection_provider", {"online": False, "stale": True, "actions": []})
+                if snapshot["mission_online"] else {"online": False, "stale": True, "actions": []}
+            ),
             "event_sync": mission.get("event_sync") if snapshot["mission_online"] else None,
             "fault_counts": {
                 "active": len(store.faults(robot_id, active_only=True)),
@@ -1722,6 +1982,18 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
                 ),
             },
         })
+
+    @app.get(prefix + "/inspection/capabilities")
+    @require_role("Viewer")
+    def s1_inspection_capabilities(robot_id):
+        snapshot = bridge_or_503().snapshot()
+        if not snapshot.get("mission_online"):
+            return jsonify({"online": False, "stale": True, "actions": [],
+                            "reason": "MissionManager status is unavailable."}), 503
+        provider = (snapshot.get("mission") or {}).get(
+            "inspection_provider", {"online": False, "stale": True, "actions": []}
+        )
+        return jsonify(provider)
 
     @app.post(prefix + "/battery/scenario")
     @require_role("Engineer")
@@ -2553,3 +2825,555 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
             path, module_name, datetime.fromtimestamp(stat.st_mtime, timezone.utc)
         )
         return send_file(path, as_attachment=True, download_name=download_name)
+
+    @app.get(prefix + "/assets")
+    @require_role("Viewer")
+    def s1_assets(robot_id):
+        map_id = request.args.get("map_id")
+        with store.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM assets WHERE robot_id=? AND (? IS NULL OR map_id=?) ORDER BY name LIMIT 200",
+                (robot_id, map_id, map_id),
+            ).fetchall()
+            assets = [{**dict(row), "metadata": json.loads(row["metadata_json"])} for row in rows]
+            for asset in assets:
+                links = db.execute(
+                    "SELECT waypoint_id FROM asset_waypoints WHERE robot_id=? AND asset_id=? ORDER BY waypoint_id",
+                    (robot_id, asset["asset_id"]),
+                ).fetchall()
+                asset["waypoint_ids"] = [link["waypoint_id"] for link in links]
+        return jsonify({"assets": assets})
+
+    @app.post(prefix + "/assets")
+    @require_role("Engineer")
+    def s1_create_asset(robot_id):
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get("name"), str) or not 1 <= len(body["name"].strip()) <= 100:
+            abort(400, "Asset name is required (1–100 characters).")
+        if not isinstance(body.get("map_id"), str) or not body["map_id"]:
+            abort(400, "Asset map_id is required.")
+        metadata = body.get("metadata", {})
+        try:
+            metadata_size = len(json.dumps(metadata, allow_nan=False))
+        except (TypeError, ValueError):
+            metadata_size = 8193
+        if not isinstance(metadata, dict) or metadata_size > 8192:
+            abort(400, "Asset metadata must be a small object.")
+        identity = ensure_current_map(robot_id, body["map_id"])
+        asset_id = str(uuid.uuid4())
+        now = utc_now()
+        with store.connect() as db:
+            db.execute(
+                "INSERT INTO assets(robot_id,asset_id,map_id,map_version_id,name,metadata_json,created_at,updated_at,revision) VALUES (?,?,?,?,?,?,?,?,1)",
+                (robot_id, asset_id, body["map_id"], identity.get("map_version_id"), body["name"].strip(),
+                 json.dumps(metadata, allow_nan=False), now, now),
+            )
+        return jsonify({"asset_id": asset_id, "map_id": body["map_id"], "map_version_id": identity.get("map_version_id"), "revision": 1}), 201
+
+    @app.patch(prefix + "/assets/<asset_id>")
+    @require_role("Engineer")
+    def s1_update_asset(robot_id, asset_id):
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or set(body) - {"name", "metadata", "map_id", "active"}:
+            abort(400, "Unsupported asset fields")
+        with store.connect() as db:
+            row = db.execute("SELECT * FROM assets WHERE robot_id=? AND asset_id=?", (robot_id, asset_id)).fetchone()
+        if not row:
+            abort(404, "Asset not found")
+        revision = expected_revision()
+        if revision != row["revision"]:
+            abort(412, "Asset revision changed; reload before editing.")
+        current_metadata = json.loads(row["metadata_json"])
+        merged_meta = body.get("metadata", current_metadata)
+        try:
+            metadata_size = len(json.dumps(merged_meta, allow_nan=False))
+        except (TypeError, ValueError):
+            metadata_size = 8193
+        if not isinstance(merged_meta, dict) or metadata_size > 8192:
+            abort(400, "Asset metadata must be a small object")
+        name = body.get("name", row["name"])
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
+            abort(400, "Asset name is required (1–100 characters)")
+        map_id = body.get("map_id", row["map_id"])
+        identity = ensure_current_map(robot_id, map_id)
+        merged_meta = {**merged_meta, "active": body.get("active", current_metadata.get("active", True))}
+        if not isinstance(merged_meta["active"], bool):
+            abort(400, "active must be a boolean")
+        with store.connect() as db:
+            changed = db.execute("UPDATE assets SET name=?,map_id=?,map_version_id=?,metadata_json=?,updated_at=?,revision=revision+1 WHERE robot_id=? AND asset_id=? AND revision=?",
+                                 (name.strip(), map_id, identity.get("map_version_id"), json.dumps(merged_meta, allow_nan=False), utc_now(), robot_id, asset_id, revision)).rowcount
+        if not changed:
+            abort(412, "Asset revision changed; reload before editing.")
+        return jsonify({"asset_id": asset_id, "name": name.strip(), "map_id": map_id,
+                        "map_version_id": identity.get("map_version_id"), "metadata": merged_meta,
+                        "revision": revision + 1})
+
+    @app.get(prefix + "/assets/<asset_id>/waypoints")
+    @require_role("Viewer")
+    def s1_asset_waypoints(robot_id, asset_id):
+        with store.connect() as db:
+            asset = db.execute("SELECT asset_id FROM assets WHERE robot_id=? AND asset_id=?", (robot_id, asset_id)).fetchone()
+            if not asset:
+                abort(404, "Asset not found")
+            rows = db.execute("""SELECT w.*, aw.created_at AS linked_at FROM asset_waypoints aw
+                JOIN waypoints w ON w.robot_id=aw.robot_id AND w.waypoint_id=aw.waypoint_id
+                WHERE aw.robot_id=? AND aw.asset_id=? ORDER BY w.name""", (robot_id, asset_id)).fetchall()
+        return jsonify({"waypoints": [dict(row) for row in rows]})
+
+    @app.put(prefix + "/assets/<asset_id>/waypoints/<waypoint_id>")
+    @require_role("Engineer")
+    def s1_link_asset_waypoint(robot_id, asset_id, waypoint_id):
+        with store.connect() as db:
+            asset = db.execute("SELECT map_id,map_version_id FROM assets WHERE robot_id=? AND asset_id=?", (robot_id, asset_id)).fetchone()
+            waypoint = db.execute("SELECT map_id,map_version_id FROM waypoints WHERE robot_id=? AND waypoint_id=?", (robot_id, waypoint_id)).fetchone()
+            if not asset or not waypoint:
+                abort(404, "Asset or waypoint not found")
+            if (asset["map_id"], asset["map_version_id"]) != (waypoint["map_id"], waypoint["map_version_id"]):
+                abort(409, "Asset and waypoint map versions must match")
+            db.execute("INSERT OR IGNORE INTO asset_waypoints(robot_id,asset_id,waypoint_id,created_at,created_by) VALUES (?,?,?,?,?)",
+                       (robot_id, asset_id, waypoint_id, utc_now(), g.identity["username"]))
+        return jsonify({"asset_id": asset_id, "waypoint_id": waypoint_id, "linked": True}), 201
+
+    @app.delete(prefix + "/assets/<asset_id>/waypoints/<waypoint_id>")
+    @require_role("Engineer")
+    def s1_unlink_asset_waypoint(robot_id, asset_id, waypoint_id):
+        with store.connect() as db:
+            changed = db.execute(
+                "DELETE FROM asset_waypoints WHERE robot_id=? AND asset_id=? AND waypoint_id=?",
+                (robot_id, asset_id, waypoint_id),
+            ).rowcount
+        if not changed:
+            abort(404, "Asset waypoint link not found")
+        return "", 204
+
+    @app.get(prefix + "/inspection/results")
+    @require_role("Viewer")
+    def s1_results(robot_id):
+        try:
+            limit = int(request.args.get("limit", "50"))
+            offset = int(request.args.get("offset", "0"))
+        except ValueError:
+            abort(400, "limit and offset must be integers")
+        if not 1 <= limit <= 200 or not 0 <= offset <= 100000:
+            abort(400, "limit must be 1–200 and offset 0–100000")
+        filters = {key: request.args.get(key) for key in ("task_id", "waypoint_id", "asset_id", "outcome", "source")}
+        if filters["outcome"] and filters["outcome"] not in ("NORMAL", "ABNORMAL", "INCONCLUSIVE", "NOT_APPLICABLE"):
+            abort(400, "Invalid inspection outcome filter")
+        if filters["source"] and filters["source"] not in ("fixture", "simulation", "hardware"):
+            abort(400, "Invalid inspection source filter")
+        with store.connect() as db:
+            where = ["robot_id=?"]
+            values = [robot_id]
+            for key in ("task_id", "waypoint_id", "asset_id", "outcome", "source"):
+                if filters[key]:
+                    column = "source" if key == "source" else key
+                    where.append(f"{column}=?")
+                    values.append(filters[key])
+            rows = db.execute(
+                f"SELECT * FROM inspection_results WHERE {' AND '.join(where)} ORDER BY occurred_at DESC,inspection_result_id LIMIT ? OFFSET ?",
+                (*values, limit, offset),
+            ).fetchall()
+        return jsonify({"results": [{**dict(row), "details": json.loads(row["details_json"])} for row in rows],
+                        "limit": limit, "offset": offset,
+                        "next_offset": offset + len(rows) if len(rows) == limit else None})
+
+    @app.get(prefix + "/inspection/results/<result_id>")
+    @require_role("Viewer")
+    def s1_result_detail(robot_id, result_id):
+        with store.connect() as db:
+            row = db.execute("SELECT * FROM inspection_results WHERE robot_id=? AND inspection_result_id=?", (robot_id, result_id)).fetchone()
+            if not row:
+                abort(404, "Inspection result not found")
+            evidence = db.execute("""SELECT evidence_id,media_type,checksum,available,recorded_at
+                FROM event_evidence WHERE robot_id=? AND inspection_result_id=? ORDER BY recorded_at""",
+                                  (robot_id, result_id)).fetchall()
+        return jsonify({**dict(row), "details": json.loads(row["details_json"]),
+                        "evidence": [dict(item) for item in evidence]})
+
+    @app.get(prefix + "/inspection/tasks")
+    @require_role("Viewer")
+    def s1_inspection_tasks(robot_id):
+        """Search recent inspection runs from the MissionManager authority."""
+        try:
+            limit = int(request.args.get("limit", "20"))
+            offset = int(request.args.get("offset", "0"))
+        except ValueError:
+            abort(400, "limit and offset must be integers")
+        if not 1 <= limit <= 50 or not 0 <= offset <= 500:
+            abort(400, "limit must be 1–50 and offset 0–500")
+        query = request.args.get("q", "").strip().lower()
+        status_filter = request.args.get("status", "").strip().lower()
+        allowed_statuses = {"running", "paused", "succeeded", "failed", "cancelled"}
+        if status_filter and status_filter not in allowed_statuses:
+            abort(400, "Invalid inspection task status filter")
+
+        def parse_time_filter(name):
+            raw = request.args.get(name, "").strip()
+            if not raw:
+                return None
+            try:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                abort(400, f"{name} must be an RFC3339 timestamp")
+            if value.tzinfo is None:
+                abort(400, f"{name} must include a timezone")
+            return value.astimezone(timezone.utc)
+
+        since = parse_time_filter("since")
+        until = parse_time_filter("until")
+        if since and until and since > until:
+            abort(400, "since must not be later than until")
+
+        snapshot = bridge_or_503().snapshot()
+        if not snapshot.get("mission_online"):
+            abort(503, "Mission manager status is unavailable")
+        mission_state = snapshot.get("mission") or {}
+        candidates = [mission_state.get("run"), *(mission_state.get("history") or [])]
+        seen = set()
+        inspections = []
+        for task in candidates:
+            if not isinstance(task, dict):
+                continue
+            task_id = task.get("task_id") or task.get("taskId")
+            if not isinstance(task_id, str) or not task_id or task_id in seen:
+                continue
+            seen.add(task_id)
+            steps = task.get("steps") if isinstance(task.get("steps"), list) else []
+            is_inspection = str(task.get("mission_id", task.get("missionId", ""))).startswith("inspection-")
+            is_inspection = is_inspection or any(
+                isinstance(step, dict) and step.get("type") == "inspection_action" for step in steps
+            )
+            if not is_inspection:
+                continue
+            searchable = " ".join((task_id, str(task.get("mission_id", "")),
+                                   str(task.get("mission_name", "")))).lower()
+            if query and query not in searchable:
+                continue
+            status = str(task.get("status", "unknown")).lower()
+            if status_filter and status != status_filter:
+                continue
+            started_at = task.get("started_at")
+            try:
+                started = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+                if started.tzinfo is None:
+                    continue
+                started = started.astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if since and started < since or until and started > until:
+                continue
+            inspections.append({
+                "task_id": task_id,
+                "mission_id": task.get("mission_id", task.get("missionId")),
+                "mission_name": task.get("mission_name", ""),
+                "status": status,
+                "step_index": task.get("step_index", task.get("stepIndex", 0)),
+                "steps_total": len(steps),
+                "started_at": started_at,
+                "updated_at": task.get("updated_at"),
+                "ended_at": task.get("ended_at"),
+                "reason": task.get("reason", ""),
+                "events": task.get("events", []),
+            })
+        inspections.sort(key=lambda item: item["started_at"], reverse=True)
+        page = inspections[offset:offset + limit]
+        return jsonify({"tasks": page, "limit": limit, "offset": offset,
+                        "next_offset": offset + len(page) if offset + len(page) < len(inspections) else None,
+                        "available_history_runs": len(candidates),
+                        "history_window_limited": len(mission_state.get("history") or []) >= 10})
+
+    @app.get(prefix + "/inspection/evidence/<evidence_id>")
+    @require_role("Viewer")
+    def s1_evidence_metadata(robot_id, evidence_id):
+        with store.connect() as db:
+            row = db.execute("""SELECT evidence_id,inspection_result_id,media_type,checksum,
+                available,recorded_at FROM event_evidence WHERE robot_id=? AND evidence_id=?""",
+                             (robot_id, evidence_id)).fetchone()
+        if not row:
+            abort(404, "Evidence metadata not found")
+        return jsonify({**dict(row), "media_status": "UNAVAILABLE" if not row["available"] else "AVAILABLE",
+                        "media_url": None})
+
+    @app.get(prefix + "/waypoints/<waypoint_id>/action-plan")
+    @require_role("Viewer")
+    def s1_action_plan(robot_id, waypoint_id):
+        with store.connect() as db:
+            row = db.execute("SELECT * FROM waypoint_action_plans WHERE robot_id=? AND waypoint_id=?", (robot_id, waypoint_id)).fetchone()
+        if not row:
+            abort(404, "Action plan not found")
+        return jsonify({"waypoint_id": waypoint_id, "revision": row["revision"],
+                        "actions": json.loads(row["actions_json"]), "executable": False})
+
+    @app.put(prefix + "/waypoints/<waypoint_id>/action-plan")
+    @require_role("Engineer")
+    def s1_save_action_plan(robot_id, waypoint_id):
+        waypoint = store.waypoint(robot_id, waypoint_id)
+        if not waypoint:
+            abort(404, "Waypoint not found")
+        body = request.get_json(silent=True)
+        actions = body.get("actions") if isinstance(body, dict) else None
+        if not isinstance(actions, list) or len(actions) > 20:
+            abort(400, "Action plan must contain at most 20 actions")
+        for action in actions:
+            if (not isinstance(action, dict) or action.get("kind") not in ("wait", "capture", "detect", "broadcast")
+                    or not isinstance(action.get("timeout_ms"), int) or not 100 <= action["timeout_ms"] <= 120000):
+                abort(400, "Action kind or timeout is invalid")
+            if set(action) - {"kind", "timeout_ms", "detector_types", "asset_ids", "parameters", "required", "retries"}:
+                abort(400, "Unsupported action-plan field")
+            if action.get("kind") == "detect" and (not isinstance(action.get("detector_types"), list)
+                                                       or not action["detector_types"]
+                                                       or any(not isinstance(v, str) or not v or len(v) > 64 for v in action["detector_types"])):
+                abort(400, "Detect actions need detector type identifiers")
+            if not isinstance(action.get("asset_ids", []), list) or len(action.get("asset_ids", [])) > 100:
+                abort(400, "Invalid action asset references")
+            parameters = action.get("parameters", {})
+            try:
+                parameters_size = len(json.dumps(parameters, allow_nan=False))
+            except (TypeError, ValueError):
+                parameters_size = 4097
+            if not isinstance(parameters, dict) or parameters_size > 4096:
+                abort(400, "Action parameters must be a small JSON object")
+        revision = expected_revision(allow_zero=True)
+        with store.connect() as db:
+            current = db.execute("SELECT revision FROM waypoint_action_plans WHERE robot_id=? AND waypoint_id=?", (robot_id, waypoint_id)).fetchone()
+            if revision != (current["revision"] if current else 0):
+                abort(412, "Action plan revision changed")
+            new_revision = revision + 1
+            db.execute(
+                """INSERT INTO waypoint_action_plans(robot_id,waypoint_id,revision,actions_json,updated_at)
+                   VALUES (?,?,?,?,?) ON CONFLICT(robot_id,waypoint_id) DO UPDATE SET
+                   revision=excluded.revision,actions_json=excluded.actions_json,updated_at=excluded.updated_at""",
+                (robot_id, waypoint_id, new_revision, json.dumps(actions, allow_nan=False), utc_now()),
+            )
+        return jsonify({"waypoint_id": waypoint_id, "revision": new_revision,
+                        "actions": actions, "executable": False})
+
+    @app.post(prefix + "/inspection/tasks")
+    @require_role("Operator")
+    def s1_create_inspection_task(robot_id):
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or set(body) - {"name", "waypoint_ids", "compile_only"}:
+            abort(400, "Inspection task accepts only name, waypoint_ids, and compile_only.")
+        compile_only = body.get("compile_only", False)
+        if not isinstance(compile_only, bool):
+            abort(400, "compile_only must be a boolean.")
+        name = body.get("name", "指定巡检")
+        waypoint_ids = body.get("waypoint_ids")
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
+            abort(400, "Inspection task name is required (1–120 characters).")
+        if (not isinstance(waypoint_ids, list) or not 1 <= len(waypoint_ids) <= 50
+                or any(not isinstance(item, str) or not item or len(item) > 128 for item in waypoint_ids)
+                or len(set(waypoint_ids)) != len(waypoint_ids)):
+            abort(400, "waypoint_ids must contain 1–50 unique waypoint IDs.")
+        idempotency_key = request.headers.get("Idempotency-Key", "")
+        if not 8 <= len(idempotency_key) <= 128:
+            abort(400, "Idempotency-Key must be 8–128 characters.")
+
+        bridge = bridge_or_503()
+        snapshot = bridge.snapshot()
+        if not snapshot.get("mission_online"):
+            abort(503, "Mission manager is offline.")
+        if not compile_only:
+            readiness = autonomy_readiness(snapshot)
+            if not readiness["ready"]:
+                abort(409, "Inspection task is blocked: " + "; ".join(readiness["blockers"]))
+        elif not snapshot.get("map_identity_online"):
+            abort(503, "Current map identity is unavailable; template snapshot cannot be bound safely.")
+        identity = snapshot.get("map_identity") or {}
+        provider = (snapshot.get("mission") or {}).get("inspection_provider") or {}
+        if not compile_only:
+            if not provider.get("online") or provider.get("stale", True):
+                abort(503, "Inspection provider capability or heartbeat is unavailable or stale.")
+            runtime_mode = os.environ.get("ROBOT_MODE", "unknown").strip().lower()
+            source_mode = provider.get("source_mode")
+            if ((source_mode == "fixture" and runtime_mode != "simulation")
+                    or (source_mode != "fixture" and source_mode != runtime_mode)):
+                abort(409, "Inspection provider source mode does not match the robot runtime mode.")
+        capability_map = {
+            item.get("kind"): item for item in provider.get("actions", [])
+            if isinstance(item, dict) and isinstance(item.get("kind"), str)
+        }
+        map_id = identity.get("map_id")
+        map_version_id = identity.get("map_version_id")
+        if not map_id or not map_version_id:
+            abort(503, "Current map identity is unavailable.")
+
+        steps = []
+        try:
+            with store.connect() as db:
+                db.execute("BEGIN")
+                for waypoint_id in waypoint_ids:
+                    row = db.execute(
+                        "SELECT * FROM waypoints WHERE robot_id=? AND waypoint_id=?",
+                        (robot_id, waypoint_id),
+                    ).fetchone()
+                    if not row:
+                        abort(404, f"Waypoint {waypoint_id} not found.")
+                    if not row["enabled"]:
+                        abort(409, f"Waypoint {row['name']} is disabled.")
+                    if (row["map_id"], row["map_version_id"]) != (map_id, map_version_id):
+                        abort(409, f"Waypoint {row['name']} is bound to a different map version.")
+                    point_step_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{idempotency_key}:{waypoint_id}:waypoint"))
+                    steps.append({
+                        "id": point_step_id, "type": "waypoint",
+                        "pose": {"x": row["x"], "y": row["y"],
+                                 "z": math.sin(row["yaw"] / 2), "w": math.cos(row["yaw"] / 2)},
+                        "waypointId": waypoint_id, "waypoint_id": waypoint_id,
+                        "waypointName": row["name"],
+                    })
+                    plan = db.execute(
+                        "SELECT actions_json FROM waypoint_action_plans WHERE robot_id=? AND waypoint_id=?",
+                        (robot_id, waypoint_id),
+                    ).fetchone()
+                    if not plan:
+                        abort(409, f"Waypoint {row['name']} has no saved action plan.")
+                    actions = json.loads(plan["actions_json"])
+                    if not actions:
+                        abort(409, f"Waypoint {row['name']} has an empty action plan.")
+                    linked_assets = [item[0] for item in db.execute(
+                        "SELECT asset_id FROM asset_waypoints WHERE robot_id=? AND waypoint_id=? ORDER BY asset_id",
+                        (robot_id, waypoint_id),
+                    ).fetchall()]
+                    for index, action in enumerate(actions):
+                        if action.get("required", True) is not True or action.get("retries", 0) != 0:
+                            abort(409, "Optional actions and per-action retries are not supported by this mission compiler.")
+                        if action["kind"] == "wait":
+                            steps.append({
+                                "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{idempotency_key}:{waypoint_id}:wait:{index}")),
+                                "type": "wait", "seconds": action["timeout_ms"] / 1000,
+                            })
+                            continue
+                        capability = capability_map.get(action["kind"])
+                        if not compile_only and (not capability or capability.get("supported") is not True):
+                            abort(409, f"Provider does not support action {action['kind']}.")
+                        detectors = action.get("detector_types", [])
+                        supported_detectors = capability.get("detectors", []) if capability else []
+                        if not compile_only and detectors and not set(detectors).issubset(set(supported_detectors)):
+                            abort(409, "Provider does not support all configured detector types.")
+                        asset_ids = action.get("asset_ids") or linked_assets
+                        if any(not isinstance(asset_id, str) or not asset_id for asset_id in asset_ids):
+                            abort(400, "Action asset IDs are invalid.")
+                        for asset_id in asset_ids:
+                            asset = db.execute(
+                                "SELECT map_id,map_version_id,metadata_json FROM assets WHERE robot_id=? AND asset_id=?",
+                                (robot_id, asset_id),
+                            ).fetchone()
+                            if not asset:
+                                abort(404, f"Asset {asset_id} not found.")
+                            metadata = json.loads(asset["metadata_json"])
+                            if (asset["map_id"], asset["map_version_id"]) != (map_id, map_version_id):
+                                abort(409, f"Asset {asset_id} is bound to a different map version.")
+                            if metadata.get("active", True) is not True:
+                                abort(409, f"Asset {asset_id} is disabled.")
+                        steps.append({
+                            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{idempotency_key}:{waypoint_id}:action:{index}")),
+                            "type": "inspection_action", "action": action["kind"],
+                            "waypoint_id": waypoint_id, "timeout_ms": action["timeout_ms"],
+                            "detector_types": detectors, "asset_ids": asset_ids,
+                            "parameters": action.get("parameters", {}),
+                        })
+        except sqlite3.Error as error:
+            abort(503, f"Inspection plan could not be read consistently: {error}")
+        if len(steps) > 200:
+            abort(400, "Compiled inspection task exceeds the 200-step mission limit.")
+        if not any(step["type"] == "inspection_action" for step in steps):
+            abort(409, "Inspection task needs at least one provider action.")
+
+        mission_seed = json_hash({"robot_id": robot_id, "key": idempotency_key, "body": body})
+        mission_id = "inspection-" + mission_seed[:32]
+        mission = {
+            "id": mission_id, "name": name.strip(), "steps": steps,
+            "map_id": map_id, "map_version_id": map_version_id,
+        }
+        save_key = hashlib.sha256((idempotency_key + ":mission-save").encode()).hexdigest()
+        save_response, save_status = dispatch(
+            robot_id, "mission.save", {"command": "save", "mission": mission},
+            idempotency_key=save_key,
+        )
+        save_result = save_response.get_json()
+        if save_result.get("status") != "accepted":
+            return jsonify({"mission_id": mission_id, "mission": save_result}), save_status
+        if compile_only:
+            return jsonify({"status": "compiled", "mission_id": mission_id,
+                            "task_id": None, "schedule_path": "/scheduler"}), 201
+        start_key = hashlib.sha256((idempotency_key + ":task-start").encode()).hexdigest()
+        start_response, start_status = dispatch(
+            robot_id, "task.start", {"command": "start", "mission_id": mission_id},
+            idempotency_key=start_key,
+        )
+        start_result = start_response.get_json()
+        return jsonify({
+            "mission_id": mission_id, "task_id": start_result.get("task_id"),
+            "status": start_result.get("status"), "command": start_result,
+        }), start_status
+
+    @app.get(prefix + "/inspection/alerts")
+    @require_role("Viewer")
+    def s1_alerts(robot_id):
+        map_id = request.args.get("map_id", "").strip()
+        map_version_id = request.args.get("map_version_id", "").strip()
+        if bool(map_id) != bool(map_version_id):
+            abort(400, "map_id and map_version_id must be provided together")
+        with store.connect() as db:
+            rows = db.execute("""SELECT a.*,r.details_json AS result_details_json
+                FROM inspection_alerts a LEFT JOIN inspection_results r
+                ON r.robot_id=a.robot_id AND r.inspection_result_id=a.inspection_result_id
+                WHERE a.robot_id=? ORDER BY a.last_seen DESC LIMIT 100""", (robot_id,)).fetchall()
+        alerts = []
+        for row in rows:
+            item = inspection_alert_payload(row)
+            if map_id and (item.get("map_id"), item.get("map_version_id")) != (map_id, map_version_id):
+                continue
+            alerts.append(item)
+        return jsonify({"alerts": alerts})
+
+    @app.get(prefix + "/inspection/alerts/<alert_id>")
+    @require_role("Viewer")
+    def s1_alert_detail(robot_id, alert_id):
+        with store.connect() as db:
+            row = db.execute("""SELECT a.*,r.details_json AS result_details_json
+                FROM inspection_alerts a LEFT JOIN inspection_results r
+                ON r.robot_id=a.robot_id AND r.inspection_result_id=a.inspection_result_id
+                WHERE a.robot_id=? AND a.alert_id=?""", (robot_id, alert_id)).fetchone()
+            if not row:
+                abort(404, "Inspection alert not found")
+            alert = inspection_alert_payload(row)
+            evidence = db.execute("""SELECT evidence_id,media_type,checksum,available,recorded_at
+                FROM event_evidence WHERE robot_id=? AND inspection_result_id=? ORDER BY recorded_at""",
+                (robot_id, alert["inspection_result_id"]),
+            ).fetchall()
+        return jsonify({"alert": alert, "evidence": [dict(item) for item in evidence]})
+
+    @app.patch(prefix + "/inspection/alerts/<alert_id>")
+    @require_role("Operator")
+    def s1_update_alert(robot_id, alert_id):
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or body.get("state") not in ("ACKNOWLEDGED", "IN_REVIEW", "RESOLVED", "CLOSED"):
+            abort(400, "Invalid alert state")
+        note = body.get("note", "")
+        if not isinstance(note, str) or len(note) > 2000:
+            abort(400, "Invalid alert note")
+        revision = expected_revision()
+        with store.connect() as db:
+            current = db.execute("SELECT state,revision FROM inspection_alerts WHERE robot_id=? AND alert_id=?",
+                                 (robot_id, alert_id)).fetchone()
+            if not current:
+                abort(404, "Inspection alert not found")
+            allowed = {"OPEN": {"ACKNOWLEDGED"}, "ACKNOWLEDGED": {"IN_REVIEW", "RESOLVED"},
+                       "IN_REVIEW": {"RESOLVED"}, "RESOLVED": {"IN_REVIEW", "CLOSED"}, "CLOSED": set()}
+            if revision != current["revision"]:
+                abort(412, "Alert revision changed; reload before editing")
+            if body["state"] not in allowed.get(current["state"], set()):
+                abort(409, "Invalid inspection alert state transition")
+            changed = db.execute(
+                "UPDATE inspection_alerts SET state=?,note=?,updated_by=?,revision=revision+1 WHERE robot_id=? AND alert_id=? AND revision=?",
+                (body["state"], note, g.identity["username"], robot_id, alert_id, revision),
+            ).rowcount
+            if changed:
+                store._append_event(db, robot_id, "inspection_alert_updated", {
+                    "alert_id": alert_id, "from_state": current["state"], "state": body["state"],
+                    "note": note, "actor": g.identity["username"],
+                })
+        if not changed:
+            abort(412, "Alert revision changed or alert does not exist")
+        return jsonify({"alert_id": alert_id, "state": body["state"], "revision": revision + 1})

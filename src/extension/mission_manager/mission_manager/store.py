@@ -288,6 +288,51 @@ class MissionStore:
         with self.db:
             self._insert_event(task_id, status, step_index, reason, robot_pose, request_id)
 
+    def add_inspection_result(self, run, result, robot_pose=None):
+        """Persist an inspection receipt and its business event in the robot outbox."""
+        now = result["observed_at"]
+        event = {
+            "schema_version": 1, "event_id": str(uuid.uuid4()),
+            "robot_id": self.robot_id, "source": "mission_manager",
+            "type": "inspection.result", "occurred_at": now, "recorded_at": utc_now(),
+            "simulation": result["source_mode"] == "simulation",
+            "correlation": {"task_id": run["task_id"], "mission_id": run["mission_id"],
+                            "request_id": run.get("origin_request_id"),
+                            "map_id": run.get("map_id"), "map_version_id": run.get("map_version_id")},
+            "severity": "WARNING" if result["outcome"] == "ABNORMAL" else "INFO",
+            "payload": result,
+        }
+        with self.db:
+            self._insert_event(run["task_id"], run["status"], run["step_index"],
+                               f"inspection result {result['result_id']}: {result['outcome']}",
+                               robot_pose, run.get("origin_request_id"))
+            self._write_outbox(event)
+        return event["event_id"]
+
+    def record_late_inspection_result(self, result):
+        """Keep a bounded late provider receipt for audit without task progression."""
+        encoded = json.dumps(result, allow_nan=False, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > 65536:
+            raise ValueError("late inspection result exceeds 64 KiB")
+        event_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                  f"late:{result['action_run_id']}:{result['result_id']}"))
+        event = {
+            "schema_version": 1, "event_id": event_id,
+            "robot_id": self.robot_id, "source": "mission_manager",
+            "type": "inspection.result.late", "occurred_at": result["observed_at"],
+            "recorded_at": utc_now(), "simulation": result["source_mode"] == "simulation",
+            "correlation": {"task_id": result["task_id"], "mission_id": result.get("mission_id"),
+                            "request_id": None, "map_id": result.get("map_id"),
+                            "map_version_id": result.get("map_version_id")},
+            "severity": "WARNING", "payload": {**result, "late": True},
+        }
+        with self.db:
+            exists = self.db.execute("SELECT 1 FROM robot_event_outbox WHERE event_id=?", (event_id,)).fetchone()
+            if exists:
+                return event_id
+            self._write_outbox(event)
+        return event_id
+
     def _insert_event(self, task_id, status, step_index, reason, robot_pose,
                       request_id, *, event_type="task.event"):
         """Write the run history and its durable outbound event in one transaction."""

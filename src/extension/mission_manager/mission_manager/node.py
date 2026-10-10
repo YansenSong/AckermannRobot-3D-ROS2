@@ -55,12 +55,36 @@ def validated_mission(raw):
             if abs(values["z"] ** 2 + values["w"] ** 2 - 1) > 0.1:
                 raise ValueError(f"step {index + 1} has an invalid orientation")
             item.update(pose=values, waypointId=step.get("waypointId"),
-                        waypointName=str(step.get("waypointName", ""))[:120])
+                        waypointName=str(step.get("waypointName", ""))[:120],
+                        waypoint_id=step.get("waypoint_id", step.get("waypointId")))
         elif kind == "wait":
             seconds = float(step.get("seconds", 0))
             if not math.isfinite(seconds) or seconds <= 0 or seconds > 86400:
                 raise ValueError(f"step {index + 1} has invalid wait seconds")
             item["seconds"] = seconds
+        elif kind == "inspection_action":
+            action = step.get("action")
+            if action not in ("capture", "detect", "broadcast"):
+                raise ValueError(f"step {index + 1} has an unsupported inspection action")
+            timeout_ms = step.get("timeout_ms", 15000)
+            if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 100 <= timeout_ms <= 120000:
+                raise ValueError(f"step {index + 1} has an invalid inspection timeout")
+            detector_types = step.get("detector_types", [])
+            asset_ids = step.get("asset_ids", [])
+            parameters = step.get("parameters", {})
+            if (not isinstance(detector_types, list) or len(detector_types) > 20
+                    or any(not isinstance(value, str) or not value or len(value) > 64 for value in detector_types)):
+                raise ValueError(f"step {index + 1} has invalid detector types")
+            if (not isinstance(asset_ids, list) or len(asset_ids) > 100
+                    or any(not isinstance(value, str) or not value or len(value) > 128 for value in asset_ids)):
+                raise ValueError(f"step {index + 1} has invalid asset ids")
+            if not isinstance(parameters, dict) or len(json.dumps(parameters, allow_nan=False)) > 4096:
+                raise ValueError(f"step {index + 1} has invalid parameters")
+            if action == "detect" and not detector_types:
+                raise ValueError(f"step {index + 1} needs at least one detector type")
+            item.update(action=action, timeout_ms=timeout_ms,
+                        detector_types=detector_types, asset_ids=asset_ids,
+                        parameters=parameters)
         elif kind not in ("home", "dock", "undock"):
             raise ValueError(f"step {index + 1} has unknown type")
         result.append(item)
@@ -109,6 +133,24 @@ class MissionManager(Node):
         self.step_started = None
         self.nav_seen_active = False
         self.goal_sent_ns = None
+        self.nav_arrived = False
+        self.nav_arrived_at = None
+        self.stopped_since = None
+        self.linear_speed = None
+        self.linear_speed_received_at = None
+        self.action_status = None
+        self.inspection_capabilities = None
+        self.inspection_capabilities_seen = 0.0
+        self.inspection_heartbeat_seen = 0.0
+        self.inspection_provider_observed_at = None
+        self.action_request_pub = self.create_publisher(String, "/inspection/action/request", 10)
+        self.action_control_pub = self.create_publisher(String, "/inspection/action/control", 10)
+        self.create_subscription(String, "/inspection/provider/capabilities",
+                                 self.on_inspection_capabilities, 1)
+        self.create_subscription(String, "/inspection/provider/heartbeat",
+                                 self.on_inspection_provider_heartbeat, 10)
+        self.create_subscription(String, "/inspection/action/result", self.on_inspection_result, 10)
+        self.create_subscription(String, "/inspection/action/status", self.on_inspection_status, 10)
         self.owned_goals = set()
         self.last_wait_persist = 0.0
         self.stop_owned = False
@@ -385,11 +427,21 @@ class MissionManager(Node):
             run["stepIndex"] = run["step_index"]
             run["taskId"] = run["task_id"]
             run["status"] = run["status"].lower()
+            if run["steps"] and run["step_index"] < len(run["steps"]):
+                active_step = run["steps"][run["step_index"]]
+                if active_step.get("type") == "inspection_action":
+                    run["active_action"] = {
+                        "action_run_id": getattr(self, "action_run_id", None),
+                        "step_id": active_step["id"], "status": self.action_status or "QUEUED",
+                        "kind": active_step["action"],
+                    }
         history = self.store.recent_runs(10)
         for item in history:
             item["events"] = self.store.events(item["task_id"], limit=50)
+        provider = self.inspection_provider_snapshot()
         payload = {"schema_version": 1, "online": True, "server_time": utc_now(),
                    "missions": self.store.missions(), "run": run,
+                   "inspection_provider": provider,
                    "event_sync": self.store.outbox_status(),
                    "history": history, "schedules": self.store.schedules(self.robot_id),
                    "schedule_runs": self.store.schedule_runs(self.robot_id, limit=500)}
@@ -494,6 +546,9 @@ class MissionManager(Node):
         block_reason = self.map_binding_block_reason(
             mission.get("map_id"), mission.get("map_version_id")
         )
+        if block_reason:
+            raise ValueError(block_reason)
+        block_reason = self.inspection_mission_block_reason(mission)
         if block_reason:
             raise ValueError(block_reason)
         self.run = self.store.new_run(
@@ -620,6 +675,8 @@ class MissionManager(Node):
             if block_reason:
                 raise ValueError(block_reason)
         if action == "pause" and status == "RUNNING":
+            if self._kind() == "inspection_action":
+                self.publish_action_control("pause")
             remaining = max(0.0, self.deadline - time.monotonic()) if self.deadline and self._kind() == "wait" else 0.0
             self._stop_motion()
             self.deadline = None
@@ -627,8 +684,12 @@ class MissionManager(Node):
         elif action == "resume" and status == "PAUSED":
             self._release_motion()
             self._transition("RUNNING", "resumed by operator")
+            if self._kind() == "inspection_action":
+                self.publish_action_control("resume")
             self._begin_step(resume=True)
         elif action == "cancel" and status in ACTIVE:
+            if self._kind() == "inspection_action":
+                self.publish_action_control("cancel")
             self._stop_motion()
             self.deadline = None
             self._transition("CANCELLED", "cancelled by operator")
@@ -659,12 +720,26 @@ class MissionManager(Node):
     def _kind(self):
         return self.run["steps"][self.run["step_index"]]["type"]
 
+    def publish_action_control(self, action):
+        action_run_id = getattr(self, "action_run_id", None)
+        if not action_run_id:
+            return
+        self.action_control_pub.publish(String(data=json.dumps({
+            "schema_version": 1, "robot_id": self.robot_id,
+            "task_id": self.run["task_id"], "step_id": self.run["steps"][self.run["step_index"]]["id"],
+            "attempt": self.run["attempt"], "action_run_id": action_run_id,
+            "command": action, "requested_at": utc_now(),
+        }, allow_nan=False)))
+
     def _begin_step(self, resume=False):
         step = self.run["steps"][self.run["step_index"]]
         kind = step["type"]
         self.step_started = time.monotonic()
         self.nav_seen_active = False
         self.goal_sent_ns = None
+        self.nav_arrived = False
+        self.nav_arrived_at = None
+        self.stopped_since = None
         self._event(f"step {self.run['step_index'] + 1} started: {kind}")
         if kind == "wait":
             seconds = self.run["remaining_seconds"] if resume else step["seconds"]
@@ -684,6 +759,32 @@ class MissionManager(Node):
             self.owned_goals.add(self._goal_key(goal))
             self.deadline = time.monotonic() + NAV_TIMEOUT
             self.goal_pub.publish(goal)
+        elif kind == "inspection_action":
+            reason = self.inspection_start_block_reason()
+            if reason:
+                self._fail(f"inspection action blocked: {reason}")
+                return
+            step_id = step["id"]
+            action_run_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                f"{self.robot_id}:{self.run['task_id']}:{step_id}:{self.run['attempt']}"))
+            request = {
+                "schema_version": 1, "action_run_id": action_run_id,
+                "robot_id": self.robot_id, "mission_id": self.run["mission_id"],
+                "task_id": self.run["task_id"], "step_id": step_id,
+                "attempt": self.run["attempt"], "map_id": self.run.get("map_id"),
+                "map_version_id": self.run.get("map_version_id"),
+                "waypoint_id": step.get("waypoint_id") or self.run["steps"][self.run["step_index"] - 1].get("waypoint_id"),
+                "asset_ids": step["asset_ids"],
+                "kind": step["action"], "detector_types": step["detector_types"],
+                "parameters": step["parameters"], "requested_at": utc_now(),
+                "timeout_ms": step["timeout_ms"],
+                "source_mode": os.environ.get("ROBOT_MODE", "unknown"),
+            }
+            self.deadline = time.monotonic() + step["timeout_ms"] / 1000.0
+            self.action_run_id = action_run_id
+            self.action_step_id = step_id
+            self.action_status = "DISPATCHED"
+            self.action_request_pub.publish(String(data=json.dumps(request, allow_nan=False)))
         else:
             self.deadline = time.monotonic() + DOCK_TIMEOUT
             (self.dock_pub if kind == "dock" else self.undock_pub).publish(Bool(data=True))
@@ -718,6 +819,21 @@ class MissionManager(Node):
             self._transition("PAUSED", f"safety guard: {guard_reason}",
                              remaining_seconds=remaining)
             return
+        if self._kind() in ("waypoint", "home") and self.nav_arrived:
+            now = time.monotonic()
+            if self.nav_arrived_at is not None and now - self.nav_arrived_at > 5.0:
+                self._fail("robot did not reach stable stop after ARRIVED")
+                return
+            odometry_fresh = self.linear_speed_received_at is not None and now - self.linear_speed_received_at <= 1.0
+            pose_fresh = self.pose_received_at is not None and now - self.pose_received_at <= 1.0
+            if odometry_fresh and pose_fresh and self.linear_speed is not None and self.linear_speed <= 0.05:
+                self.stopped_since = self.stopped_since or now
+                if now - self.stopped_since >= 0.5:
+                    self._complete_step()
+                    return
+            else:
+                self.stopped_since = None
+            return
         if self._kind() == "wait" and time.monotonic() - self.last_wait_persist >= 1.0:
             self.run = self.store.update_run(
                 self.run["task_id"], remaining_seconds=max(0.0, self.deadline - time.monotonic()))
@@ -750,7 +866,9 @@ class MissionManager(Node):
         if message.state == NavigationStatus.PLANNING and message.detail.startswith("new goal received"):
             self.nav_seen_active = True
         elif self.nav_seen_active and message.state == NavigationStatus.ARRIVED:
-            self._complete_step()
+            self.nav_arrived = True
+            self.nav_arrived_at = time.monotonic()
+            self.stopped_since = None
         elif self.nav_seen_active and message.state == NavigationStatus.FAILED:
             self._fail(message.detail or "navigation failed")
 
@@ -775,10 +893,240 @@ class MissionManager(Node):
             self.pose_received_at = time.monotonic()
 
     def on_ekf_odom(self, message):
+        twist = message.twist.twist
+        speed = math.hypot(twist.linear.x, twist.linear.y)
         if (message.header.frame_id == "odom"
                 and math.isfinite(message.pose.pose.position.x)
-                and math.isfinite(message.pose.pose.position.y)):
+                and math.isfinite(message.pose.pose.position.y)
+                and math.isfinite(speed)):
             self.ekf_odom_received_at = time.monotonic()
+            self.linear_speed = speed
+            self.linear_speed_received_at = self.ekf_odom_received_at
+
+    def inspection_start_block_reason(self):
+        now = time.monotonic()
+        if self.run["step_index"] == 0 or self.run["steps"][self.run["step_index"] - 1]["type"] not in ("waypoint", "inspection_action"):
+            return "inspection actions must follow a waypoint arrival in the mission"
+        if self.pose_received_at is None or now - self.pose_received_at > 1.0:
+            return "localization pose is unavailable or stale"
+        if self.linear_speed_received_at is None or now - self.linear_speed_received_at > 1.0:
+            return "odometry speed is unavailable or stale"
+        if self.linear_speed is None or self.linear_speed > 0.05:
+            return "robot is not confirmed stationary"
+        if self.map_binding_block_reason(self.run.get("map_id"), self.run.get("map_version_id")):
+            return "map bundle identity is not current"
+        block_reason = self.inspection_action_capability_block_reason(
+            self.run["steps"][self.run["step_index"]]
+        )
+        if block_reason:
+            return block_reason
+        return ""
+
+    def on_inspection_capabilities(self, message):
+        try:
+            value = json.loads(message.data)
+            if (not isinstance(value, dict) or value.get("schema_version") != 1
+                    or value.get("robot_id") != self.robot_id
+                    or not isinstance(value.get("provider_id"), str) or not value["provider_id"]
+                    or value.get("source_mode") not in ("fixture", "simulation", "hardware")
+                    or value.get("online") is not True or not isinstance(value.get("actions"), list)):
+                raise ValueError("capability identity is invalid")
+            actions = {}
+            for item in value["actions"]:
+                if (not isinstance(item, dict) or item.get("kind") not in ("capture", "detect", "broadcast")
+                        or not isinstance(item.get("supported"), bool)):
+                    raise ValueError("capability action is invalid")
+                detectors = item.get("detectors", [])
+                if not isinstance(detectors, list) or any(not isinstance(v, str) or not v for v in detectors):
+                    raise ValueError("capability detector list is invalid")
+                actions[item["kind"]] = {
+                    "kind": item["kind"], "supported": item["supported"],
+                    "detectors": detectors,
+                    "can_pause": item.get("can_pause") is True,
+                    "can_cancel": item.get("can_cancel") is True,
+                }
+            observed_at = value.get("observed_at")
+            if observed_at is not None:
+                stamp = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    raise ValueError("capability observed_at needs timezone")
+            self.inspection_capabilities = {
+                "provider_id": value["provider_id"], "source_mode": value["source_mode"],
+                "software_version": str(value.get("software_version", ""))[:128],
+                "actions": list(actions.values()), "action_map": actions,
+            }
+            self.inspection_capabilities_seen = time.monotonic()
+            self.inspection_provider_observed_at = observed_at
+        except (ValueError, TypeError, AttributeError, KeyError, json.JSONDecodeError):
+            self.inspection_capabilities = None
+            self.inspection_capabilities_seen = 0.0
+            self.inspection_heartbeat_seen = 0.0
+
+    def on_inspection_provider_heartbeat(self, message):
+        try:
+            value = json.loads(message.data)
+            capabilities = self.inspection_capabilities
+            if (not isinstance(value, dict) or value.get("schema_version") != 1
+                    or value.get("robot_id") != self.robot_id or not capabilities
+                    or value.get("provider_id") != capabilities["provider_id"]
+                    or value.get("source_mode") != capabilities["source_mode"]
+                    or value.get("online") is not True):
+                self.inspection_heartbeat_seen = 0.0
+                return
+            observed_at = value.get("observed_at")
+            if not isinstance(observed_at, str) or datetime.fromisoformat(
+                    observed_at.replace("Z", "+00:00")).tzinfo is None:
+                self.inspection_heartbeat_seen = 0.0
+                return
+            self.inspection_heartbeat_seen = time.monotonic()
+            self.inspection_provider_observed_at = observed_at
+        except (ValueError, TypeError, AttributeError):
+            self.inspection_heartbeat_seen = 0.0
+
+    def inspection_provider_snapshot(self):
+        capabilities = self.inspection_capabilities or {}
+        capability_fresh = (self.inspection_capabilities_seen > 0
+                            and time.monotonic() - self.inspection_capabilities_seen < 5.0)
+        heartbeat_fresh = (self.inspection_heartbeat_seen > 0
+                           and time.monotonic() - self.inspection_heartbeat_seen < 5.0)
+        online = capability_fresh and heartbeat_fresh
+        return {
+            "online": online, "stale": not online,
+            "provider_id": capabilities.get("provider_id"),
+            "source_mode": capabilities.get("source_mode"),
+            "software_version": capabilities.get("software_version"),
+            "actions": capabilities.get("actions", []),
+            "observed_at": self.inspection_provider_observed_at if online else None,
+        }
+
+    def inspection_action_capability_block_reason(self, step):
+        provider = self.inspection_provider_snapshot()
+        if not provider["online"]:
+            return "inspection provider capability or heartbeat is unavailable or stale"
+        robot_mode = os.environ.get("ROBOT_MODE", "unknown")
+        if provider["source_mode"] == "fixture":
+            if robot_mode != "simulation":
+                return "fixture inspection provider is allowed in simulation mode only"
+        elif provider["source_mode"] != robot_mode:
+            return "inspection provider source mode does not match robot mode"
+        action = self.inspection_capabilities["action_map"].get(step.get("action"))
+        if not action or not action["supported"]:
+            return f"inspection provider does not support {step.get('action')}"
+        required_detectors = set(step.get("detector_types", []))
+        if required_detectors and not required_detectors.issubset(set(action["detectors"])):
+            return "inspection provider does not support all configured detector types"
+        return ""
+
+    def inspection_mission_block_reason(self, mission):
+        for step in mission.get("steps", []):
+            if step.get("type") == "inspection_action":
+                reason = self.inspection_action_capability_block_reason(step)
+                if reason:
+                    return reason
+        return ""
+
+    def on_inspection_result(self, message):
+        try:
+            result = json.loads(message.data)
+            if (not isinstance(result, dict) or result.get("schema_version") != 1
+                    or result.get("robot_id") != self.robot_id):
+                return
+            allowed_fields = {"schema_version", "provider_id", "result_id", "robot_id", "mission_id",
+                              "task_id", "step_id", "attempt", "action_run_id", "status", "outcome",
+                              "detector_type", "confidence", "observed_at", "source_mode", "model_version",
+                              "map_id", "map_version_id", "waypoint_id", "asset_ids", "position",
+                              "classifications", "evidence", "fixture_scenario", "reason_code"}
+            if set(result) - allowed_fields:
+                return
+            evidence = result.get("evidence", [])
+            if (not isinstance(evidence, list) or len(evidence) > 20
+                    or any(not isinstance(item, dict) or set(item) -
+                           {"evidence_id", "media_type", "checksum", "size_bytes"} for item in evidence)):
+                return
+            for item in evidence:
+                if (not isinstance(item.get("evidence_id"), str) or not item["evidence_id"]
+                        or item.get("media_type") not in ("image/jpeg", "image/png", "image/webp", "video/mp4")
+                        or not isinstance(item.get("checksum"), str)
+                        or not re.fullmatch(r"[0-9a-fA-F]{64}", item["checksum"])
+                        or isinstance(item.get("size_bytes"), bool)
+                        or not isinstance(item.get("size_bytes"), int)
+                        or not 0 <= item["size_bytes"] <= 100 * 1024 * 1024):
+                    return
+            if (not isinstance(result.get("result_id"), str) or not result["result_id"]
+                    or not isinstance(result.get("action_run_id"), str)
+                    or not isinstance(result.get("step_id"), str)
+                    or not isinstance(result.get("task_id"), str)
+                    or result.get("source_mode") not in ("fixture", "simulation", "hardware")
+                    or result.get("status") not in ("SUCCEEDED", "FAILED", "UNAVAILABLE", "TIMEOUT")
+                    or result.get("outcome") not in ("NORMAL", "ABNORMAL", "INCONCLUSIVE", "NOT_APPLICABLE")
+                    or result.get("reason_code") not in (None, "PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT", "PROVIDER_FAILED", "PROVIDER_REJECTED")
+                    or not isinstance(result.get("mission_id"), str)
+                    or not isinstance(result.get("map_id"), str)
+                    or not isinstance(result.get("map_version_id"), str)
+                    or not isinstance(result.get("observed_at"), str)):
+                return
+            attempt = result.get("attempt")
+            if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+                return
+            if result["status"] != "SUCCEEDED" and result["outcome"] != "NOT_APPLICABLE":
+                return
+            confidence = result.get("confidence")
+            if confidence is not None and (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+                                           or not math.isfinite(confidence) or not 0 <= confidence <= 1):
+                return
+            position = result.get("position")
+            if position is not None and (not isinstance(position, dict)
+                                         or set(position) - {"frame_id", "x", "y", "yaw", "observed_at"}):
+                return
+            classifications = result.get("classifications", [])
+            if (not isinstance(classifications, list) or len(classifications) > 100
+                    or any(not isinstance(item, dict) or set(item) -
+                           {"detector_type", "label", "class_id", "value", "confidence"} for item in classifications)):
+                return
+            observed_at = datetime.fromisoformat(result["observed_at"].replace("Z", "+00:00"))
+            if observed_at.tzinfo is None:
+                return
+            expected = self.run["steps"][self.run["step_index"]] if self.run and self.run.get("steps") else {}
+            if (not self.run or self.run["status"] != "RUNNING" or expected.get("type") != "inspection_action"
+                    or result.get("action_run_id") != getattr(self, "action_run_id", None)):
+                self.store.record_late_inspection_result(result)
+                return
+            if (result.get("task_id") != self.run["task_id"]
+                    or result.get("step_id") != expected.get("id")
+                    or result.get("attempt") != self.run["attempt"]):
+                return
+            if (not isinstance(result.get("result_id"), str) or not result["result_id"]
+                    or result.get("source_mode") not in ("fixture", "simulation", "hardware")
+                    or result.get("map_id") != self.run.get("map_id")
+                    or result.get("map_version_id") != self.run.get("map_version_id")):
+                return
+            if result["status"] != "SUCCEEDED" and result["outcome"] != "NOT_APPLICABLE":
+                return
+            self.store.add_inspection_result(self.run, result, self.pose)
+            self.deadline = None
+            if result["status"] == "SUCCEEDED":
+                self._complete_step()
+            else:
+                self._fail(f"inspection action {result['status'].lower()}")
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return
+
+    def on_inspection_status(self, message):
+        try:
+            status = json.loads(message.data)
+            if (not isinstance(status, dict) or status.get("schema_version") != 1
+                    or status.get("robot_id") != self.robot_id or not self.run
+                    or self.run["status"] != "RUNNING" or self._kind() != "inspection_action"
+                    or status.get("action_run_id") != getattr(self, "action_run_id", None)
+                    or status.get("task_id") != self.run["task_id"]
+                    or status.get("step_id") != self.run["steps"][self.run["step_index"]]["id"]
+                    or status.get("attempt") != self.run["attempt"]
+                    or status.get("status") not in ("ACCEPTED", "RUNNING", "PAUSE_PENDING", "PAUSED", "CANCEL_PENDING")):
+                return
+            self.action_status = status["status"]
+            self.publish_state()
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return
 
     def destroy_node(self):
         if self.run and self.run["status"] == "RUNNING":

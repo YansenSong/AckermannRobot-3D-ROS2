@@ -25,6 +25,8 @@ window.NAV2D.queuedWaypointItems = [];
 window.NAV2D.queuedWaypointLabels = [];
 window.NAV2D.savedWaypointItems = [];
 window.NAV2D._savedWaypointClickCallback = null;
+window.NAV2D.inspectionAlertItems = [];
+window.NAV2D._inspectionAlertClickCallback = null;
 window.NAV2D.layerState = {
   map: true,
   scan: false,
@@ -284,6 +286,7 @@ window.NAV2D.InitMap = (ros) => {
     window.NAV2D.mapInited = true;
     navigator(ros);
   }
+  window.NAV2D.setInspectionAlerts?.(window.NAV2D.inspectionAlerts || []);
 };
 
 // Cleaning map
@@ -384,6 +387,14 @@ const updateNavigationOverlayScale = (scene = getScene()) => {
       label.y = marker.y - 10 / Math.abs(scene.scaleY || 1);
     }
   });
+  (window.NAV2D.inspectionAlertItems || []).forEach(({ marker, label }) => {
+    scaleMarkerToScene(marker, scene);
+    if (label) {
+      scaleMarkerToScene(label, scene);
+      label.x = marker.x + 12 / Math.abs(scene.scaleX || 1);
+      label.y = marker.y - 10 / Math.abs(scene.scaleY || 1);
+    }
+  });
   (window.NAV2D.pointNumberLabels || []).forEach(({ marker, label }) => {
     scaleMarkerToScene(label, scene);
     positionWaypointLabel(marker, label, scene);
@@ -441,6 +452,10 @@ const applyLayerState = () => {
   });
   (window.NAV2D.savedWaypointItems || []).forEach(({ label }) => {
     if (label) label.visible = state.waypoints !== false;
+  });
+  (window.NAV2D.inspectionAlertItems || []).forEach(({ marker, label }) => {
+    if (marker) marker.visible = state.inspectionAlerts !== false;
+    if (label) label.visible = state.inspectionAlerts !== false;
   });
 };
 
@@ -641,6 +656,53 @@ window.NAV2D.clearSavedWaypoints = () => {
   window.NAV2D.setSavedWaypoints([]);
 };
 
+// Business alert pins are accepted only with a location already verified by
+// the platform against the current map identity. They never publish robot commands.
+window.NAV2D.setInspectionAlerts = (alerts) => {
+  window.NAV2D.inspectionAlerts = Array.isArray(alerts) ? alerts : [];
+  const scene = getScene();
+  if (!scene) return;
+  (window.NAV2D.inspectionAlertItems || []).forEach(({ marker, label }) => {
+    [marker, label].forEach((item) => item && scene.removeChild(item));
+  });
+  window.NAV2D.inspectionAlertItems = window.NAV2D.inspectionAlerts.map((alert) => {
+    const position = alert?.position;
+    if (!alert?.alert_id || typeof position?.frame_id !== "string"
+        || position.frame_id.replace(/^\/+/, "") !== "map"
+        || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return null;
+    const marker = new window.createjs.Shape();
+    marker.graphics.beginFill("#dc2626").beginStroke("#ffffff").setStrokeStyle(2).drawCircle(0, 0, 10);
+    marker.x = position.x;
+    marker.y = -position.y;
+    marker.cursor = "pointer";
+    marker.mouseEnabled = true;
+    marker.addEventListener("click", (event) => {
+      if (event?.nativeEvent && event.nativeEvent.button !== 0) return;
+      window.NAV2D._inspectionAlertClickCallback?.(alert.alert_id);
+    });
+    scaleMarkerToScene(marker, scene);
+    scene.addChild(marker);
+    const label = new window.createjs.Text(
+      `! ${alert.category || "业务告警"}`,
+      "bold 10px RobotoMono, monospace",
+      "#ffffff",
+    );
+    label.textAlign = "left";
+    label.textBaseline = "middle";
+    label.mouseEnabled = false;
+    label.outline = 3;
+    label.x = marker.x + 12 / Math.abs(scene.scaleX || 1);
+    label.y = marker.y - 10 / Math.abs(scene.scaleY || 1);
+    scaleMarkerToScene(label, scene);
+    scene.addChild(label);
+    marker.visible = window.NAV2D.layerState?.inspectionAlerts !== false;
+    label.visible = marker.visible;
+    return { alert_id: alert.alert_id, marker, label };
+  }).filter(Boolean);
+  applyLayerState();
+  bringNavigationOverlaysToFront(scene);
+};
+
 window.NAV2D.setLayerOpacity = (layer, opacity) => {
   window.NAV2D.layerOpacity = {
     ...window.NAV2D.layerOpacity,
@@ -688,6 +750,10 @@ const bringNavigationOverlaysToFront = (scene = getScene()) => {
     if (label) scene.addChild(label);
   });
   if (window.NAV2D.robotMarker) scene.addChild(window.NAV2D.robotMarker);
+  (window.NAV2D.inspectionAlertItems || []).forEach(({ marker, label }) => {
+    if (marker) scene.addChild(marker);
+    if (label) scene.addChild(label);
+  });
 };
 
 window.NAV2D.setGoalPose = (pose) => {
