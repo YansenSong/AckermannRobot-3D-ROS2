@@ -2,7 +2,7 @@
 
 ## 总体结论
 
-本地基线为 `fd998a40100fe51ab348dbaf7216dcc2e2a51dc2`，与交接文档记录的公开 main 一致。S0 保持原样并复用；平台业务表由 SQLite schema 3 增量迁移至 7。W1、W3、W5、W6 的业务接入层有实际代码，inspection action 有 ROS2 fixture 闭环测试；但本轮**没有完成 S1-01～S1-57 的全部验收**。没有运行 Gazebo 或实机，也没有外部检测 provider，因此不报告 `SIM_VERIFIED` 或 `REAL_VERIFIED`。
+本地基线为 `fd998a40100fe51ab348dbaf7216dcc2e2a51dc2`，与交接文档记录的公开 main 一致。S0 保持原样并复用；平台业务表由 SQLite schema 3 增量迁移至 8。W1、W3、W5、W6 的业务接入层有实际代码，inspection action 有 ROS2 fixture 闭环测试；但本轮**没有完成 S1-01～S1-57 的全部验收**。没有运行 Gazebo 或实机，也没有外部检测 provider，因此不报告 `SIM_VERIFIED` 或 `REAL_VERIFIED`。
 
 目前可交付的边界是：资产/点位关系、Provider capability/heartbeat 状态、单次及多点巡检 mission 编译/下发、编译后接入既有周期调度、结果和业务告警入库/查询/处置、告警证据元数据安全展示、带来源标记的 Provider ROS2 接入与 fixture、MissionManager 到点稳定停车后派发动作、当前地图版本告警 pin，以及运行页状态卡片。待完成的主要部分是模板版本编辑/管理和调度运行历史呈现、地图运行区和旧写入口收口、真实媒体存储/授权读取、地图 pin 浏览器视觉验收、以及真实仿真和实机联调。
 
@@ -16,7 +16,7 @@
 | W3 点位/资产 | 新增资产创建、编辑/停用、地图版本关联、点位关联/解除关联 API 与 Web；动作计划可校验、版本化保存为不可执行草稿。 | 未实现基准照片上传/存储。 |
 | W4 任务编排 | 指定任务 API/UI 支持单点立即执行；多点序列可编译为不可变 MissionManager mission 快照，保存时 Provider 可离线；inspection profile 复用现有 SchedulerPage 和 `/schedules` 建立周期调度。MissionManager 在实际开始和到点派发时重验地图、安全状态和 Provider 能力；任务页可按 ID/名称、状态和时间筛选当前及最近巡检历史。 | 模板版本化编辑/管理和调度运行历史呈现未补齐；完整历史归档查询待扩展；周期触发只验证 API 接入，未运行真实调度周期；真实 provider 能力联调待外部提供。 |
 | W5 运行页 | MapPage 在巡检 profile 显示在线/离线或未知、状态过期、电量来源、当前地图/模式、任务摘要、当前 map/version 告警数；告警位置经当前 map/version 过滤后显示为可点击地图 pin；明确物理急停未知。 | 当前页是地图操作页聚合，不是独立大屏验收；无 Gazebo 联动截图或地图 pin 的浏览器视觉验收。 |
-| W6 结果/告警 | Outbox 事件事务写入结果；异常形成独立业务告警并按稳定 fingerprint 合并计数；结果筛选/分页/详情、告警详情/证据元数据、告警状态机及操作审计均有 API；Web 显示 Fixture/Simulation 来源及媒体不可用态，地图 pin 可跳转对应告警详情。 | 无图像文件上传、持久化、服务端授权读取或下载；处理页面目前提供确认按钮，其他处理状态主要通过 API；没有独立 SSE 告警流。 |
+| W6 结果/告警 | Outbox 事件事务写入结果；异常按资产组或巡检点形成业务告警，关闭后新异常另建 episode；结果按所有关联资产筛选、告警先按地图版本过滤再分页；告警详情/证据元数据、状态机及操作审计均有 API；Web 显示 Fixture/Simulation 来源及媒体不可用态，地图 pin 可跳转对应告警详情。 | 无图像文件上传、持久化、服务端授权读取或下载；处理页面目前提供确认按钮，其他处理状态主要通过 API；没有独立 SSE 告警流。 |
 | W7 设备/BMS | 复用现有 Info/BMS/Health、`/battery/state`、`/config` 和 Fault 机制；状态缺失显示 unavailable/unknown。 | 本轮未扩展设备粒度健康快照；未完成传感器断流集成测试或硬件联调。 |
 | W8 联动与回归 | Python 平台、MissionManager、Adapter、AreaRules、前端单测和 Vite build 已执行；一个隔离 ROS_DOMAIN_ID fixture 集成测试实际贯通到 PlatformStore。 | 完整 `check_s0.sh` 本轮结果另见测试表；Gazebo、ROS graph 多进程演示、截图和真实 provider 均未执行。 |
 | W9 文档/交接 | 本报告、API/数据模型、测试矩阵、Provider 契约和外部待办均更新；S0 文档未修改。 | 由于上述 BLOCKED/EXTERNAL_PENDING 项，不能作为全部 57 项验收完成声明。 |
@@ -73,10 +73,10 @@
 | S1-44 异常事件接收 | W6 | FIXTURE_VERIFIED / EXTERNAL_PENDING | Adapter fixture result topic→MissionManager→Outbox 已通过；真实业务异常来源未接入。 |
 | S1-45 告警分类/等级 | W6 | CODE_READY / EXTERNAL_PENDING | 仅依据外部 detector/category 和结果建立业务告警；无模型判定；外部类别/严重度策略需确认。 |
 | S1-46 告警详情/证据 | W6 | CODE_READY / BLOCKED / EXTERNAL_PENDING | GET 告警详情返回关联证据 metadata；`InspectionPage.jsx` 展示媒体不可用态，拒绝文件路径/URL；无实际媒体读写/图像展示。 |
-| S1-47 地图告警定位 | W5/W6 | CODE_READY / BLOCKED | 告警 API 从关联结果解析 map frame 坐标，并要求 map_id/map_version_id 成对过滤；MapPage 仅渲染当前身份的可点击 pin 并跳到告警详情列表。无有效位置不落在原点；浏览器/Gazebo 视觉验收未做。 |
+| S1-47 地图告警定位 | W5/W6 | CODE_READY / BLOCKED | 告警 API 从关联结果解析 map frame 坐标，map_id/map_version_id 独立索引并在 SQL 中先过滤再分页；MapPage 仅渲染当前身份的可点击 pin 并跳到告警详情列表。无有效位置不落在原点；浏览器/Gazebo 视觉验收未做。 |
 | S1-48 无法确认状态 | W6 | FIXTURE_VERIFIED / EXTERNAL_PENDING | `INCONCLUSIVE` 与技术状态分离且无默认正常；集成测试验证 INCONCLUSIVE 入库。 |
-| S1-49 告警去重/持续 | W6 | CODE_READY | 稳定 fingerprint 对同分类/地图版本/资产集合合并 occurrence_count；平台 API 告警测试。持续窗口需业务方确认。 |
-| S1-50 告警查询/留存 | W6 | CODE_READY | 结果带 limit/offset 与 task/point/asset/outcome/source 过滤；告警列表保留最近 100 条；无导出和游标接口。 |
+| S1-49 告警去重/持续 | W6 | CODE_READY | 同分类/地图版本按资产组优先、无资产时按巡检点归并；RESOLVED/CLOSED 后再触发新 OPEN episode，旧案留存。多资产按组还是逐资产告警、持续窗口仍需业务方确认。 |
+| S1-50 告警查询/留存 | W6 | CODE_READY | 结果带 limit/offset 与 task/point/任一关联 asset/outcome/source 过滤；告警 SQL 先按 map/version 过滤再分页并返回 next_offset；无导出和稳定游标接口。 |
 | S1-51 告警处理状态 | W6 | CODE_READY | Operator If-Match 状态机与平台事件审计；Web 当前仅显示 OPEN→ACKNOWLEDGED 操作。 |
 | S1-52 设备详情 | W7 | CODE_READY / BLOCKED | 复用 `InfoPage.jsx`、`/build`、`/status`；本轮未加逐传感器设备快照视图。 |
 | S1-53 实时 SOC | W7 | CODE_READY | 复用 `/battery/state` 与 `BmsPage.jsx`；无 BMS 时沿用 unavailable。 |
@@ -87,7 +87,7 @@
 
 ## 主要源码和数据迁移
 
-- 平台 API/存储：`third_party/RobotPilot/ros2/src/robotpilot_ui_package/robotpilot_ui_package/platform_api.py`；schema 3→7 增量迁移，新增 `inspection_alerts`、`waypoint_action_plans`、`asset_waypoints`、`map_quality_reviews`，并给旧 `assets` 表补 `revision`。不删除旧业务行。生产升级前备份 SQLite；旧二进制不支持向下打开 schema 7，回滚需恢复备份。
+- 平台 API/存储：`third_party/RobotPilot/ros2/src/robotpilot_ui_package/robotpilot_ui_package/platform_api.py`；schema 3→8 增量迁移，新增 `inspection_alerts`、`inspection_result_assets`、`waypoint_action_plans`、`asset_waypoints`、`map_quality_reviews`，并给旧 `assets` 表补 `revision`。不删除旧业务行。生产升级前备份 SQLite；旧二进制不支持向下打开 schema 8，回滚需恢复备份。
 - 机器人编排：`src/extension/mission_manager/mission_manager/{node.py,store.py}`；action 请求/控制/回执，停车门禁、任务关联与 Outbox 事件。
 - 外部接入：新增 `src/extension/inspection_adapter/` ROS2 包；fixture 需显式设置 `INSPECTION_PROVIDER_MODE=fixture`，默认 external。
 - Web：`third_party/RobotPilot/web/src/pages/{InspectionPage,AssetsPage,WaypointActionsPage,MapPage,MapsPage,registry}.jsx` 与 `components/MapQualityReviewPanel.jsx`。
@@ -110,3 +110,9 @@
 - 失败复现：`test_paused_inspection_result_is_reconciled_and_request_is_immutable` 在修复前恢复后仍停留 RUNNING；`test_external_pending_request_survives_adapter_restart_without_redispatch` 在修复前找不到持久 pending。
 - 修复：MissionStore schema 4→5 新增请求/回执持久表。同一 `action_run_id` 的 `requested_at` 和整份请求保持不可变；暂停期间有效回执先落库，恢复后对账并生成确定性去重的 Outbox 事件。适配器从 SQLite 恢复 pending 和原始超时，不重新调用 Provider。Manager 的能力订阅改为可靠 TRANSIENT_LOCAL QoS，在线判定使用锁存能力及新鲜心跳。
 - 回归：MissionManager 与 Adapter 共 `44 passed`；连同平台 API 的 Python 回归为 `137 passed、3 skipped`，React `40 passed`，Vite 构建通过，MissionManager 与 Adapter 两包分别构建通过。覆盖 pause 前后回执、管理器重启、适配器重启、重复请求、取消后晚到、retry attempt 变化及 Provider 无回执超时。未运行真实 Provider 或多进程中断测试；外部 Provider 重启后的回执重放协议仍需联调，不提升为 `SIM_VERIFIED`。
+
+### Patch C：F03、F06、F07 告警与结果查询正确性
+
+- 失败复现：新增的不同点同类、第二资产筛选和其他地图超过 100 条后查询当前地图三个用例在修复前均失败。
+- 修复：平台 SQLite schema 7→8；`inspection_result_assets` 存全部资产并回填旧结果；告警增加结构化地图/点位、对象 fingerprint 和 episode。当前规则为资产组优先、无资产按巡检点；RESOLVED/CLOSED 后新异常建新 OPEN episode。告警列表在 SQL 中先过滤地图，再按 limit/offset 分页；摄入事务用 `BEGIN IMMEDIATE` 串行化同对象并发写入。
+- 回归：平台旧库升级、关闭后再触发、不同点、并发、资产筛选和跨地图超过 100 条均通过；Python 全量 `158 passed、3 skipped`，React `40 passed`，Vite 构建通过。旧 schema 7 已错误合并的历史计数无法自动拆分，仍保留原告警以免丢失处置记录；多资产告警粒度待产品确认。

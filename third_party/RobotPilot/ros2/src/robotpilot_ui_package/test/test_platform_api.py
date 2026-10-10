@@ -7,6 +7,7 @@ import math
 import threading
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -106,6 +107,149 @@ class FakeBridge:
 
 
 class PlatformApiTest(unittest.TestCase):
+    @staticmethod
+    def inspection_event(seq, *, result_id=None, waypoint_id="wp-1", asset_ids=None,
+                         map_id="map-a", map_version_id="v1", outcome="ABNORMAL",
+                         source="mission_manager"):
+        observed_at = (datetime(2026, 10, 10, tzinfo=timezone.utc)
+                       + timedelta(seconds=seq)).isoformat()
+        result_id = result_id or f"result-{source}-{seq}"
+        return {
+            "schema_version": 1, "event_id": f"event-{source}-{seq}",
+            "robot_id": "robot-001", "source": source, "source_seq": seq,
+            "type": "inspection.result", "severity": "WARNING",
+            "occurred_at": observed_at,
+            "correlation": {"task_id": f"task-{source}-{seq}", "request_id": None},
+            "payload": {
+                "result_id": result_id, "action_run_id": f"action-{source}-{seq}",
+                "task_id": f"task-{source}-{seq}", "step_id": f"step-{seq}",
+                "status": "SUCCEEDED", "outcome": outcome, "source_mode": "fixture",
+                "observed_at": observed_at, "map_id": map_id,
+                "map_version_id": map_version_id, "waypoint_id": waypoint_id,
+                "asset_ids": asset_ids or [], "detector_type": "fire_smoke",
+            },
+        }
+
+    def test_alerts_are_scoped_to_waypoint_and_closed_episode_stays_traceable(self):
+        self.store.ingest_robot_events("robot-001", [self.inspection_event(1, waypoint_id="wp-a")])
+        self.store.ingest_robot_events("robot-001", [self.inspection_event(2, waypoint_id="wp-b")])
+        alerts = self.client.get(self.base + "/inspection/alerts").json["alerts"]
+        self.assertEqual(len(alerts), 2)
+        self.store.ingest_robot_events("robot-001", [self.inspection_event(3, waypoint_id="wp-a")])
+        alerts = self.client.get(self.base + "/inspection/alerts").json["alerts"]
+        original = next(item for item in alerts if item["waypoint_id"] == "wp-a")
+        self.assertEqual(original["occurrence_count"], 2)
+        for revision, state in enumerate(("ACKNOWLEDGED", "RESOLVED", "CLOSED"),
+                                         start=original["revision"]):
+            response = self.client.patch(self.base + f"/inspection/alerts/{original['alert_id']}",
+                                         json={"state": state},
+                                         headers={"If-Match": f'"{revision}"'})
+            self.assertEqual(response.status_code, 200)
+        self.store.ingest_robot_events("robot-001", [self.inspection_event(4, waypoint_id="wp-a")])
+        alerts = self.client.get(self.base + "/inspection/alerts").json["alerts"]
+        self.assertEqual(len(alerts), 3)
+        reopened = next(item for item in alerts if item["waypoint_id"] == "wp-a"
+                        and item["state"] == "OPEN")
+        self.assertNotEqual(reopened["alert_id"], original["alert_id"])
+        self.assertEqual(reopened["occurrence_count"], 1)
+        closed = self.client.get(self.base + f"/inspection/alerts/{original['alert_id']}").json["alert"]
+        self.assertEqual(closed["state"], "CLOSED")
+        self.assertEqual(closed["occurrence_count"], 2)
+
+    def test_results_filter_every_linked_asset_once(self):
+        event = self.inspection_event(1, asset_ids=["asset-a", "asset-b", "asset-b"],
+                                      outcome="INCONCLUSIVE")
+        self.store.ingest_robot_events("robot-001", [event])
+        for asset_id in ("asset-a", "asset-b"):
+            rows = self.client.get(self.base + f"/inspection/results?asset_id={asset_id}").json["results"]
+            self.assertEqual([item["inspection_result_id"] for item in rows],
+                             [event["payload"]["result_id"]])
+
+    def test_concurrent_same_object_alert_ingest_has_one_active_episode(self):
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def ingest(source):
+            try:
+                barrier.wait()
+                self.store.ingest_robot_events("robot-001", [
+                    self.inspection_event(1, source=source, waypoint_id="wp-shared")])
+            except Exception as error:
+                errors.append(error)
+
+        workers = [threading.Thread(target=ingest, args=(name,))
+                   for name in ("provider-a", "provider-b")]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=10)
+        self.assertFalse(errors)
+        self.assertTrue(all(not worker.is_alive() for worker in workers))
+        alerts = self.client.get(self.base + "/inspection/alerts").json["alerts"]
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["occurrence_count"], 2)
+
+    def test_map_alert_filter_runs_before_limit_and_supports_pagination(self):
+        self.store.ingest_robot_events("robot-001", [self.inspection_event(
+            1, map_id="target-map", map_version_id="target-v1")])
+        other = [self.inspection_event(seq, waypoint_id=f"other-wp-{seq}",
+                                       asset_ids=[f"asset-{seq}"],
+                                       map_id="other-map", map_version_id="other-v1")
+                 for seq in range(2, 103)]
+        self.store.ingest_robot_events("robot-001", other[:100])
+        self.store.ingest_robot_events("robot-001", other[100:])
+        response = self.client.get(self.base +
+                                   "/inspection/alerts?map_id=target-map&map_version_id=target-v1&limit=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json["alerts"]), 1)
+        self.assertEqual(response.json["alerts"][0]["map_id"], "target-map")
+        self.assertIsNone(response.json["next_offset"])
+
+    def test_schema_7_inspection_rows_migrate_without_losing_closed_alerts(self):
+        path = str(Path(self.directory.name) / "legacy-inspection.sqlite3")
+        old_event = self.inspection_event(1, asset_ids=["asset-a", "asset-b"])
+        result = old_event["payload"]
+        with sqlite3.connect(path) as db:
+            db.executescript("""
+                CREATE TABLE inspection_results (
+                    robot_id TEXT NOT NULL,inspection_result_id TEXT NOT NULL,asset_id TEXT,
+                    mission_id TEXT,task_id TEXT,waypoint_id TEXT,outcome TEXT NOT NULL,
+                    source TEXT NOT NULL,occurred_at TEXT NOT NULL,details_json TEXT NOT NULL,
+                    PRIMARY KEY(robot_id,inspection_result_id));
+                CREATE TABLE inspection_alerts (
+                    robot_id TEXT NOT NULL,alert_id TEXT NOT NULL,
+                    inspection_result_id TEXT NOT NULL,category TEXT NOT NULL,
+                    severity TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'OPEN',
+                    note TEXT NOT NULL DEFAULT '',first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,occurrence_count INTEGER NOT NULL DEFAULT 1,
+                    revision INTEGER NOT NULL DEFAULT 1,updated_by TEXT,
+                    PRIMARY KEY(robot_id,alert_id));
+                PRAGMA user_version = 7;
+            """)
+            db.execute("""INSERT INTO inspection_results VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                       ("robot-001", result["result_id"], "asset-a", None, result["task_id"],
+                        result["waypoint_id"], "ABNORMAL", "fixture",
+                        result["observed_at"], json.dumps(result)))
+            db.execute("""INSERT INTO inspection_alerts
+                (robot_id,alert_id,inspection_result_id,category,severity,state,
+                 first_seen,last_seen) VALUES (?,?,?,?,?,?,?,?)""",
+                ("robot-001", "alert-legacy", result["result_id"], "fire_smoke",
+                 "WARNING", "CLOSED", result["observed_at"], result["observed_at"]),
+            )
+        upgraded = PlatformStore(path)
+        self.assertEqual(upgraded.schema_version, 8)
+        with upgraded.connect() as db:
+            linked = db.execute("""SELECT asset_id FROM inspection_result_assets
+                WHERE robot_id=? AND inspection_result_id=? ORDER BY asset_id""",
+                ("robot-001", result["result_id"])).fetchall()
+            self.assertEqual([row[0] for row in linked], ["asset-a", "asset-b"])
+        fresh = self.inspection_event(1, source="migration", asset_ids=["asset-a", "asset-b"])
+        upgraded.ingest_robot_events("robot-001", [fresh])
+        with upgraded.connect() as db:
+            alerts = db.execute("SELECT alert_id,state,episode FROM inspection_alerts ORDER BY episode").fetchall()
+        self.assertEqual([(row["state"], row["episode"]) for row in alerts],
+                         [("CLOSED", 1), ("OPEN", 2)])
+        self.assertEqual(alerts[0]["alert_id"], "alert-legacy")
     def test_offline_robot_outbox_replays_once_after_both_stores_restart(self):
         robot_path = str(Path(self.directory.name) / "robot-missions.sqlite3")
         robot = MissionStore(robot_path, "robot-001")
@@ -455,7 +599,7 @@ class PlatformApiTest(unittest.TestCase):
         self.assertIn("version", response.json)
         self.assertIn("commit", response.json)
         self.assertIn("frontend_build", response.json)
-        self.assertEqual(response.json["schema_versions"]["platform"], 7)
+        self.assertEqual(response.json["schema_versions"]["platform"], 8)
         self.assertIsNone(response.json["schema_versions"]["auth"])
         self.assertNotIn("path", response.json)
 
@@ -898,7 +1042,8 @@ class PlatformApiTest(unittest.TestCase):
             "task_id": "task-1", "step_id": "step-1", "status": "SUCCEEDED",
             "outcome": "ABNORMAL", "source_mode": "fixture",
             "observed_at": "2026-10-10T00:00:00Z", "map_id": "map-a",
-            "map_version_id": "v1", "detector_type": "fire_smoke",
+            "map_version_id": "v1", "waypoint_id": "wp-fixture",
+            "detector_type": "fire_smoke",
             "position": {"frame_id": "map", "x": 1.25, "y": -0.5, "yaw": 0.2,
                          "observed_at": "2026-10-10T00:00:00Z"},
             "evidence": [{"evidence_id": "evidence-1", "media_type": "image/jpeg",
@@ -1178,7 +1323,7 @@ class PlatformApiTest(unittest.TestCase):
         self.assertIsNone(migrated["valid_from"])
         self.assertIsNone(migrated["valid_until"])
         with sqlite3.connect(legacy_path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
             tables = {row[0] for row in db.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )}
@@ -1188,13 +1333,13 @@ class PlatformApiTest(unittest.TestCase):
     def test_platform_database_rejects_future_schema_before_mutation(self):
         future_path = str(Path(self.directory.name) / "future-platform.sqlite3")
         with sqlite3.connect(future_path) as db:
-            db.execute("PRAGMA user_version = 8")
+            db.execute("PRAGMA user_version = 9")
         os.chmod(future_path, 0o644)
         with self.assertRaisesRegex(RuntimeError, "schema is newer"):
             PlatformStore(future_path)
         self.assertEqual(Path(future_path).stat().st_mode & 0o777, 0o644)
         with sqlite3.connect(future_path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 9)
 
     def test_waypoint_payload_rejects_invalid_values_duplicate_and_unsupported_action(self):
         body = {"map_id": "simulation/map-a", "name": "A", "x": 0, "y": 0, "yaw": 0}

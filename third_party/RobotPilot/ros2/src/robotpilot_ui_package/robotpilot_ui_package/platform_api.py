@@ -37,7 +37,7 @@ from .log_maintenance import prune_expired_logs
 from .route_tasks import list_saved_routes, route_mission
 from .storage_monitor import storage_report
 
-PLATFORM_SCHEMA_VERSION = 7
+PLATFORM_SCHEMA_VERSION = 8
 
 try:
     from ament_index_python.packages import get_package_share_directory
@@ -51,6 +51,20 @@ def utc_now():
 
 def json_hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def inspection_alert_fingerprint(result, category):
+    """Group an abnormality by its mapped object, never by category alone."""
+    asset_ids = result.get("asset_ids") or []
+    if asset_ids:
+        target = {"asset_ids": sorted(set(asset_ids))}
+    elif result.get("waypoint_id"):
+        target = {"waypoint_id": result["waypoint_id"]}
+    else:
+        # Unknown locations must not merge unrelated observations.
+        target = {"result_id": result["result_id"]}
+    return json_hash({"category": category, "map_id": result["map_id"],
+                      "map_version_id": result["map_version_id"], "target": target})
 
 
 def inspection_alert_payload(row):
@@ -313,6 +327,14 @@ class PlatformStore:
                 );
                 CREATE INDEX IF NOT EXISTS inspection_results_task
                     ON inspection_results(robot_id, task_id, occurred_at DESC);
+                CREATE TABLE IF NOT EXISTS inspection_result_assets (
+                    robot_id TEXT NOT NULL,
+                    inspection_result_id TEXT NOT NULL,
+                    asset_id TEXT NOT NULL,
+                    PRIMARY KEY (robot_id, inspection_result_id, asset_id)
+                );
+                CREATE INDEX IF NOT EXISTS inspection_result_assets_asset
+                    ON inspection_result_assets(robot_id, asset_id, inspection_result_id);
                 CREATE TABLE IF NOT EXISTS event_evidence (
                     robot_id TEXT NOT NULL,
                     evidence_id TEXT NOT NULL,
@@ -340,6 +362,11 @@ class PlatformStore:
                     occurrence_count INTEGER NOT NULL DEFAULT 1,
                     revision INTEGER NOT NULL DEFAULT 1,
                     updated_by TEXT,
+                    fingerprint TEXT,
+                    episode INTEGER NOT NULL DEFAULT 1,
+                    map_id TEXT,
+                    map_version_id TEXT,
+                    waypoint_id TEXT,
                     PRIMARY KEY (robot_id, alert_id)
                 );
                 CREATE INDEX IF NOT EXISTS inspection_alerts_recent
@@ -454,6 +481,52 @@ class PlatformStore:
             asset_columns = {row["name"] for row in db.execute("PRAGMA table_info(assets)")}
             if "revision" not in asset_columns:
                 db.execute("ALTER TABLE assets ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+            alert_columns = {row["name"] for row in db.execute("PRAGMA table_info(inspection_alerts)")}
+            for column, declaration in (
+                ("fingerprint", "TEXT"), ("episode", "INTEGER NOT NULL DEFAULT 1"),
+                ("map_id", "TEXT"), ("map_version_id", "TEXT"), ("waypoint_id", "TEXT"),
+            ):
+                if column not in alert_columns:
+                    db.execute(f"ALTER TABLE inspection_alerts ADD COLUMN {column} {declaration}")
+            if current_schema < 8:
+                db.execute("""INSERT OR IGNORE INTO inspection_result_assets
+                    (robot_id,inspection_result_id,asset_id)
+                    SELECT robot_id,inspection_result_id,asset_id FROM inspection_results
+                    WHERE asset_id IS NOT NULL AND asset_id != ''""")
+                for row in db.execute("""SELECT robot_id,inspection_result_id,details_json
+                    FROM inspection_results""").fetchall():
+                    try:
+                        result = json.loads(row["details_json"] or "{}")
+                    except (TypeError, ValueError):
+                        continue
+                    asset_ids = result.get("asset_ids", []) if isinstance(result, dict) else []
+                    if not isinstance(asset_ids, list):
+                        continue
+                    for asset_id in asset_ids:
+                        if isinstance(asset_id, str) and 1 <= len(asset_id) <= 128:
+                            db.execute("""INSERT OR IGNORE INTO inspection_result_assets
+                                (robot_id,inspection_result_id,asset_id) VALUES (?,?,?)""",
+                                (row["robot_id"], row["inspection_result_id"], asset_id),
+                            )
+                for row in db.execute("""SELECT a.robot_id,a.alert_id,a.category,r.details_json
+                    FROM inspection_alerts a LEFT JOIN inspection_results r
+                    ON r.robot_id=a.robot_id AND r.inspection_result_id=a.inspection_result_id
+                    WHERE a.fingerprint IS NULL OR a.map_id IS NULL""").fetchall():
+                    try:
+                        result = json.loads(row["details_json"] or "{}")
+                        fingerprint = inspection_alert_fingerprint(result, row["category"])
+                    except (TypeError, ValueError, KeyError):
+                        continue
+                    db.execute("""UPDATE inspection_alerts SET fingerprint=?,map_id=?,
+                        map_version_id=?,waypoint_id=? WHERE robot_id=? AND alert_id=?""",
+                        (fingerprint, result["map_id"], result["map_version_id"],
+                         result.get("waypoint_id"), row["robot_id"], row["alert_id"]),
+                    )
+            db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS inspection_alerts_episode
+                ON inspection_alerts(robot_id,fingerprint,episode)
+                WHERE fingerprint IS NOT NULL""")
+            db.execute("""CREATE INDEX IF NOT EXISTS inspection_alerts_map_recent
+                ON inspection_alerts(robot_id,map_id,map_version_id,last_seen DESC)""")
             for column, declaration in (
                 ("point_type", "TEXT NOT NULL DEFAULT 'inspection'"),
                 ("source", "TEXT NOT NULL DEFAULT 'operator'"),
@@ -638,6 +711,7 @@ class PlatformStore:
                 raise ValueError("robot event exceeds 64 KiB")
             prepared.append((event_id, source, seq, event_type, occurred_at, encoded, event))
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             last_committed_seq = db.execute(
                 "SELECT COALESCE(MAX(source_seq), 0) FROM robot_events WHERE robot_id = ? AND source = ?",
                 (robot_id, prepared[0][1]),
@@ -700,6 +774,15 @@ class PlatformStore:
             raise ValueError("inspection classifications contain unsupported fields")
         if result.get("reason_code") not in (None, "PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT", "PROVIDER_FAILED", "PROVIDER_REJECTED"):
             raise ValueError("inspection reason_code is invalid")
+        asset_ids = result.get("asset_ids", [])
+        if (not isinstance(asset_ids, list) or len(asset_ids) > 100
+                or any(not isinstance(value, str) or not 1 <= len(value) <= 128
+                       for value in asset_ids)):
+            raise ValueError("inspection asset_ids are invalid")
+        waypoint_id = result.get("waypoint_id")
+        if waypoint_id is not None and (not isinstance(waypoint_id, str)
+                                        or not 1 <= len(waypoint_id) <= 128):
+            raise ValueError("inspection waypoint_id is invalid")
         return result
 
     @staticmethod
@@ -752,6 +835,11 @@ class PlatformStore:
              result["outcome"], result["source_mode"], result["observed_at"],
              json.dumps(result, allow_nan=False, separators=(",", ":"))),
         )
+        for asset_id in set(result.get("asset_ids") or []):
+            db.execute("""INSERT OR IGNORE INTO inspection_result_assets
+                (robot_id,inspection_result_id,asset_id) VALUES (?,?,?)""",
+                (robot_id, result["result_id"], asset_id),
+            )
         for item in evidence:
             db.execute(
                 """INSERT INTO event_evidence(robot_id,evidence_id,event_id,inspection_result_id,
@@ -761,19 +849,30 @@ class PlatformStore:
             )
         if result["outcome"] == "ABNORMAL":
             category = result.get("detector_type") or "other"
-            asset_ids = result.get("asset_ids") or []
-            fingerprint = json_hash({"category": category, "map_id": result["map_id"],
-                                     "map_version_id": result["map_version_id"], "asset_ids": sorted(asset_ids)})
-            alert_id = "alert-" + fingerprint[:40]
-            db.execute(
-                """INSERT INTO inspection_alerts(robot_id,alert_id,inspection_result_id,category,
-                   severity,first_seen,last_seen,occurrence_count) VALUES (?,?,?,?,?,?,?,1)
-                   ON CONFLICT(robot_id,alert_id) DO UPDATE SET
-                   inspection_result_id=excluded.inspection_result_id,last_seen=excluded.last_seen,
-                   occurrence_count=inspection_alerts.occurrence_count+1""",
-                (robot_id, alert_id, result["result_id"], category, "WARNING",
-                 result["observed_at"], result["observed_at"]),
-            )
+            fingerprint = inspection_alert_fingerprint(result, category)
+            latest = db.execute("""SELECT alert_id,episode,state FROM inspection_alerts
+                WHERE robot_id=? AND fingerprint=? ORDER BY episode DESC LIMIT 1""",
+                (robot_id, fingerprint),
+            ).fetchone()
+            if latest and latest["state"] not in ("RESOLVED", "CLOSED"):
+                db.execute("""UPDATE inspection_alerts SET inspection_result_id=?,
+                    last_seen=?,occurrence_count=occurrence_count+1,revision=revision+1
+                    WHERE robot_id=? AND alert_id=?""",
+                    (result["result_id"], result["observed_at"], robot_id, latest["alert_id"]),
+                )
+            else:
+                episode = latest["episode"] + 1 if latest else 1
+                alert_id = f"alert-{fingerprint[:32]}-{episode}"
+                db.execute(
+                    """INSERT INTO inspection_alerts(robot_id,alert_id,inspection_result_id,
+                       category,severity,first_seen,last_seen,occurrence_count,fingerprint,
+                       episode,map_id,map_version_id,waypoint_id)
+                       VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?)""",
+                    (robot_id, alert_id, result["result_id"], category, "WARNING",
+                     result["observed_at"], result["observed_at"], fingerprint,
+                     episode, result["map_id"], result["map_version_id"],
+                     result.get("waypoint_id")),
+                )
 
     def robot_event_history(self, robot_id, *, limit=100, before=None,
                             event_type=None, severity=None, task_id=None,
@@ -2962,15 +3061,22 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
         if filters["source"] and filters["source"] not in ("fixture", "simulation", "hardware"):
             abort(400, "Invalid inspection source filter")
         with store.connect() as db:
-            where = ["robot_id=?"]
+            where = ["r.robot_id=?"]
             values = [robot_id]
-            for key in ("task_id", "waypoint_id", "asset_id", "outcome", "source"):
+            for key in ("task_id", "waypoint_id", "outcome", "source"):
                 if filters[key]:
                     column = "source" if key == "source" else key
-                    where.append(f"{column}=?")
+                    where.append(f"r.{column}=?")
                     values.append(filters[key])
+            if filters["asset_id"]:
+                where.append("""(r.asset_id=? OR EXISTS (
+                    SELECT 1 FROM inspection_result_assets ira
+                    WHERE ira.robot_id=r.robot_id
+                    AND ira.inspection_result_id=r.inspection_result_id AND ira.asset_id=?))""")
+                values.extend((filters["asset_id"], filters["asset_id"]))
             rows = db.execute(
-                f"SELECT * FROM inspection_results WHERE {' AND '.join(where)} ORDER BY occurred_at DESC,inspection_result_id LIMIT ? OFFSET ?",
+                f"SELECT r.* FROM inspection_results r WHERE {' AND '.join(where)} "
+                "ORDER BY r.occurred_at DESC,r.inspection_result_id LIMIT ? OFFSET ?",
                 (*values, limit, offset),
             ).fetchall()
         return jsonify({"results": [{**dict(row), "details": json.loads(row["details_json"])} for row in rows],
@@ -3315,18 +3421,29 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
         map_version_id = request.args.get("map_version_id", "").strip()
         if bool(map_id) != bool(map_version_id):
             abort(400, "map_id and map_version_id must be provided together")
+        try:
+            limit = int(request.args.get("limit", "100"))
+            offset = int(request.args.get("offset", "0"))
+        except ValueError:
+            abort(400, "limit and offset must be integers")
+        if not 1 <= limit <= 200 or not 0 <= offset <= 100000:
+            abort(400, "limit must be 1–200 and offset 0–100000")
         with store.connect() as db:
+            where = ["a.robot_id=?"]
+            values = [robot_id]
+            if map_id:
+                where.extend(("a.map_id=?", "a.map_version_id=?"))
+                values.extend((map_id, map_version_id))
             rows = db.execute("""SELECT a.*,r.details_json AS result_details_json
                 FROM inspection_alerts a LEFT JOIN inspection_results r
                 ON r.robot_id=a.robot_id AND r.inspection_result_id=a.inspection_result_id
-                WHERE a.robot_id=? ORDER BY a.last_seen DESC LIMIT 100""", (robot_id,)).fetchall()
-        alerts = []
-        for row in rows:
-            item = inspection_alert_payload(row)
-            if map_id and (item.get("map_id"), item.get("map_version_id")) != (map_id, map_version_id):
-                continue
-            alerts.append(item)
-        return jsonify({"alerts": alerts})
+                WHERE """ + " AND ".join(where) +
+                " ORDER BY a.last_seen DESC,a.alert_id LIMIT ? OFFSET ?",
+                (*values, limit + 1, offset),
+            ).fetchall()
+        alerts = [inspection_alert_payload(row) for row in rows[:limit]]
+        return jsonify({"alerts": alerts, "limit": limit, "offset": offset,
+                        "next_offset": offset + limit if len(rows) > limit else None})
 
     @app.get(prefix + "/inspection/alerts/<alert_id>")
     @require_role("Viewer")

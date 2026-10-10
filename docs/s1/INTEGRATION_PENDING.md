@@ -16,6 +16,7 @@
 
 ## 本仓库后续工作
 
+- 请业务方确认多资产检测的告警粒度：当前平台把同一次检测关联的资产 ID 集合视为一个对象，一组资产生成一个 episode；若需逐资产拆分，须同步确定每条告警的地图 pin 位置和历史迁移规则。
 - 为已编译 MissionManager 巡检快照补模板 revision 编辑/管理和调度运行历史视图；当前任务检索仅覆盖 MissionManager 状态携带的最近 10 条运行历史，完整归档分页/导出待扩展。日/周 schedule 的现有接口和 Scheduler 页面已可选择编译后的巡检 mission。
 - 通过安全控制面实现 operating/allowed area；迁移受影响的 ROSBridge 地图/区域业务写操作并验证端侧 ACK。遵循 S0 map bundle 冷切换约束。
 - 基准照片与结果证据的受控媒体上传、持久存储、授权读取、大小/MIME/hash 检查、审计和 missing/corrupt 处置；不暴露宿主路径或任意 URL。
