@@ -8,6 +8,9 @@ if [[ ! -f /opt/ros/humble/setup.bash ]]; then
   exit 2
 fi
 source /opt/ros/humble/setup.bash
+if [[ -f "$repo_root/install/setup.bash" ]]; then
+  source "$repo_root/install/setup.bash"
+fi
 
 if [[ ! -x "$repo_root/third_party/RobotPilot/web/node_modules/.bin/vitest" ]]; then
   echo "BLOCKED: run npm ci in third_party/RobotPilot/web first" >&2
@@ -21,7 +24,15 @@ colcon --log-base "$check_root/log" build \
     "$repo_root/third_party/RobotPilot/ros2/src/robotpilot_ui_package" \
   --packages-up-to mission_manager robotpilot_ui_package \
   --symlink-install --build-base "$check_root/build" --install-base "$check_root/install"
-source "$check_root/install/setup.bash"
+source "$check_root/install/local_setup.bash"
+
+# The navigation launch composition must resolve the newly installed monitor.
+# Other bringup dependencies are already supplied by the main workspace.
+colcon --log-base "$check_root/bringup-log" build \
+  --base-paths "$repo_root/src" \
+  --packages-select robot_bringup \
+  --symlink-install --build-base "$check_root/build" --install-base "$check_root/install"
+source "$check_root/install/local_setup.bash"
 
 python3 -m pytest -q \
   "$repo_root/third_party/RobotPilot/ros2/src/robotpilot_ui_package/test" \

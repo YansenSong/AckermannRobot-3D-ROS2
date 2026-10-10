@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "map_id": "0c254af3b862",
+  "map_version_id": "0c254af3b862",
+  "bundle_id": "531478c17e738b11c91c7381b861f0703b86bd9801798b8530d8f0390bd081ac",
+  "files": {
+    "map_yaml": "e7a04e5bafba67fbe37f65f2d0509fb1ca4798d86862bae3ec9033cf144c3a02",
+    "map_image": "1c06a3baa83129699b6c282defc352b93f70237f7a88396a2236ff6dd1feadad",
+    "globalmap_pcd": "70357ca4ce6c52b8f90ab29961a094780d9b4986a23b11e797915e18eb3a3181"
+  }
+}

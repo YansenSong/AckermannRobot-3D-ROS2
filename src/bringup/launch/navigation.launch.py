@@ -72,9 +72,17 @@ def generate_launch_description():
         name='mission_manager', output='screen',
         respawn=True, respawn_delay=1.0,
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}])
+    map_bundle_monitor = Node(
+        package='mission_manager', executable='map_bundle_monitor',
+        name='map_bundle_monitor', output='screen',
+        respawn=True, respawn_delay=1.0,
+        parameters=[{
+            'map_yaml': LaunchConfiguration('map'),
+            'globalmap_pcd': LaunchConfiguration('globalmap_pcd'),
+        }])
     rviz = Node(package='rviz2', executable='rviz2', name='rviz2', output='screen',
                 condition=IfCondition(LaunchConfiguration('use_rviz')),
                 arguments=['-d', os.path.join(share, 'rviz', 'nav2_default_view.rviz')])
     return LaunchDescription(
         arguments + [localization, area_rules, planning, scan, adapter, mux,
-                     nav_status, mission_manager, rviz])
+                     nav_status, map_bundle_monitor, mission_manager, rviz])

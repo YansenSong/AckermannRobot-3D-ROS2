@@ -67,6 +67,10 @@ class FakeBridge:
             },
             "map_identity_online": True,
             "map_identity_observed_at": "2026-10-08T00:00:00+00:00",
+            "map_bundle": {"schema_version": 1, "ready": True,
+                           "map_id": "simulation/map-a", "map_version_id": "simulation/map-a",
+                           "bundle_id": "test-bundle", "globalmap_pcd_sha256": "test-pcd"},
+            "map_bundle_online": True,
             "software_stop_state": {
                 "active": False, "result": "confirmed", "durable": True,
                 "observed_at": "2026-10-08T00:00:00+00:00",
@@ -787,6 +791,11 @@ class PlatformApiTest(unittest.TestCase):
         from robotpilot_ui_package.platform_api import autonomy_readiness
         ready = autonomy_readiness({
             "mission_online": True, "map_identity_online": True, "pose_online": True,
+            "map_identity": {"map_id": "grid-1", "map_version_id": "grid-1"},
+            "map_bundle_online": True, "map_bundle": {"ready": True, "map_id": "grid-1",
+                                                     "map_version_id": "grid-1",
+                                                     "bundle_id": "test-bundle",
+                                                     "globalmap_pcd_sha256": "test-pcd"},
             "software_stop_online": True, "software_stop_state": bridge.software_stop_state,
             "battery_online": True,
             "battery_state": {"available": True, "low_battery": False, "charging": False},

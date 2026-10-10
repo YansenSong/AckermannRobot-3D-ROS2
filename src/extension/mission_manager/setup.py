@@ -18,6 +18,8 @@ setup(
     entry_points={
         "console_scripts": [
             "mission_manager = mission_manager.node:main",
+            "map_bundle_monitor = mission_manager.map_bundle:monitor_main",
+            "map_bundle_manifest = mission_manager.map_bundle:manifest_main",
         ],
     },
 )

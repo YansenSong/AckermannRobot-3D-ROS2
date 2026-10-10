@@ -68,6 +68,14 @@ def autonomy_readiness(snapshot):
         blockers.append("MissionManager unavailable")
     if not snapshot.get("map_identity_online"):
         blockers.append("current 2D map identity unavailable or stale")
+    bundle = snapshot.get("map_bundle")
+    if (not snapshot.get("map_bundle_online") or not isinstance(bundle, dict)
+            or not bundle.get("ready") or not bundle.get("bundle_id")
+            or not bundle.get("globalmap_pcd_sha256")):
+        blockers.append("2D/3D map bundle unavailable or unverified")
+    elif (bundle.get("map_id") != (snapshot.get("map_identity") or {}).get("map_id")
+          or bundle.get("map_version_id") != (snapshot.get("map_identity") or {}).get("map_version_id")):
+        blockers.append("active 2D and LIORF 3D maps do not match")
     if not snapshot.get("pose_online"):
         blockers.append("localization pose unavailable or stale")
     stop = snapshot.get("software_stop_state")
@@ -976,6 +984,8 @@ class RobotBridge(Node):
         self.map_identity = None
         self.map_identity_seen = 0
         self.map_identity_observed_at = None
+        self.map_bundle = None
+        self.map_bundle_seen = 0
         self.software_stop_state = None
         self.software_stop_seen = 0
         self.diagnostics = {}
@@ -1001,6 +1011,7 @@ class RobotBridge(Node):
         self.create_subscription(Float32, "/battery_status", self._battery, 10)
         self.create_subscription(String, "/battery/state", self._battery_state, 10)
         self.create_subscription(String, "/ackermann/routes/catalog", self._route_catalog, 10)
+        self.create_subscription(String, "/localization/map_bundle", self._map_bundle, 10)
         self.create_subscription(String, "/safety/software_stop/state", self._software_stop_state, 10)
         self.create_subscription(String, "/area_rules/control", self._area_control, 10)
         self.create_subscription(DiagnosticArray, "/diagnostics", self._diagnostic, 10)
@@ -1030,6 +1041,18 @@ class RobotBridge(Node):
             }
             self.map_identity_seen = time.monotonic()
             self.map_identity_observed_at = utc_now()
+
+    def _map_bundle(self, message):
+        try:
+            value = json.loads(message.data)
+        except (ValueError, TypeError, AttributeError):
+            return
+        if (not isinstance(value, dict) or value.get("schema_version") != 1
+                or not isinstance(value.get("ready"), bool)):
+            return
+        with self.lock:
+            self.map_bundle = value
+            self.map_bundle_seen = time.monotonic()
 
     def _software_stop_state(self, message):
         try:
@@ -1229,6 +1252,8 @@ class RobotBridge(Node):
                 "map_identity": copy.deepcopy(self.map_identity),
                 "map_identity_online": self.map_identity is not None and time.monotonic() - self.map_identity_seen < 30,
                 "map_identity_observed_at": self.map_identity_observed_at,
+                "map_bundle": copy.deepcopy(self.map_bundle),
+                "map_bundle_online": self.map_bundle is not None and time.monotonic() - self.map_bundle_seen < 5,
                 "software_stop_state": copy.deepcopy(self.software_stop_state),
                 "software_stop_online": self.software_stop_state is not None and time.monotonic() - self.software_stop_seen < 3,
                 "area_control": copy.deepcopy(self.area_control),
@@ -1659,6 +1684,11 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
             "current_map": {
                 **(snapshot["map_identity"] or {}), "stale": not snapshot["map_identity_online"],
                 "observed_at": snapshot["map_identity_observed_at"],
+            },
+            "map_bundle": {
+                **(snapshot.get("map_bundle") or {}),
+                "stale": not snapshot.get("map_bundle_online", False),
+                "ready": bool(snapshot.get("map_bundle_online") and (snapshot.get("map_bundle") or {}).get("ready")),
             },
             "software_stop": {
                 **(snapshot["software_stop_state"] or {}),

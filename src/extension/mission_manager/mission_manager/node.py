@@ -104,6 +104,7 @@ class MissionManager(Node):
         self.active_request_id = None
         self.pose = None
         self.pose_received_at = None
+        self.ekf_odom_received_at = None
         self.deadline = None
         self.step_started = None
         self.nav_seen_active = False
@@ -115,6 +116,8 @@ class MissionManager(Node):
         self.software_stop_received_at = None
         self.map_identity = None
         self.map_identity_received_at = None
+        self.map_bundle = None
+        self.map_bundle_received_at = None
         self.fault_candidates = {}
         self.battery_state = None
         self.battery_received_at = None
@@ -138,6 +141,7 @@ class MissionManager(Node):
             String, "/safety/software_stop/state", self.on_software_stop_state, 10
         )
         self.create_subscription(String, "/ackermann/routes/catalog", self.on_route_catalog, 10)
+        self.create_subscription(String, "/localization/map_bundle", self.on_map_bundle, 10)
         self.create_subscription(DiagnosticArray, "/diagnostics", self.on_diagnostics, 10)
         self.create_subscription(String, "/battery/state", self.on_battery_state, 10)
         self.create_subscription(String, "/area_rules/control", self.on_area_control, 10)
@@ -145,6 +149,7 @@ class MissionManager(Node):
         self.create_subscription(PoseStamped, "/goal_pose", self.on_goal, 10)
         self.create_subscription(String, "/dock_trigger_status", self.on_dock, 10)
         self.create_subscription(Odometry, "/liorf_localization/mapping/odometry", self.on_odom, 10)
+        self.create_subscription(Odometry, "/odometry/filtered", self.on_ekf_odom, 10)
         self.create_timer(0.2, self.tick)
         self.create_timer(2.0, self.publish_state)
         self.create_timer(5.0, self.publish_outbox)
@@ -215,6 +220,14 @@ class MissionManager(Node):
             level = item.level[0] if isinstance(item.level, (bytes, bytearray)) else int(item.level)
             if level not in (0, 1, 2, 3):
                 continue
+            # robot_localization's topic frequency diagnostic can report no
+            # events while its actual filtered odometry is arriving. Trust the
+            # observed stream only for this exact contradictory diagnostic.
+            if (item.name == "ekf_filter_node: odometry/filtered topic status"
+                    and item.message == "No events recorded."
+                    and self.ekf_odom_received_at is not None
+                    and now - self.ekf_odom_received_at < 2.0):
+                level = 0
             if level == 0:
                 self.fault_candidates.pop(item.name, None)
                 self.store.observe_fault(item.name, 0, item.message)
@@ -329,7 +342,22 @@ class MissionManager(Node):
         self.map_identity = {"map_id": map_id, "map_version_id": map_version_id}
         self.map_identity_received_at = time.monotonic()
 
+    def on_map_bundle(self, message):
+        try:
+            bundle = json.loads(message.data)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return
+        if (not isinstance(bundle, dict) or bundle.get("schema_version") != 1
+                or not isinstance(bundle.get("ready"), bool)):
+            return
+        self.map_bundle = bundle
+        self.map_bundle_received_at = time.monotonic()
+
     def map_binding_block_reason(self, map_id, map_version_id):
+        if (self.map_bundle is None or self.map_bundle_received_at is None
+                or time.monotonic() - self.map_bundle_received_at > 5.0
+                or not self.map_bundle.get("ready")):
+            return "2D/3D map bundle is unavailable or unverified"
         if (
             not self.map_identity
             or self.map_identity_received_at is None
@@ -342,6 +370,11 @@ class MissionManager(Node):
             return "mission map_id does not match the current 2D map"
         if map_version_id != self.map_identity["map_version_id"]:
             return "mission map_version_id does not match the current 2D map version"
+        if (self.map_bundle.get("map_id") != self.map_identity["map_id"]
+                or self.map_bundle.get("map_version_id") != self.map_identity["map_version_id"]
+                or not self.map_bundle.get("bundle_id")
+                or not self.map_bundle.get("globalmap_pcd_sha256")):
+            return "active 2D and LIORF 3D maps do not match the verified bundle"
         return ""
 
     def publish_state(self):
@@ -674,6 +707,17 @@ class MissionManager(Node):
     def tick(self):
         if not self.run or self.run["status"] != "RUNNING" or self.deadline is None:
             return
+        guard_reason = self.motion_guard_block_reason() or self.map_binding_block_reason(
+            self.run.get("map_id"), self.run.get("map_version_id")
+        )
+        if guard_reason:
+            remaining = (max(0.0, self.deadline - time.monotonic())
+                         if self._kind() == "wait" else 0.0)
+            self._stop_motion()
+            self.deadline = None
+            self._transition("PAUSED", f"safety guard: {guard_reason}",
+                             remaining_seconds=remaining)
+            return
         if self._kind() == "wait" and time.monotonic() - self.last_wait_persist >= 1.0:
             self.run = self.store.update_run(
                 self.run["task_id"], remaining_seconds=max(0.0, self.deadline - time.monotonic()))
@@ -729,6 +773,12 @@ class MissionManager(Node):
         ):
             self.pose = values
             self.pose_received_at = time.monotonic()
+
+    def on_ekf_odom(self, message):
+        if (message.header.frame_id == "odom"
+                and math.isfinite(message.pose.pose.position.x)
+                and math.isfinite(message.pose.pose.position.y)):
+            self.ekf_odom_received_at = time.monotonic()
 
     def destroy_node(self):
         if self.run and self.run["status"] == "RUNNING":

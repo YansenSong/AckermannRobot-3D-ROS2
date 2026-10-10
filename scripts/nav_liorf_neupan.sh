@@ -29,9 +29,17 @@ if [[ "$MAP_DIR" != "$MAPS_DIR"/* ]]; then
     exit 1
 fi
 
-test -f "$MAP_DIR/GlobalMap.pcd"
-test -f "$MAP_DIR/map.pgm"
-test -f "$MAP_DIR/map.yaml"
+for required_file in GlobalMap.pcd map.pgm map.yaml; do
+    if [[ ! -s "$MAP_DIR/$required_file" ]]; then
+        echo "缺少或为空的导航地图文件: $MAP_DIR/$required_file" >&2
+        exit 1
+    fi
+done
+if [[ ! -f "$MAP_DIR/map.bundle.json" ]]; then
+    echo "缺少 2D/3D 地图配对清单: $MAP_DIR/map.bundle.json" >&2
+    echo "请先加载该 2D 地图，核对 LIORF 点云来源，再用 map_bundle_manifest 生成清单。" >&2
+    exit 1
+fi
 source "$PROJECT_DIR/install/setup.bash"
 
 for required_package in robot_bringup nav_status mission_manager area_rules; do

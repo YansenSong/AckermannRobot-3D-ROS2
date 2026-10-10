@@ -5,15 +5,15 @@
 | 来源 | 当前写入/请求 | 类别 | 当前反馈 | `local` 目标 |
 |---|---|---|---|---|
 | `components/MissionClient.jsx`、`shared/missions/*` | **已迁移**：任务写走 `/missions`、`/tasks`、`/commands`；状态仍订阅 `/mission/state` | 任务写 | HTTP 命令结果与 ROS 状态 | `local` 网关现拒绝 `/mission/command` 写发布，仅允许遗留 `query`；仍需 Gazebo 整链确认 |
-| `pages/MapPage.jsx` | `/initialpose` | 定位重置 | 没有可关联完成 ACK | 增加受控定位命令及确认，或正式模式禁用，不能把 publish 当完成 |
+| `pages/MapPage.jsx` | `/initialpose` | 定位重置 | 没有可关联完成 ACK | `local` 网关现禁止直发；仍需受控定位命令及确认，不能把 publish 当完成 |
 | `pages/MapPage.jsx`、`components/StatusBar.jsx` | Nav2 cancel service | 安全方向取消 | service response | 由任务命令 `cancel` 承接并查询端侧 ACK；保留急停/取消有效路径 |
 | `pages/MapPage.jsx`、`pages/MapsPage.jsx` | `/ui_operation` 地图/路线操作 | 地图写、路线写 | 文本 `/ui_message`、目录刷新；非结构化 ACK | 白名单 REST 操作，保留 `folders_handler`/`route_store` 执行；结构化 `request_id` ACK |
 | `pages/RoutePage.jsx` | `/ui_operation`、`/ackermann/routes/plan_request` | 路线编辑/规划写 | 路线目录/点位 topic；部分无完成 ACK | 白名单 REST 路线命令，返回关联状态 |
 | `shared/hooks/useKeepoutZones.js` | `/area_rules/command` | 区域安全规则写 | `/area_rules/ack` 带 request_id | REST API → area_rules，保留机器人端版本校验和 ACK |
 | `shared/hooks/useSoftwareStop.js` | `/safety/software_stop/request` | 软件停车及释放 | `/safety/software_stop/state` 带 request_id | 停车/释放分别授权，走受控 API；端侧持久锁存和释放保护不变 |
 | `components/Joystick.jsx` | `/cmd_vel`（100 ms 循环） | 手动驾驶 | 无逐命令 ACK；依赖 mux 超时 | 正式远端模式禁用原始速度写；本机仿真保留并受 mux 仲裁 |
-| `components/DockingControl.jsx` | `/goal_pose`、`/dock_trigger`、`/undock_robot` | 导航/对接写 | 状态 topic，无统一命令 ACK | 任务/对接 API；端侧状态与命令关联 |
-| `components/ControlSwitcher.jsx` | 动态 `topicName` | 外设/配置写 | 无统一 ACK | 正式模式禁止任意 topic；显式白名单 API |
+| `components/DockingControl.jsx` | `/goal_pose`、`/dock_trigger`、`/undock_robot` | 导航/对接写 | 状态 topic，无统一命令 ACK | `local` 网关现禁止直发；后续补任务/对接 API、端侧状态与命令关联 |
+| `components/ControlSwitcher.jsx` | 动态 `topicName` | 外设/配置写 | 无统一 ACK | `local` 网关禁止任意 topic 及 `/periphery_operation`；后续补显式白名单 API |
 | `components/LifecycleStatus.jsx` | 节点 `/change_state` service | 生命周期写 | service response | 限工程角色的白名单管理 API；页面目前未挂载，不作为默认控制入口 |
 | `components/Map.jsx`、`pages/MapsPage.jsx`、`pages/RoutePage.jsx`、`shared/hooks/useSavedWaypoints.js` | `/map`、目录、点位请求 topic | 只读请求 | 对应响应 topic | 可暂保留只读请求，网关限制 topic 白名单 |
 | `pages/MapPage.jsx` | 单点/路线任务经 `taskApi.js` | 已受控任务写 | HTTP command + ROS ACK/任务状态 | 保留，补机器人端去重、状态与事件追踪 |

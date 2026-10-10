@@ -16,6 +16,9 @@
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | ROS 诊断生产者 → RobotBridge / mission_manager | 3 秒去抖；严重级别阻止任务启动/恢复 |
 | `/liorf_localization/mapping/odometry` | `nav_msgs/Odometry` | LIORF → RobotBridge / mission_manager | `map` 位姿；3 秒 stale |
 | `/ackermann/routes/catalog` | `std_msgs/String` JSON | route_store → RobotBridge / mission_manager | 2D 地图版本；30 秒 stale |
+| `/map` | `nav_msgs/OccupancyGrid` | map_server → route_store / map_bundle_monitor | reliable、transient local、深度 1；监测节点计算与 route_store 相同的 12 位地图 ID |
+| `/liorf_localization/localization/global_map` | `sensor_msgs/PointCloud2` | LIORF → map_bundle_monitor | reliable、transient local、深度 1；LIORF 成功装载点云后发布 |
+| `/localization/map_bundle` | `std_msgs/String` JSON | map_bundle_monitor → RobotBridge / mission_manager | reliable、transient local、深度 1；2 秒发布，5 秒 stale；`ready`、`map_id`、`map_version_id`、`bundle_id`、PCD SHA-256、阻断原因 |
 | `/navigation/state` | `nav_status/NavigationStatus` | 导航栈 → RobotBridge / mission_manager | 平台 3 秒 stale |
 | `/goal_pose` | `geometry_msgs/PoseStamped` | mission_manager → 导航栈 | frame 必须是 `map`；任务超时另计 |
 | `/mission/hold` | `std_msgs/Bool` | mission_manager → cmd_vel_mux | 机器人侧停止仲裁 |

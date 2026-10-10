@@ -16,11 +16,11 @@ READ_REQUEST_TOPICS = {
     "/nav_data_req", "/ackermann/routes/request", "/WP_req",
 }
 OPERATOR_TOPICS = {
-    "/goal_pose", "/stop", "/dock_trigger", "/undock_robot",
+    "/stop",
 }
 SOFTWARE_STOP_REQUEST_TOPIC = "/safety/software_stop/request"
 ENGINEER_TOPICS = {
-    "/initialpose", "/ui_operation", "/periphery_operation",
+    "/ui_operation",
     "/ackermann/routes/plan_request", "/ackermann/routes/operation",
     "/area_rules/command",
 }

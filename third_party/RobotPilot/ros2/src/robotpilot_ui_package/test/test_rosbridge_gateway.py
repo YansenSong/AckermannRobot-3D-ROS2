@@ -13,7 +13,9 @@ class GatewayPolicyTest(unittest.TestCase):
                                         "msg": {"data": '{"command":"query"}'}}), "Viewer")
         self.assertIsNone(required_role({"op": "publish", "topic": "/mission/command",
                                         "msg": {"data": '{"command":"start"}'}}))
-        self.assertEqual(required_role({"op": "publish", "topic": "/initialpose"}), "Engineer")
+        for topic in ("/initialpose", "/goal_pose", "/dock_trigger", "/undock_robot",
+                      "/periphery_operation"):
+            self.assertIsNone(required_role({"op": "publish", "topic": topic}))
         self.assertIsNone(required_role({"op": "publish", "topic": "/cmd_vel"}))
         self.assertIsNone(required_role({"op": "publish", "topic": "/unknown"}))
         self.assertIsNone(required_role({"op": "call_service", "service": "/rosapi/set_param"}))

@@ -5,6 +5,7 @@ import time
 import unittest
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from nav_status.msg import NavigationStatus
@@ -43,6 +44,45 @@ class MissionNodeTest(unittest.TestCase):
         node.on_route_catalog(String(data=json.dumps({
             "active_files": {"map_id": map_id, "map_version_id": map_version_id},
         })))
+        node.on_map_bundle(String(data=json.dumps({
+            "schema_version": 1, "ready": True,
+            "map_id": map_id, "map_version_id": map_version_id,
+            "bundle_id": "bundle-test", "globalmap_pcd_sha256": "test-pcd",
+        })))
+
+    def test_ekf_no_events_fault_requires_missing_filtered_odom(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            try:
+                name = "ekf_filter_node: odometry/filtered topic status"
+                node.store.observe_fault(name, 2, "No events recorded.")
+                self.assertTrue(node.store.active_critical_faults())
+                odom = Odometry()
+                odom.header.frame_id = "odom"
+                node.on_ekf_odom(odom)
+                status = DiagnosticStatus()
+                status.name = name
+                status.level = b"\x02"
+                status.message = "No events recorded."
+                diag = DiagnosticArray()
+                diag.status = [status]
+                node.on_diagnostics(diag)
+                self.assertFalse(node.store.active_critical_faults())
+                node.ekf_odom_received_at = time.monotonic() - 3
+                node.store.observe_fault(name, 2, "No events recorded.")
+                node.on_diagnostics(diag)
+                self.assertTrue(node.store.active_critical_faults())
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
 
     def test_motion_guard_checks_battery_area_and_critical_faults(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -326,6 +366,11 @@ class MissionNodeTest(unittest.TestCase):
                     "id": "map-task", "name": "Map bound", "map_id": "grid-1",
                     "map_version_id": "grid-1", "steps": [{"type": "wait", "seconds": 1}],
                 }})))
+                node.map_bundle = None
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "map-task"})))
+                self.assertIn("map bundle is unavailable or unverified",
+                              json.loads(node.ack_pub.messages[-1].data)["error"])
+                self.current_map(node)
                 self.current_map(node, "grid-2", "grid-2")
                 node.on_command(String(data=json.dumps({"command": "start", "mission_id": "map-task"})))
                 self.assertEqual(
@@ -345,6 +390,38 @@ class MissionNodeTest(unittest.TestCase):
                     "mission map_version_id does not match the current 2D map version",
                 )
                 self.assertEqual(node.run["status"], "PAUSED")
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_log_dir is None:
+                    os.environ.pop("ROS_LOG_DIR", None)
+                else:
+                    os.environ["ROS_LOG_DIR"] = previous_log_dir
+
+    def test_active_mission_pauses_when_map_bundle_becomes_unverified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous_log_dir = os.environ.get("ROS_LOG_DIR")
+            os.environ["ROS_LOG_DIR"] = directory
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            self.software_stop(node)
+            self.current_map(node)
+            try:
+                node.on_command(String(data=json.dumps({"command": "save", "mission": {
+                    "id": "map-task", "name": "Map bound", "map_id": "grid-1",
+                    "map_version_id": "grid-1", "steps": [{"type": "wait", "seconds": 30}],
+                }})))
+                node.on_command(String(data=json.dumps({"command": "start", "mission_id": "map-task"})))
+                self.assertEqual(node.run["status"], "RUNNING")
+                node.on_map_bundle(String(data=json.dumps({
+                    "schema_version": 1, "ready": False, "reason": "active 2D map changed",
+                })))
+                node.tick()
+                self.assertEqual(node.run["status"], "PAUSED")
+                self.assertEqual(node.run["hold_active"], 1)
+                self.assertIn("map bundle", node.run["reason"])
+                self.assertGreater(node.run["remaining_seconds"], 0)
             finally:
                 node.destroy_node()
                 rclpy.shutdown()
