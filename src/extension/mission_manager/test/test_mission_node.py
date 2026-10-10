@@ -502,6 +502,147 @@ class MissionNodeTest(unittest.TestCase):
             else:
                 os.environ["ROBOT_MODE"] = previous_mode
 
+    def test_paused_inspection_result_is_reconciled_and_request_is_immutable(self):
+        previous_mode = os.environ.get("ROBOT_MODE")
+        os.environ["ROBOT_MODE"] = "simulation"
+        try:
+            for result_while_paused, restart_before_resume in (
+                    (True, False), (False, False), (True, True), (False, True)):
+                with self.subTest(result_while_paused=result_while_paused,
+                                  restart_before_resume=restart_before_resume), tempfile.TemporaryDirectory() as directory:
+                    rclpy.init(args=["--ros-args", "-p",
+                                     f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+                    node = MissionManager()
+                    node.action_request_pub = PublisherSpy()
+                    node.action_control_pub = PublisherSpy()
+                    try:
+                        self.software_stop(node)
+                        self.current_map(node)
+                        self.fixture_provider(node)
+                        odom = Odometry()
+                        odom.header.frame_id = "odom"
+                        odom.pose.pose.orientation.w = 1.0
+                        node.on_odom(odom)
+                        node.on_ekf_odom(odom)
+                        mission = node.store.save_mission({
+                            "id": "pause-inspect", "name": "Pause inspect", "map_id": "grid-1",
+                            "map_version_id": "grid-1", "steps": [
+                                {"id": "nav", "type": "waypoint", "waypoint_id": "wp-1",
+                                 "pose": {"x": 1, "y": 2, "z": 0, "w": 1}},
+                                {"id": "detect", "type": "inspection_action", "action": "detect",
+                                 "waypoint_id": "wp-1", "detector_types": ["fire_smoke"],
+                                 "asset_ids": [], "parameters": {}, "timeout_ms": 5000},
+                            ],
+                        })
+                        node.run = node.store.new_run("pause-task", mission)
+                        node.run = node.store.update_run("pause-task", step_index=1,
+                                                         arrival_step_index=0)
+                        node._begin_step()
+                        first_request = json.loads(node.action_request_pub.messages[-1].data)
+                        result = {"schema_version": 1, "result_id": "pause-result",
+                                  "robot_id": node.robot_id, "mission_id": "pause-inspect",
+                                  "task_id": "pause-task", "step_id": "detect", "attempt": 1,
+                                  "action_run_id": first_request["action_run_id"],
+                                  "status": "SUCCEEDED", "outcome": "INCONCLUSIVE",
+                                  "source_mode": "fixture", "observed_at": "2026-10-10T00:00:00Z",
+                                  "map_id": "grid-1", "map_version_id": "grid-1",
+                                  "waypoint_id": "wp-1", "confidence": None}
+                        node._control("pause", {"task_id": "pause-task"})
+                        self.assertEqual(node.run["status"], "PAUSED")
+                        if result_while_paused:
+                            node.on_inspection_result(String(data=json.dumps(result)))
+                            self.assertEqual(node.run["status"], "PAUSED")
+                        if restart_before_resume:
+                            node.destroy_node()
+                            node = MissionManager()
+                            node.action_request_pub = PublisherSpy()
+                            node.action_control_pub = PublisherSpy()
+                            self.software_stop(node)
+                            self.current_map(node)
+                            self.fixture_provider(node)
+                        node.on_odom(odom)
+                        node.on_ekf_odom(odom)
+                        node._control("resume", {"task_id": "pause-task"})
+                        if not result_while_paused:
+                            self.assertEqual(json.loads(node.action_request_pub.messages[-1].data), first_request)
+                            node.on_inspection_result(String(data=json.dumps(result)))
+                        self.assertEqual(node.run["status"], "SUCCEEDED")
+                        node.on_inspection_result(String(data=json.dumps(result)))
+                        self.assertEqual(len([event for event in node.store.pending_events()
+                                              if event["type"] == "inspection.result"]), 1)
+                    finally:
+                        node.destroy_node()
+                        rclpy.shutdown()
+        finally:
+            if previous_mode is None:
+                os.environ.pop("ROBOT_MODE", None)
+            else:
+                os.environ["ROBOT_MODE"] = previous_mode
+
+    def test_cancelled_result_stays_late_and_retry_changes_action_identity(self):
+        previous_mode = os.environ.get("ROBOT_MODE")
+        os.environ["ROBOT_MODE"] = "simulation"
+        with tempfile.TemporaryDirectory() as directory:
+            rclpy.init(args=["--ros-args", "-p",
+                             f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+            node = MissionManager()
+            node.action_request_pub = PublisherSpy()
+            try:
+                self.software_stop(node)
+                self.current_map(node)
+                self.fixture_provider(node)
+                odom = Odometry()
+                odom.header.frame_id = "odom"
+                odom.pose.pose.orientation.w = 1.0
+                node.on_odom(odom)
+                node.on_ekf_odom(odom)
+                mission = node.store.save_mission({
+                    "id": "action", "name": "Action", "map_id": "grid-1",
+                    "map_version_id": "grid-1", "steps": [
+                        {"id": "nav", "type": "waypoint", "waypoint_id": "wp-1",
+                         "pose": {"x": 1, "y": 2, "z": 0, "w": 1}},
+                        {"id": "detect", "type": "inspection_action", "action": "detect",
+                         "waypoint_id": "wp-1", "detector_types": ["fire_smoke"],
+                         "asset_ids": [], "parameters": {}, "timeout_ms": 5000},
+                    ],
+                })
+                node.run = node.store.new_run("cancel-task", mission)
+                node.run = node.store.update_run("cancel-task", step_index=1,
+                                                 arrival_step_index=0)
+                node._begin_step()
+                cancelled_request = json.loads(node.action_request_pub.messages[-1].data)
+                node._control("cancel", {"task_id": "cancel-task"})
+                result = {"schema_version": 1, "result_id": "cancel-result",
+                          "robot_id": node.robot_id, "mission_id": "action",
+                          "task_id": "cancel-task", "step_id": "detect", "attempt": 1,
+                          "action_run_id": cancelled_request["action_run_id"],
+                          "status": "SUCCEEDED", "outcome": "INCONCLUSIVE",
+                          "source_mode": "fixture", "observed_at": "2026-10-10T00:00:00Z",
+                          "map_id": "grid-1", "map_version_id": "grid-1", "confidence": None}
+                node.on_inspection_result(String(data=json.dumps(result)))
+                self.assertEqual(node.run["status"], "CANCELLED")
+                self.assertEqual(len([item for item in node.store.pending_events()
+                                      if item["type"] == "inspection.result.late"]), 1)
+                node.run = node.store.new_run("retry-task", mission)
+                node.run = node.store.update_run("retry-task", step_index=1,
+                                                 arrival_step_index=0)
+                node._begin_step()
+                first_request = json.loads(node.action_request_pub.messages[-1].data)
+                node._fail("provider unavailable")
+                node.on_odom(odom)
+                node.on_ekf_odom(odom)
+                node._control("retry", {"task_id": "retry-task"})
+                retry_request = json.loads(node.action_request_pub.messages[-1].data)
+                self.assertEqual(retry_request["attempt"], 2)
+                self.assertNotEqual(first_request["action_run_id"], retry_request["action_run_id"])
+            finally:
+                node.destroy_node()
+                rclpy.shutdown()
+                if previous_mode is None:
+                    os.environ.pop("ROBOT_MODE", None)
+                else:
+                    os.environ["ROBOT_MODE"] = previous_mode
+
     def test_inspection_mission_requires_fresh_matching_provider_capability(self):
         with tempfile.TemporaryDirectory() as directory:
             previous_log_dir = os.environ.get("ROS_LOG_DIR")

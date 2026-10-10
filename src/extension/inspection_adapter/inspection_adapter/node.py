@@ -39,6 +39,15 @@ class InspectionAdapter(Node):
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("CREATE TABLE IF NOT EXISTS action_runs(action_run_id TEXT PRIMARY KEY,request_json TEXT NOT NULL,result_json TEXT,updated_at TEXT NOT NULL)")
         self.db.commit()
+        for action_run_id, request_json in self.db.execute(
+                "SELECT action_run_id,request_json FROM action_runs WHERE result_json IS NULL"):
+            try:
+                request = validate_request(request_json, self.robot_id)
+            except (ValueError, TypeError, KeyError):
+                self.get_logger().warning(f"ignored invalid persisted action {action_run_id}")
+                continue
+            self.pending[action_run_id] = request
+            self.pending_deadline[action_run_id] = self._deadline_from_request(request)
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.result_pub = self.create_publisher(String, "/inspection/action/result", 10)
@@ -58,6 +67,12 @@ class InspectionAdapter(Node):
         self.create_timer(0.1, self.flush_late_fixture)
         self.create_timer(0.1, self.expire_pending)
         self.delayed = []
+
+    @staticmethod
+    def _deadline_from_request(request):
+        requested = datetime.fromisoformat(request["requested_at"].replace("Z", "+00:00"))
+        elapsed = (datetime.now(timezone.utc) - requested).total_seconds()
+        return time.monotonic() + max(0.0, request["timeout_ms"] / 1000.0 - elapsed)
 
     def publish_fixture_capabilities(self):
         if self.mode != "fixture":
@@ -124,6 +139,8 @@ class InspectionAdapter(Node):
             self.result_pub.publish(String(data=cached[1]))
             return
         if action_run_id in self.completed or action_run_id in self.pending:
+            if action_run_id in self.pending:
+                self.publish_action_status(request, "ACCEPTED")
             return
         self.db.execute("INSERT INTO action_runs(action_run_id,request_json,updated_at) VALUES (?,?,?) ON CONFLICT(action_run_id) DO UPDATE SET request_json=excluded.request_json,updated_at=excluded.updated_at",
                         (action_run_id, request_json, datetime.now(timezone.utc).isoformat()))
@@ -133,7 +150,7 @@ class InspectionAdapter(Node):
             self.run_fixture(request)
             return
         action = (self.capabilities or {}).get("action_map", {}).get(request["kind"])
-        online = self.capabilities_seen and time.monotonic() - self.capabilities_seen < 5
+        online = bool(self.capabilities)
         heartbeat = self.heartbeat_seen and time.monotonic() - self.heartbeat_seen < 5
         if not online or not heartbeat or not action or not action.get("supported"):
             mode = request.get("source_mode")
@@ -143,7 +160,7 @@ class InspectionAdapter(Node):
                 self.get_logger().error("inspection source mode is unknown; withholding result")
             return
         self.pending[action_run_id] = request
-        self.pending_deadline[action_run_id] = time.monotonic() + request["timeout_ms"] / 1000.0
+        self.pending_deadline[action_run_id] = self._deadline_from_request(request)
         self.provider_request_pub.publish(String(data=json.dumps(request, allow_nan=False)))
         self.publish_action_status(request, "ACCEPTED")
 
@@ -189,7 +206,7 @@ class InspectionAdapter(Node):
                       "mission_id": request["mission_id"], "task_id": request["task_id"],
                       "step_id": request["step_id"], "attempt": request["attempt"],
                       "status": "TIMEOUT", "outcome": "NOT_APPLICABLE",
-                      "source_mode": (self.capabilities or {}).get("source_mode", "simulation"),
+                      "source_mode": "fixture" if self.mode == "fixture" else request["source_mode"],
                       "observed_at": datetime.now(timezone.utc).isoformat(),
                       "map_id": request["map_id"], "map_version_id": request["map_version_id"],
                       "waypoint_id": request.get("waypoint_id"), "asset_ids": request.get("asset_ids", []),
@@ -265,8 +282,8 @@ class InspectionAdapter(Node):
             if not request:
                 return
             result = validate_result(raw, request, self.robot_id)
-            if result.get("source_mode") != (self.capabilities or {}).get("source_mode"):
-                raise ValueError("provider result source_mode does not match its registered capability")
+            if result.get("source_mode") != request["source_mode"]:
+                raise ValueError("provider result source_mode does not match the original request")
             self.pending.pop(result["action_run_id"], None)
             self.pending_deadline.pop(result["action_run_id"], None)
             self.emit_result(result)

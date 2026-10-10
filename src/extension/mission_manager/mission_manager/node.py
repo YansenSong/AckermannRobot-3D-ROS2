@@ -163,8 +163,11 @@ class MissionManager(Node):
         self.inspection_provider_observed_at = None
         self.action_request_pub = self.create_publisher(String, "/inspection/action/request", 10)
         self.action_control_pub = self.create_publisher(String, "/inspection/action/control", 10)
-        self.create_subscription(String, "/inspection/provider/capabilities",
-                                 self.on_inspection_capabilities, 1)
+        self.create_subscription(
+            String, "/inspection/provider/capabilities", self.on_inspection_capabilities,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL),
+        )
         self.create_subscription(String, "/inspection/provider/heartbeat",
                                  self.on_inspection_provider_heartbeat, 10)
         self.create_subscription(String, "/inspection/action/result", self.on_inspection_result, 10)
@@ -695,19 +698,21 @@ class MissionManager(Node):
         if action == "pause" and status == "RUNNING":
             if self._kind() == "inspection_action":
                 self.publish_action_control("pause")
-            remaining = max(0.0, self.deadline - time.monotonic()) if self.deadline and self._kind() == "wait" else 0.0
+            remaining = (max(0.0, self.deadline - time.monotonic())
+                         if self.deadline and self._kind() in ("wait", "inspection_action") else 0.0)
             self._stop_motion()
             self.deadline = None
             self._transition("PAUSED", "paused by operator", remaining_seconds=remaining)
         elif action == "resume" and status == "PAUSED":
             self._release_motion()
             self._transition("RUNNING", "resumed by operator")
-            if self._kind() == "inspection_action":
-                self.publish_action_control("resume")
             self._begin_step(resume=True)
         elif action == "cancel" and status in ACTIVE:
             if self._kind() == "inspection_action":
                 self.publish_action_control("cancel")
+                queued_result = self.store.inspection_result(self._current_action_run_id())
+                if queued_result is not None:
+                    self.store.record_late_inspection_result(queued_result)
             self._stop_motion()
             self.deadline = None
             self._transition("CANCELLED", "cancelled by operator")
@@ -749,7 +754,7 @@ class MissionManager(Node):
         return None, None
 
     def publish_action_control(self, action):
-        action_run_id = getattr(self, "action_run_id", None)
+        action_run_id = self._current_action_run_id()
         if not action_run_id:
             return
         self.action_control_pub.publish(String(data=json.dumps({
@@ -758,6 +763,14 @@ class MissionManager(Node):
             "attempt": self.run["attempt"], "action_run_id": action_run_id,
             "command": action, "requested_at": utc_now(),
         }, allow_nan=False)))
+
+    def _current_action_run_id(self):
+        if not self.run or self._kind() != "inspection_action":
+            return None
+        step_id = self.run["steps"][self.run["step_index"]]["id"]
+        action_run_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+            f"{self.robot_id}:{self.run['task_id']}:{step_id}:{self.run['attempt']}"))
+        return action_run_id if self.store.inspection_request(action_run_id) else None
 
     def _begin_step(self, resume=False):
         step = self.run["steps"][self.run["step_index"]]
@@ -788,31 +801,49 @@ class MissionManager(Node):
             self.deadline = time.monotonic() + NAV_TIMEOUT
             self.goal_pub.publish(goal)
         elif kind == "inspection_action":
+            step_id = step["id"]
+            action_run_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                f"{self.robot_id}:{self.run['task_id']}:{step_id}:{self.run['attempt']}"))
+            self.action_run_id = action_run_id
+            self.action_step_id = step_id
+            if resume:
+                queued_result = self.store.inspection_result(action_run_id)
+                if queued_result is not None:
+                    self._apply_inspection_result(queued_result)
+                    return
             reason = self.inspection_start_block_reason()
             if reason:
                 self._fail(f"inspection action blocked: {reason}")
                 return
-            step_id = step["id"]
-            action_run_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
-                f"{self.robot_id}:{self.run['task_id']}:{step_id}:{self.run['attempt']}"))
-            request = {
-                "schema_version": 1, "action_run_id": action_run_id,
-                "robot_id": self.robot_id, "mission_id": self.run["mission_id"],
-                "task_id": self.run["task_id"], "step_id": step_id,
-                "attempt": self.run["attempt"], "map_id": self.run.get("map_id"),
-                "map_version_id": self.run.get("map_version_id"),
-                "waypoint_id": self._arrival_waypoint()[1],
-                "asset_ids": step["asset_ids"],
-                "kind": step["action"], "detector_types": step["detector_types"],
-                "parameters": step["parameters"], "requested_at": utc_now(),
-                "timeout_ms": step["timeout_ms"],
-                "source_mode": os.environ.get("ROBOT_MODE", "unknown"),
-            }
-            self.deadline = time.monotonic() + step["timeout_ms"] / 1000.0
-            self.action_run_id = action_run_id
-            self.action_step_id = step_id
+            request = self.store.inspection_request(action_run_id)
+            if request is None:
+                request = {
+                    "schema_version": 1, "action_run_id": action_run_id,
+                    "robot_id": self.robot_id, "mission_id": self.run["mission_id"],
+                    "task_id": self.run["task_id"], "step_id": step_id,
+                    "attempt": self.run["attempt"], "map_id": self.run.get("map_id"),
+                    "map_version_id": self.run.get("map_version_id"),
+                    "waypoint_id": self._arrival_waypoint()[1],
+                    "asset_ids": step["asset_ids"],
+                    "kind": step["action"], "detector_types": step["detector_types"],
+                    "parameters": step["parameters"], "requested_at": utc_now(),
+                    "timeout_ms": step["timeout_ms"],
+                    "source_mode": os.environ.get("ROBOT_MODE", "unknown"),
+                }
+                self.store.save_inspection_request(request)
+            if resume and self.run["remaining_seconds"] > 0:
+                remaining = self.run["remaining_seconds"]
+            elif resume:
+                requested_at = datetime.fromisoformat(request["requested_at"].replace("Z", "+00:00"))
+                remaining = max(0.0, request["timeout_ms"] / 1000.0
+                                - (datetime.now(timezone.utc) - requested_at).total_seconds())
+            else:
+                remaining = request["timeout_ms"] / 1000.0
+            self.deadline = time.monotonic() + max(0.0, remaining)
             self.action_status = "DISPATCHED"
             self.action_request_pub.publish(String(data=json.dumps(request, allow_nan=False)))
+            if resume:
+                self.publish_action_control("resume")
         else:
             self.deadline = time.monotonic() + DOCK_TIMEOUT
             (self.dock_pub if kind == "dock" else self.undock_pub).publish(Bool(data=True))
@@ -844,7 +875,9 @@ class MissionManager(Node):
         )
         if guard_reason:
             remaining = (max(0.0, self.deadline - time.monotonic())
-                         if self._kind() == "wait" else 0.0)
+                         if self._kind() in ("wait", "inspection_action") else 0.0)
+            if self._kind() == "inspection_action":
+                self.publish_action_control("pause")
             self._stop_motion()
             self.deadline = None
             self._transition("PAUSED", f"safety guard: {guard_reason}",
@@ -1020,8 +1053,7 @@ class MissionManager(Node):
 
     def inspection_provider_snapshot(self):
         capabilities = self.inspection_capabilities or {}
-        capability_fresh = (self.inspection_capabilities_seen > 0
-                            and time.monotonic() - self.inspection_capabilities_seen < 5.0)
+        capability_fresh = bool(capabilities)
         heartbeat_fresh = (self.inspection_heartbeat_seen > 0
                            and time.monotonic() - self.inspection_heartbeat_seen < 5.0)
         online = capability_fresh and heartbeat_fresh
@@ -1122,8 +1154,8 @@ class MissionManager(Node):
             if observed_at.tzinfo is None:
                 return
             expected = self.run["steps"][self.run["step_index"]] if self.run and self.run.get("steps") else {}
-            if (not self.run or self.run["status"] != "RUNNING" or expected.get("type") != "inspection_action"
-                    or result.get("action_run_id") != getattr(self, "action_run_id", None)):
+            if (not self.run or self.run["status"] not in ACTIVE or expected.get("type") != "inspection_action"
+                    or result.get("action_run_id") != self._current_action_run_id()):
                 self.store.record_late_inspection_result(result)
                 return
             if (result.get("task_id") != self.run["task_id"]
@@ -1132,19 +1164,35 @@ class MissionManager(Node):
                 return
             if (not isinstance(result.get("result_id"), str) or not result["result_id"]
                     or result.get("source_mode") not in ("fixture", "simulation", "hardware")
+                    or result.get("mission_id") != self.run["mission_id"]
                     or result.get("map_id") != self.run.get("map_id")
                     or result.get("map_version_id") != self.run.get("map_version_id")):
                 return
+            original_request = self.store.inspection_request(result["action_run_id"])
+            if (not original_request
+                    or result.get("waypoint_id") not in (None, original_request.get("waypoint_id"))
+                    or result.get("asset_ids") not in (None, original_request.get("asset_ids"))):
+                return
+            result["waypoint_id"] = original_request.get("waypoint_id")
+            result["asset_ids"] = original_request.get("asset_ids", [])
             if result["status"] != "SUCCEEDED" and result["outcome"] != "NOT_APPLICABLE":
                 return
-            self.store.add_inspection_result(self.run, result, self.pose)
-            self.deadline = None
-            if result["status"] == "SUCCEEDED":
-                self._complete_step()
-            else:
-                self._fail(f"inspection action {result['status'].lower()}")
+            self.store.save_inspection_result(result)
+            if self.run["status"] == "PAUSED":
+                self.action_status = "RESULT_READY"
+                self.publish_state()
+                return
+            self._apply_inspection_result(result)
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
             return
+
+    def _apply_inspection_result(self, result):
+        self.store.add_inspection_result(self.run, result, self.pose)
+        self.deadline = None
+        if result["status"] == "SUCCEEDED":
+            self._complete_step()
+        else:
+            self._fail(f"inspection action {result['status'].lower()}")
 
     def on_inspection_status(self, message):
         try:
@@ -1152,7 +1200,7 @@ class MissionManager(Node):
             if (not isinstance(status, dict) or status.get("schema_version") != 1
                     or status.get("robot_id") != self.robot_id or not self.run
                     or self.run["status"] != "RUNNING" or self._kind() != "inspection_action"
-                    or status.get("action_run_id") != getattr(self, "action_run_id", None)
+                    or status.get("action_run_id") != self._current_action_run_id()
                     or status.get("task_id") != self.run["task_id"]
                     or status.get("step_id") != self.run["steps"][self.run["step_index"]]["id"]
                     or status.get("attempt") != self.run["attempt"]

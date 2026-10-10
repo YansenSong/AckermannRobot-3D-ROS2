@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 
 ACTIVE_STATUSES = ("RUNNING", "PAUSED")
-MISSION_SCHEMA_VERSION = 4
+MISSION_SCHEMA_VERSION = 5
 
 
 def utc_now():
@@ -143,6 +143,18 @@ class MissionStore:
                 message TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS inspection_action_runs (
+                action_run_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                request_json TEXT NOT NULL,
+                result_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS inspection_action_runs_task
+                ON inspection_action_runs(task_id, step_id, attempt);
                 """
             )
             with self.db:
@@ -297,7 +309,9 @@ class MissionStore:
         """Persist an inspection receipt and its business event in the robot outbox."""
         now = result["observed_at"]
         event = {
-            "schema_version": 1, "event_id": str(uuid.uuid4()),
+            "schema_version": 1,
+            "event_id": str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                  f"inspection:{self.robot_id}:{result['action_run_id']}")),
             "robot_id": self.robot_id, "source": "mission_manager",
             "type": "inspection.result", "occurred_at": now, "recorded_at": utc_now(),
             "simulation": result["source_mode"] == "simulation",
@@ -308,11 +322,61 @@ class MissionStore:
             "payload": result,
         }
         with self.db:
+            if self.db.execute("SELECT 1 FROM robot_event_outbox WHERE event_id=?",
+                               (event["event_id"],)).fetchone():
+                return event["event_id"]
             self._insert_event(run["task_id"], run["status"], run["step_index"],
                                f"inspection result {result['result_id']}: {result['outcome']}",
                                robot_pose, run.get("origin_request_id"))
             self._write_outbox(event)
         return event["event_id"]
+
+    def inspection_request(self, action_run_id):
+        row = self.db.execute("SELECT request_json FROM inspection_action_runs WHERE action_run_id=?",
+                              (action_run_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_inspection_request(self, request):
+        action_run_id = request["action_run_id"]
+        existing = self.inspection_request(action_run_id)
+        if existing is not None:
+            if existing != request:
+                raise ValueError("action_run_id already has a different request")
+            return existing
+        now = utc_now()
+        with self.db:
+            self.db.execute(
+                """INSERT INTO inspection_action_runs(action_run_id,task_id,step_id,attempt,
+                   request_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)""",
+                (action_run_id, request["task_id"], request["step_id"], request["attempt"],
+                 json.dumps(request, allow_nan=False, sort_keys=True), now, now),
+            )
+        return request
+
+    def inspection_result(self, action_run_id):
+        row = self.db.execute("SELECT result_json FROM inspection_action_runs WHERE action_run_id=?",
+                              (action_run_id,)).fetchone()
+        return json.loads(row[0]) if row and row[0] else None
+
+    def save_inspection_result(self, result):
+        action_run_id = result["action_run_id"]
+        with self.db:
+            row = self.db.execute(
+                "SELECT request_json,result_json FROM inspection_action_runs WHERE action_run_id=?",
+                (action_run_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("unknown inspection action_run_id")
+            existing = json.loads(row["result_json"]) if row["result_json"] else None
+            if existing is not None:
+                if existing != result:
+                    raise ValueError("action_run_id received conflicting results")
+                return existing
+            self.db.execute(
+                "UPDATE inspection_action_runs SET result_json=?,updated_at=? WHERE action_run_id=?",
+                (json.dumps(result, allow_nan=False, sort_keys=True), utc_now(), action_run_id),
+            )
+        return result
 
     def record_late_inspection_result(self, result):
         """Keep a bounded late provider receipt for audit without task progression."""

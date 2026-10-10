@@ -61,11 +61,11 @@
 | S1-32 到点动作串联 | W4 | FIXTURE_VERIFIED / EXTERNAL_PENDING | MissionManager ↔ Adapter ROS topic 与 fixture 闭环已跑；后续补丁验证 waypoint→wait→detect、waypoint→capture→detect、waypoint→wait→detect→wait→capture 同点串联及孤立 wait 后拒绝检测；外部 provider、能力拒绝发布及现场动作待联调。 |
 | S1-33 任务下发/命令确认 | W4 | CODE_READY | 复用 Platform API、Idempotency-Key、ACK；本轮任务状态由现有 MissionManager 持有。 |
 | S1-34 任务全过程状态 | W4 | CODE_READY / FIXTURE_VERIFIED | MissionManager 发布 active action 状态、Outbox 记结果；fixture 集成测试验证；Web 任务时间线未新增。 |
-| S1-35 任务暂停 | W4 | CODE_READY / EXTERNAL_PENDING | 机器人命令和 adapter pause 能力按声明转发；真实 provider pause 能力及交互测试未验证。 |
-| S1-36 任务恢复 | W4 | CODE_READY / EXTERNAL_PENDING | 复用 MissionManager resume 与原任务 attempt；真实 provider 恢复语义未联调。 |
-| S1-37 取消/安全退出 | W4 | CODE_READY / FIXTURE_VERIFIED | MissionManager cancel/control 与晚到结果隔离；测试覆盖集成正常结果而非全部 cancel 时序。 |
-| S1-38 失败重试 | W4 | CODE_READY | 复用机器人 retry/attempt，action_run_id 与 task/step/attempt 关联；外部重复执行语义待 provider 确认。 |
-| S1-39 任务异常分支 | W4 | CODE_READY / FIXTURE_VERIFIED | adapter 有 rejected/offline/timeout/late_result fixture 场景与结果校验；全场景 manager 集成尚未跑。 |
+| S1-35 任务暂停 | W4 | CODE_READY / EXTERNAL_PENDING | 机器人命令和 adapter pause 能力按声明转发；后续单测验证暂停期间回执持久化、恢复后才推进；真实 provider pause 能力及交互测试未验证。 |
+| S1-36 任务恢复 | W4 | CODE_READY / EXTERNAL_PENDING | MissionManager 将首发请求及回执持久化，恢复使用原 action_run_id 和完全相同 payload；单测覆盖管理器重启前后恢复。真实 provider 恢复语义未联调。 |
+| S1-37 取消/安全退出 | W4 | CODE_READY / FIXTURE_VERIFIED | MissionManager cancel/control 与晚到结果隔离；后续单测覆盖取消后成功回执仅记 late、不推进；真实 provider cancel 确认待联调。 |
+| S1-38 失败重试 | W4 | CODE_READY | 失败后 retry 增加 attempt 并得到新 action_run_id；后续单测验证。外部动作是否可安全重试仍待 provider 确认。 |
+| S1-39 任务异常分支 | W4 | CODE_READY / FIXTURE_VERIFIED | adapter 有 rejected/offline/timeout/late_result fixture 场景；后续单测验证 adapter 重启恢复 pending、不重复派发，Provider 未返回时保持 TIMEOUT。全场景多进程集成尚未跑。 |
 | S1-40 任务地图/点位关联 | W4 | CODE_READY | 巡检任务编译检查 waypoint、asset map_id/map_version_id 与当前 map bundle，并把 pose/asset/action 参数快照写入 mission steps；后续补丁保留 wait/action 的 waypoint_id，机器人执行请求从已完成到点上下文取点位，运行记录将最近成功到点索引持久化。 |
 | S1-41 任务执行历史 | W4 | CODE_READY / FIXTURE_VERIFIED | 复用 robot task history 与 durable Outbox；fixture 结果摄入 PlatformStore；业务历史筛选 UI 不完整。 |
 | S1-42 任务检索 | W4 | CODE_READY / BLOCKED | InspectionPage 支持按任务 ID/名称、状态、开始/结束时间过滤 MissionManager 当前运行及携带的最近 10 条巡检历史；完整机器人任务归档分页、导出和超过该窗口的任务检索未实现。 |
@@ -104,3 +104,9 @@
 - 失败复现：新增 `test_inspection_steps_keep_their_waypoint_assignment` 在修复前得到 `['wp-1', None, None, None]`，证明 wait/检测的点位字段在 mission 验证时丢失。
 - 修复：compiler 给等待步骤写入所属巡检点；MissionManager 验证并保留业务步骤的 `waypoint_id`，按最近连续业务段中的成功到点索引判断启动资格。运行库 schema 3→4 增加 `arrival_step_index`，旧行默认 `-1`，未确认到点时保持拒绝；派发前仍检查新鲜位姿、停稳、地图和 Provider。
 - 回归：MissionManager/store 与平台 API 共 `71 passed`（补入孤立等待拒绝用例后单项再跑 `1 passed`）。覆盖三种合法排列、错误点位绑定、旧库迁移及未到点拒绝。未运行 Gazebo，不提升为 `SIM_VERIFIED`。
+
+### Patch B：F02、F08 动作生命周期与重启
+
+- 失败复现：`test_paused_inspection_result_is_reconciled_and_request_is_immutable` 在修复前恢复后仍停留 RUNNING；`test_external_pending_request_survives_adapter_restart_without_redispatch` 在修复前找不到持久 pending。
+- 修复：MissionStore schema 4→5 新增请求/回执持久表。同一 `action_run_id` 的 `requested_at` 和整份请求保持不可变；暂停期间有效回执先落库，恢复后对账并生成确定性去重的 Outbox 事件。适配器从 SQLite 恢复 pending 和原始超时，不重新调用 Provider。Manager 的能力订阅改为可靠 TRANSIENT_LOCAL QoS，在线判定使用锁存能力及新鲜心跳。
+- 回归：MissionManager 与 Adapter 共 `44 passed`；连同平台 API 的 Python 回归为 `137 passed、3 skipped`，React `40 passed`，Vite 构建通过，MissionManager 与 Adapter 两包分别构建通过。覆盖 pause 前后回执、管理器重启、适配器重启、重复请求、取消后晚到、retry attempt 变化及 Provider 无回执超时。未运行真实 Provider 或多进程中断测试；外部 Provider 重启后的回执重放协议仍需联调，不提升为 `SIM_VERIFIED`。

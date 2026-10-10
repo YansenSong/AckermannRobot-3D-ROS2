@@ -72,6 +72,30 @@ class MissionStoreTest(unittest.TestCase):
             self.assertEqual(reopened.pending_events()[0]["payload"]["late"], True)
             reopened.close()
 
+    def test_inspection_request_and_paused_receipt_survive_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "action.sqlite3")
+            request = {"action_run_id": "action-1", "task_id": "task-1",
+                       "step_id": "step-1", "attempt": 1,
+                       "requested_at": "2026-10-10T00:00:00Z"}
+            store = MissionStore(path)
+            store.save_inspection_request(request)
+            store.close()
+            store = MissionStore(path)
+            self.assertEqual(store.inspection_request("action-1"), request)
+            self.assertEqual(store.save_inspection_request(request), request)
+            with self.assertRaisesRegex(ValueError, "different request"):
+                store.save_inspection_request({**request, "requested_at": "2026-10-10T00:00:01Z"})
+            receipt = {"action_run_id": "action-1", "result_id": "result-1"}
+            store.save_inspection_result(receipt)
+            store.close()
+            store = MissionStore(path)
+            self.assertEqual(store.inspection_result("action-1"), receipt)
+            self.assertEqual(store.save_inspection_result(receipt), receipt)
+            with self.assertRaisesRegex(ValueError, "conflicting results"):
+                store.save_inspection_result({**receipt, "result_id": "result-2"})
+            store.close()
+
     def test_command_claim_replays_ack_and_conflicting_body_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "commands.sqlite3")
@@ -203,7 +227,7 @@ class MissionStoreTest(unittest.TestCase):
             connection.close()
 
             store = MissionStore(path)
-            self.assertEqual(store.schema_version, 4)
+            self.assertEqual(store.schema_version, 5)
             self.assertEqual(store.run("task")["arrival_step_index"], -1)
             self.assertIsNone(store.mission("legacy")["map_id"])
             self.assertIsNone(store.run("task")["map_version_id"])
@@ -215,11 +239,11 @@ class MissionStoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "future.sqlite3")
             with sqlite3.connect(path) as db:
-                db.execute("PRAGMA user_version = 5")
+                db.execute("PRAGMA user_version = 6")
             with self.assertRaisesRegex(RuntimeError, "schema is newer"):
                 MissionStore(path)
             with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
 
     def test_schema_migration_rolls_back_after_ddl_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -284,7 +308,7 @@ class MissionStoreTest(unittest.TestCase):
                     PRAGMA user_version = 1;
                 """)
             store = MissionStore(path)
-            self.assertEqual(store.schema_version, 4)
+            self.assertEqual(store.schema_version, 5)
             self.assertEqual(store.run("task-1")["arrival_step_index"], -1)
             self.assertEqual(store.run("task-1")["status"], "PAUSED")
             self.assertIsNone(store.run("task-1")["origin_request_id"])
