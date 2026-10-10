@@ -408,6 +408,100 @@ class MissionNodeTest(unittest.TestCase):
                 else:
                     os.environ["ROBOT_MODE"] = previous_robot_mode
 
+    def test_business_steps_keep_arrival_context_across_waits_and_actions(self):
+        previous_mode = os.environ.get("ROBOT_MODE")
+        os.environ["ROBOT_MODE"] = "simulation"
+        try:
+            for kinds in (("wait", "detect"), ("capture", "detect"),
+                          ("wait", "detect", "wait", "capture")):
+                with self.subTest(kinds=kinds), tempfile.TemporaryDirectory() as directory:
+                    rclpy.init(args=["--ros-args", "-p",
+                                     f"database_path:={os.path.join(directory, 'missions.sqlite3')}"])
+                    node = MissionManager()
+                    node.action_request_pub = PublisherSpy()
+                    try:
+                        self.software_stop(node)
+                        self.current_map(node)
+                        self.fixture_provider(node)
+                        stable = Odometry()
+                        stable.header.frame_id = "odom"
+                        stable.pose.pose.orientation.w = 1.0
+                        node.on_ekf_odom(stable)
+                        steps = [{"id": "nav", "type": "waypoint", "waypoint_id": "wp-1",
+                                  "pose": {"x": 1, "y": 2, "z": 0, "w": 1}}]
+                        for index, kind in enumerate(kinds):
+                            step = {"id": f"business-{index}", "waypoint_id": "wp-1"}
+                            if kind == "wait":
+                                step.update(type="wait", seconds=0.1)
+                            else:
+                                step.update(type="inspection_action", action=kind,
+                                            timeout_ms=5000,
+                                            detector_types=["fire_smoke"] if kind == "detect" else [])
+                            steps.append(step)
+                        node.on_command(String(data=json.dumps({"command": "save", "mission": {
+                            "id": "sequence", "name": "Sequence", "map_id": "grid-1",
+                            "map_version_id": "grid-1", "steps": steps}})))
+                        node.on_command(String(data=json.dumps({"command": "start", "mission_id": "sequence"})))
+                        nav = NavigationStatus()
+                        nav.stamp.sec = node.goal_sent_ns // 1000000000
+                        nav.stamp.nanosec = node.goal_sent_ns % 1000000000
+                        nav.state = NavigationStatus.PLANNING
+                        nav.detail = "new goal received; waiting for global plan"
+                        node.on_nav(nav)
+                        nav.state = NavigationStatus.ARRIVED
+                        node.on_nav(nav)
+                        node.on_odom(stable)
+                        node.on_ekf_odom(stable)
+                        node.tick()
+                        time.sleep(0.51)
+                        node.on_odom(stable)
+                        node.on_ekf_odom(stable)
+                        node.tick()
+                        self.assertEqual(node.run["arrival_step_index"], 0)
+                        for kind in kinds:
+                            node.on_odom(stable)
+                            node.on_ekf_odom(stable)
+                            if kind == "wait":
+                                self.assertEqual(node._kind(), "wait")
+                                node.deadline = time.monotonic() - 0.01
+                                node.tick()
+                                continue
+                            request = json.loads(node.action_request_pub.messages[-1].data)
+                            self.assertEqual(request["waypoint_id"], "wp-1")
+                            self.assertEqual(request["kind"], kind)
+                            node.on_inspection_result(String(data=json.dumps({
+                                "schema_version": 1, "result_id": f"result-{request['step_id']}",
+                                "robot_id": node.robot_id, "mission_id": "sequence",
+                                "task_id": node.run["task_id"], "step_id": request["step_id"],
+                                "attempt": 1, "action_run_id": request["action_run_id"],
+                                "status": "SUCCEEDED", "outcome": "INCONCLUSIVE",
+                                "source_mode": "fixture", "observed_at": "2026-10-10T00:00:00Z",
+                                "map_id": "grid-1", "map_version_id": "grid-1",
+                                "waypoint_id": "wp-1", "confidence": None,
+                            })))
+                        self.assertEqual(node.run["status"], "SUCCEEDED")
+                        if kinds == ("wait", "detect"):
+                            node.on_command(String(data=json.dumps({"command": "save", "mission": {
+                                "id": "orphan", "name": "Orphan action", "map_id": "grid-1",
+                                "map_version_id": "grid-1", "steps": [
+                                    {"id": "orphan-wait", "type": "wait", "seconds": 0.1},
+                                    {"id": "orphan-detect", "type": "inspection_action",
+                                     "action": "detect", "detector_types": ["fire_smoke"]},
+                                ]}})))
+                            node.on_command(String(data=json.dumps({"command": "start", "mission_id": "orphan"})))
+                            node.deadline = time.monotonic() - 0.01
+                            node.tick()
+                            self.assertEqual(node.run["status"], "FAILED")
+                            self.assertIn("waypoint arrival", node.run["reason"])
+                    finally:
+                        node.destroy_node()
+                        rclpy.shutdown()
+        finally:
+            if previous_mode is None:
+                os.environ.pop("ROBOT_MODE", None)
+            else:
+                os.environ["ROBOT_MODE"] = previous_mode
+
     def test_inspection_mission_requires_fresh_matching_provider_capability(self):
         with tempfile.TemporaryDirectory() as directory:
             previous_log_dir = os.environ.get("ROS_LOG_DIR")

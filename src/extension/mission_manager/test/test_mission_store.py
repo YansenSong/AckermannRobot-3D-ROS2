@@ -31,6 +31,30 @@ class MissionStoreTest(unittest.TestCase):
                 {"type": "inspection_action", "action": "detect", "timeout_ms": 1000},
             ]})
 
+    def test_inspection_steps_keep_their_waypoint_assignment(self):
+        mission = validated_mission({
+            "id": "sequence", "name": "Sequence", "steps": [
+                {"id": "nav", "type": "waypoint", "waypoint_id": "wp-1",
+                 "pose": {"x": 1, "y": 2}},
+                {"id": "wait", "type": "wait", "seconds": 2, "waypoint_id": "wp-1"},
+                {"id": "capture", "type": "inspection_action", "action": "capture",
+                 "waypoint_id": "wp-1"},
+                {"id": "detect", "type": "inspection_action", "action": "detect",
+                 "waypoint_id": "wp-1", "detector_types": ["fire_smoke"]},
+            ],
+        })
+        self.assertEqual([step.get("waypoint_id") for step in mission["steps"]],
+                         ["wp-1"] * 4)
+        with self.assertRaisesRegex(ValueError, "waypoint_id"):
+            validated_mission({"id": "bad", "name": "Bad", "steps": [
+                {"type": "inspection_action", "action": "capture", "waypoint_id": ""},
+            ]})
+        with self.assertRaisesRegex(ValueError, "waypoint_id"):
+            validated_mission({"id": "bad", "name": "Bad", "steps": [
+                {"type": "waypoint", "waypoint_id": "wp-1", "pose": {"x": 1, "y": 2}},
+                {"type": "wait", "seconds": 1, "waypoint_id": "wp-2"},
+            ]})
+
     def test_late_inspection_receipt_is_durable_and_deduplicated(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "late.sqlite3")
@@ -179,7 +203,8 @@ class MissionStoreTest(unittest.TestCase):
             connection.close()
 
             store = MissionStore(path)
-            self.assertEqual(store.schema_version, 3)
+            self.assertEqual(store.schema_version, 4)
+            self.assertEqual(store.run("task")["arrival_step_index"], -1)
             self.assertIsNone(store.mission("legacy")["map_id"])
             self.assertIsNone(store.run("task")["map_version_id"])
             self.assertEqual(store.run("task")["status"], "PAUSED")
@@ -190,11 +215,11 @@ class MissionStoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "future.sqlite3")
             with sqlite3.connect(path) as db:
-                db.execute("PRAGMA user_version = 4")
+                db.execute("PRAGMA user_version = 5")
             with self.assertRaisesRegex(RuntimeError, "schema is newer"):
                 MissionStore(path)
             with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
 
     def test_schema_migration_rolls_back_after_ddl_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -259,7 +284,8 @@ class MissionStoreTest(unittest.TestCase):
                     PRAGMA user_version = 1;
                 """)
             store = MissionStore(path)
-            self.assertEqual(store.schema_version, 3)
+            self.assertEqual(store.schema_version, 4)
+            self.assertEqual(store.run("task-1")["arrival_step_index"], -1)
             self.assertEqual(store.run("task-1")["status"], "PAUSED")
             self.assertIsNone(store.run("task-1")["origin_request_id"])
             self.assertIsNone(store.events("task-1")[0]["request_id"])

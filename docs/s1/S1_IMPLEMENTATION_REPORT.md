@@ -58,7 +58,7 @@
 | S1-29 常规巡检模板 | W4 | CODE_READY / BLOCKED | WaypointActionsPage 可按顺序选择多个点位并将点位、资产、动作计划编译为可复用 MissionManager mission 快照；Provider 可离线保存，实际执行端重新校验。模板独立版本编辑/管理及页面 DOM 验收未做。 |
 | S1-30 周期巡检 | W4 | CODE_READY / BLOCKED | inspection profile 开放既有 SchedulerPage；已编译巡检 mission 可用 `/schedules` 加入机器人日/周调度。API 接入测试通过，但没有等待一次实际周期触发或运行 schedule+inspection fixture 闭环。 |
 | S1-31 指定巡检任务 | W4 | CODE_READY | POST /inspection/tasks + WaypointActionsPage.jsx 从当前选中点位动作草稿编译并下发；API 测试覆盖快照/idempotency/capability gate。编译 API 尚未与 fixture 节点做同一条端到端测试，真实 provider 未接入。 |
-| S1-32 到点动作串联 | W4 | FIXTURE_VERIFIED / EXTERNAL_PENDING | MissionManager ↔ Adapter ROS topic 与 fixture 闭环已跑；外部 provider、能力拒绝发布及现场动作待联调。 |
+| S1-32 到点动作串联 | W4 | FIXTURE_VERIFIED / EXTERNAL_PENDING | MissionManager ↔ Adapter ROS topic 与 fixture 闭环已跑；后续补丁验证 waypoint→wait→detect、waypoint→capture→detect、waypoint→wait→detect→wait→capture 同点串联及孤立 wait 后拒绝检测；外部 provider、能力拒绝发布及现场动作待联调。 |
 | S1-33 任务下发/命令确认 | W4 | CODE_READY | 复用 Platform API、Idempotency-Key、ACK；本轮任务状态由现有 MissionManager 持有。 |
 | S1-34 任务全过程状态 | W4 | CODE_READY / FIXTURE_VERIFIED | MissionManager 发布 active action 状态、Outbox 记结果；fixture 集成测试验证；Web 任务时间线未新增。 |
 | S1-35 任务暂停 | W4 | CODE_READY / EXTERNAL_PENDING | 机器人命令和 adapter pause 能力按声明转发；真实 provider pause 能力及交互测试未验证。 |
@@ -66,7 +66,7 @@
 | S1-37 取消/安全退出 | W4 | CODE_READY / FIXTURE_VERIFIED | MissionManager cancel/control 与晚到结果隔离；测试覆盖集成正常结果而非全部 cancel 时序。 |
 | S1-38 失败重试 | W4 | CODE_READY | 复用机器人 retry/attempt，action_run_id 与 task/step/attempt 关联；外部重复执行语义待 provider 确认。 |
 | S1-39 任务异常分支 | W4 | CODE_READY / FIXTURE_VERIFIED | adapter 有 rejected/offline/timeout/late_result fixture 场景与结果校验；全场景 manager 集成尚未跑。 |
-| S1-40 任务地图/点位关联 | W4 | CODE_READY | 巡检任务编译检查 waypoint、asset map_id/map_version_id 与当前 map bundle，并把 pose/asset/action 参数快照写入 mission steps；平台 API 测试覆盖编译内容。 |
+| S1-40 任务地图/点位关联 | W4 | CODE_READY | 巡检任务编译检查 waypoint、asset map_id/map_version_id 与当前 map bundle，并把 pose/asset/action 参数快照写入 mission steps；后续补丁保留 wait/action 的 waypoint_id，机器人执行请求从已完成到点上下文取点位，运行记录将最近成功到点索引持久化。 |
 | S1-41 任务执行历史 | W4 | CODE_READY / FIXTURE_VERIFIED | 复用 robot task history 与 durable Outbox；fixture 结果摄入 PlatformStore；业务历史筛选 UI 不完整。 |
 | S1-42 任务检索 | W4 | CODE_READY / BLOCKED | InspectionPage 支持按任务 ID/名称、状态、开始/结束时间过滤 MissionManager 当前运行及携带的最近 10 条巡检历史；完整机器人任务归档分页、导出和超过该窗口的任务检索未实现。 |
 | S1-43 统一结果入库 | W6 | FIXTURE_VERIFIED / EXTERNAL_PENDING | `inspection.result` 经 MissionStore Outbox → PlatformStore 去重存储；集成测试重复摄入后仅一条。真实 Provider 待联调。 |
@@ -96,3 +96,11 @@
 ## 测试与验收限制
 
 本轮实测命令及准确结果记录在 [S1_TEST_MATRIX.md](S1_TEST_MATRIX.md)。本报告不把单测通过等同 Gazebo/系统验收。未得到真实 Provider 的 schema、能力/心跳、证据存储方式、异常分类策略或模型版本；相应责任与所需接口列于 [INTEGRATION_PENDING.md](INTEGRATION_PENDING.md)。
+
+## 2026-10-10 后续审计修复
+
+### Patch A：F01、F04 动作编排和点位归属
+
+- 失败复现：新增 `test_inspection_steps_keep_their_waypoint_assignment` 在修复前得到 `['wp-1', None, None, None]`，证明 wait/检测的点位字段在 mission 验证时丢失。
+- 修复：compiler 给等待步骤写入所属巡检点；MissionManager 验证并保留业务步骤的 `waypoint_id`，按最近连续业务段中的成功到点索引判断启动资格。运行库 schema 3→4 增加 `arrival_step_index`，旧行默认 `-1`，未确认到点时保持拒绝；派发前仍检查新鲜位姿、停稳、地图和 Provider。
+- 回归：MissionManager/store 与平台 API 共 `71 passed`（补入孤立等待拒绝用例后单项再跑 `1 passed`）。覆盖三种合法排列、错误点位绑定、旧库迁移及未到点拒绝。未运行 Gazebo，不提升为 `SIM_VERIFIED`。

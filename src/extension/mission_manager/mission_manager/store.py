@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 
 ACTIVE_STATUSES = ("RUNNING", "PAUSED")
-MISSION_SCHEMA_VERSION = 3
+MISSION_SCHEMA_VERSION = 4
 
 
 def utc_now():
@@ -54,6 +54,7 @@ class MissionStore:
                 status TEXT NOT NULL,
                 step_index INTEGER NOT NULL,
                 attempt INTEGER NOT NULL,
+                arrival_step_index INTEGER NOT NULL DEFAULT -1,
                 remaining_seconds REAL NOT NULL,
                 started_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -150,6 +151,8 @@ class MissionStore:
                     self.db.execute("ALTER TABLE runs ADD COLUMN hold_active INTEGER NOT NULL DEFAULT 0")
                 if "origin_request_id" not in columns:
                     self.db.execute("ALTER TABLE runs ADD COLUMN origin_request_id TEXT")
+                if "arrival_step_index" not in columns:
+                    self.db.execute("ALTER TABLE runs ADD COLUMN arrival_step_index INTEGER NOT NULL DEFAULT -1")
                 event_columns = {row["name"] for row in self.db.execute("PRAGMA table_info(run_events)")}
                 if "request_id" not in event_columns:
                     self.db.execute("ALTER TABLE run_events ADD COLUMN request_id TEXT")
@@ -248,6 +251,7 @@ class MissionStore:
         return [self._run(row) for row in rows]
 
     def update_run(self, task_id, *, status=None, step_index=None, attempt=None,
+                   arrival_step_index=None,
                    remaining_seconds=None, reason=None, hold_active=None,
                    event_reason=None, event_pose=None, event_request_id=None):
         current = self.run(task_id)
@@ -258,7 +262,7 @@ class MissionStore:
         ended_at = utc_now() if next_status in ("SUCCEEDED", "FAILED", "CANCELLED") else None
         with self.db:
             self.db.execute(
-                """UPDATE runs SET status = ?, step_index = ?, attempt = ?,
+                """UPDATE runs SET status = ?, step_index = ?, attempt = ?, arrival_step_index = ?,
                    remaining_seconds = ?, updated_at = ?, ended_at = ?, reason = ?,
                    hold_active = ?
                    WHERE task_id = ?""",
@@ -266,6 +270,7 @@ class MissionStore:
                     next_status,
                     next_step_index,
                     attempt if attempt is not None else current["attempt"],
+                    arrival_step_index if arrival_step_index is not None else current["arrival_step_index"],
                     remaining_seconds if remaining_seconds is not None else current["remaining_seconds"],
                     utc_now(),
                     ended_at,

@@ -39,6 +39,7 @@ def validated_mission(raw):
     if not isinstance(steps, list) or len(steps) > 200:
         raise ValueError("mission steps must be a list of at most 200 items")
     result = []
+    active_waypoint_id = None
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
             raise ValueError(f"step {index + 1} must be an object")
@@ -62,6 +63,11 @@ def validated_mission(raw):
             if not math.isfinite(seconds) or seconds <= 0 or seconds > 86400:
                 raise ValueError(f"step {index + 1} has invalid wait seconds")
             item["seconds"] = seconds
+            if "waypoint_id" in step:
+                waypoint_id = step["waypoint_id"]
+                if not isinstance(waypoint_id, str) or not 1 <= len(waypoint_id.strip()) <= 128:
+                    raise ValueError(f"step {index + 1} has invalid waypoint_id")
+                item["waypoint_id"] = waypoint_id.strip()
         elif kind == "inspection_action":
             action = step.get("action")
             if action not in ("capture", "detect", "broadcast"):
@@ -85,8 +91,20 @@ def validated_mission(raw):
             item.update(action=action, timeout_ms=timeout_ms,
                         detector_types=detector_types, asset_ids=asset_ids,
                         parameters=parameters)
+            if "waypoint_id" in step:
+                waypoint_id = step["waypoint_id"]
+                if not isinstance(waypoint_id, str) or not 1 <= len(waypoint_id.strip()) <= 128:
+                    raise ValueError(f"step {index + 1} has invalid waypoint_id")
+                item["waypoint_id"] = waypoint_id.strip()
         elif kind not in ("home", "dock", "undock"):
             raise ValueError(f"step {index + 1} has unknown type")
+        if kind == "waypoint":
+            active_waypoint_id = item.get("waypoint_id")
+        elif kind in ("wait", "inspection_action"):
+            if "waypoint_id" in item and item["waypoint_id"] != active_waypoint_id:
+                raise ValueError(f"step {index + 1} waypoint_id does not match its waypoint")
+        else:
+            active_waypoint_id = None
         result.append(item)
     map_id = raw.get("map_id")
     map_version_id = raw.get("map_version_id")
@@ -720,6 +738,16 @@ class MissionManager(Node):
     def _kind(self):
         return self.run["steps"][self.run["step_index"]]["type"]
 
+    def _arrival_waypoint(self):
+        """Return the waypoint reached for the current contiguous business steps."""
+        for index in range(self.run["step_index"] - 1, -1, -1):
+            step = self.run["steps"][index]
+            if step["type"] == "waypoint":
+                return index, step.get("waypoint_id") or step.get("waypointId")
+            if step["type"] not in ("wait", "inspection_action"):
+                break
+        return None, None
+
     def publish_action_control(self, action):
         action_run_id = getattr(self, "action_run_id", None)
         if not action_run_id:
@@ -773,7 +801,7 @@ class MissionManager(Node):
                 "task_id": self.run["task_id"], "step_id": step_id,
                 "attempt": self.run["attempt"], "map_id": self.run.get("map_id"),
                 "map_version_id": self.run.get("map_version_id"),
-                "waypoint_id": step.get("waypoint_id") or self.run["steps"][self.run["step_index"] - 1].get("waypoint_id"),
+                "waypoint_id": self._arrival_waypoint()[1],
                 "asset_ids": step["asset_ids"],
                 "kind": step["action"], "detector_types": step["detector_types"],
                 "parameters": step["parameters"], "requested_at": utc_now(),
@@ -793,11 +821,14 @@ class MissionManager(Node):
     def _complete_step(self):
         self._event(f"step {self.run['step_index'] + 1} completed")
         self.deadline = None
+        arrival_index = (self.run["step_index"] if self._kind() == "waypoint"
+                         else self.run["arrival_step_index"])
         if self.run["step_index"] + 1 >= len(self.run["steps"]):
-            self._transition("SUCCEEDED", "all steps completed", remaining_seconds=0.0)
+            self._transition("SUCCEEDED", "all steps completed", remaining_seconds=0.0,
+                             arrival_step_index=arrival_index)
             return
         self._transition("RUNNING", "next step", step_index=self.run["step_index"] + 1,
-                         remaining_seconds=0.0)
+                         remaining_seconds=0.0, arrival_step_index=arrival_index)
         self._begin_step()
 
     def _fail(self, reason):
@@ -905,8 +936,12 @@ class MissionManager(Node):
 
     def inspection_start_block_reason(self):
         now = time.monotonic()
-        if self.run["step_index"] == 0 or self.run["steps"][self.run["step_index"] - 1]["type"] not in ("waypoint", "inspection_action"):
+        arrival_index, waypoint_id = self._arrival_waypoint()
+        if arrival_index is None or self.run.get("arrival_step_index") != arrival_index:
             return "inspection actions must follow a waypoint arrival in the mission"
+        configured_waypoint_id = self.run["steps"][self.run["step_index"]].get("waypoint_id")
+        if configured_waypoint_id and configured_waypoint_id != waypoint_id:
+            return "inspection action waypoint_id does not match the reached waypoint"
         if self.pose_received_at is None or now - self.pose_received_at > 1.0:
             return "localization pose is unavailable or stale"
         if self.linear_speed_received_at is None or now - self.linear_speed_received_at > 1.0:

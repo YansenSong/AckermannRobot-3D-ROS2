@@ -3241,6 +3241,7 @@ def register_platform_api(app, bridge_provider, store, robot_id, auth_store=None
                             steps.append({
                                 "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{idempotency_key}:{waypoint_id}:wait:{index}")),
                                 "type": "wait", "seconds": action["timeout_ms"] / 1000,
+                                "waypoint_id": waypoint_id,
                             })
                             continue
                         capability = capability_map.get(action["kind"])
